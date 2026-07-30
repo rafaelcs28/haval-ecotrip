@@ -21,6 +21,7 @@ apnsLive.init();
 const impulseHelp = require('./impulse-help');
 const carHelp     = require('./car-help');
 const bluettiCloud = require('./bluetti-cloud');
+const starlink     = require('./starlink-sitio');
 
 // Sem isto, uma rejection/exception fora de rota (timer, callback MQTT, fetch em
 // background) derrubava o processo inteiro. Loga e segue — pm2 só reinicia em crash real.
@@ -4697,7 +4698,11 @@ app.get('/api/source-state', (_req, res) => {
   }
   res.json({ gwm_publicando: _gwmAlive(now),
              gwm_ultimo_pacote_s: state.last_gwm_ms ? Math.round((now - state.last_gwm_ms) / 1000) : null,
-             apk_ultimo_pacote_s: state.last_apk_ms ? Math.round((now - state.last_apk_ms) / 1000) : null,
+             // AO VIVO, não last_apk_ms: aquele é atualizado por retained e pela
+             // re-injeção que o failover faz a cada mensagem bloqueada da GWM,
+             // então marcava 0s com o carro dormindo — inútil pra diagnóstico.
+             apk_ultimo_pacote_s: state.last_apk_live_ms ? Math.round((now - state.last_apk_live_ms) / 1000) : null,
+             apk_bruto_s:         state.last_apk_ms      ? Math.round((now - state.last_apk_ms)      / 1000) : null,
              limites: { gwm_valor_parado_s: GWM_VALUE_STALE_MS / 1000,
                         apk_discordando_s:  APK_TAKEOVER_MIN_MS / 1000 },
              chaves: out });
@@ -5495,6 +5500,132 @@ app.post('/api/bluetti/control', requireAdmin, async (req, res) => {
     await _bluettiTick();
     res.json({ ok: true, state: bluettiCloud.snapshot().devices[String(target).toUpperCase()] || null });
   } catch (e) { res.status(502).json({ error: e.message }); }
+});
+
+// ── Starlink do Sítio (via HA de lá, pelo túnel Cloudflare) ─────────────────
+// Fonte: starlink-sitio.js (pull no sitio.malha.dev). Aqui só ficam o endpoint,
+// os alertas e a histerese — mesmo desenho do Bluetti.
+starlink.start({
+  dataDir: DATA_DIR,
+  log: (...a) => console.log('[starlink]', ...a),
+  onUpdate: () => { try { _evalStarlinkAlerts(); } catch (_) {} },
+});
+
+// Histerese: ping e drop oscilam por natureza num link de satélite. Só alerto com
+// 3 leituras ruins seguidas (≈3min), senão isso viraria máquina de falso positivo.
+const _slHist = { ping: [], drop: [] };
+let _slLastRestart = null;
+function _pushSl(arr, v) { if (v == null) return; arr.push(v); if (arr.length > 3) arr.shift(); }
+const _slAllAbove = (arr, lim) => arr.length === 3 && arr.every(v => v > lim);
+
+function _evalStarlinkAlerts() {
+  const st = starlink.status();
+  if (!st.configured) return;
+  const snap = starlink.snapshot();
+  const d = snap.data;
+  // Antes da 1ª leitura boa não existe "sem dados": o bridge acabou de subir. Só
+  // considero queda depois de 3 falhas seguidas (≈3min) ou 5min sem leitura.
+  const stale = st.last_ok_at ? st.stale_s > 300 : st.fail_streak >= 3;
+
+  // 1. Sem dados: o caminho passa pela própria Starlink, então isso É a queda do
+  // link (ou do HA, ou do túnel — não dá pra desempatar daqui). Último estado
+  // conhecido vai no corpo pra dar contexto de qual das três é mais provável.
+  const lastSeen = st.last_ok_at ? new Date(st.last_ok_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : 'nunca';
+  _alert('starlink_no_data', stale,
+    '🛰️ Sítio sem dados',
+    `Sem leitura da Starlink há ${st.stale_s == null ? '—' : Math.round(st.stale_s / 60) + 'min'} (última ${lastSeen}). ` +
+    `Último estado: ${d ? (d.online ? 'online, ping ' + Math.round(d.ping_ms || 0) + 'ms' : 'offline') : 'desconhecido'}. ` +
+    `Pode ser link, HA do sítio ou o túnel — o dado vem pelo próprio link. Erro: ${st.last_error || '—'}`,
+    'high', ['satellite', 'warning']);
+  if (stale || !d) {
+    for (const id of ['starlink_offline', 'starlink_integration_down', 'starlink_stowed',
+                      'starlink_obstructed', 'starlink_thermal', 'starlink_hw',
+                      'starlink_ping_drop', 'starlink_latency'])
+      _alert(id, false, '', '', 'default', []);
+    return;
+  }
+
+  // 2. HA responde mas as entidades estão unavailable = dish não responde ao gRPC.
+  _alert('starlink_integration_down', d.integration_ok === false,
+    '🛰️ Starlink sem resposta',
+    'O HA do sítio responde, mas a integração está sem dados do dish (gRPC 192.168.100.1 sem resposta). Dish desligado, cabo ou roteador.',
+    'high', ['satellite']);
+
+  // 3. Antena recolhida = sem link de propósito (ou por acidente).
+  _alert('starlink_stowed', d.stowed === true,
+    '🛰️ Antena recolhida (stowed)',
+    'A Starlink do sítio está recolhida — sem link enquanto ficar assim.',
+    'urgent', ['warning']);
+
+  // 4. Conectividade caída com HA vivo: dá pra afirmar que é o dish, não o caminho.
+  _alert('starlink_offline', d.conn === false && d.integration_ok !== false && d.stowed !== true,
+    '🛰️ Starlink offline',
+    `Dish sem conectividade${d.obstructed ? ' e obstruído' : ''}. Uptime ${d.uptime_h ?? '?'}h · quedas hoje ${d.drops_today ?? '?'}.`,
+    'urgent', ['satellite', 'warning']);
+
+  _alert('starlink_obstructed', d.obstructed === true,
+    '🛰️ Starlink obstruída',
+    `Dish reportando obstrução${d.online ? ' (ainda conectado)' : ' e sem conexão'}. Ver vegetação/estrutura na linha de visada.`,
+    'high', ['satellite']);
+
+  _alert('starlink_thermal', d.thermal === true,
+    '🛰️ Starlink em throttle térmico',
+    `Dish reduzindo desempenho por temperatura. Consumo atual ${Math.round(d.power_w || 0)}W.`,
+    'high', ['thermometer']);
+
+  // 5. Hardware: mastro, motores, local inesperado, ethernet. Um alerta só,
+  // listando o que está acusando — são coisas que exigem ir lá olhar.
+  const hw = (d.problems || []).filter(p => !['obstructed', 'thermal'].includes(p));
+  const hwNames = { mast: 'mastro fora da vertical', motors: 'motores presos', unexpected_loc: 'localização inesperada', eth: 'velocidade ethernet' };
+  _alert('starlink_hw', hw.length > 0,
+    '🛰️ Starlink com aviso de hardware',
+    `Acusando: ${hw.map(h => hwNames[h] || h).join(', ')}. Precisa de inspeção física no sítio.`,
+    'default', ['wrench']);
+
+  // 6. Qualidade: 3 leituras seguidas ruins. Drop de pacote sustentado é o que
+  // realmente derruba chamada/VPN; latência alta só degrada.
+  _pushSl(_slHist.drop, d.ping_drop);
+  _pushSl(_slHist.ping, d.ping_ms);
+  _alert('starlink_ping_drop', _slAllAbove(_slHist.drop, 5),
+    '🛰️ Starlink perdendo pacote',
+    `Ping drop acima de 5% nas últimas 3 leituras (agora ${d.ping_drop}%). Link instável.`,
+    'high', ['satellite']);
+  _alert('starlink_latency', _slAllAbove(_slHist.ping, 150),
+    '🛰️ Starlink com latência alta',
+    `Ping acima de 150ms nas últimas 3 leituras (agora ${Math.round(d.ping_ms)}ms).`,
+    'default', ['satellite']);
+
+  // 7. Reboot do dish: evento, não alerta contínuo. Baseline vem da 1ª leitura,
+  // então restart do bridge não gera evento falso.
+  if (d.last_restart) {
+    if (_slLastRestart && d.last_restart !== _slLastRestart) {
+      _recordHealthEvent('starlink_rebooted',
+        `Starlink do sítio reiniciou (${new Date(d.last_restart).toLocaleString('pt-BR')})`);
+    }
+    _slLastRestart = d.last_restart;
+  }
+}
+setInterval(() => { try { _evalStarlinkAlerts(); } catch (_) {} }, 60_000);
+
+// GET /api/starlink-history?hours=24&every=1 — série temporal (NDJSON em disco,
+// janela de STARLINK_HIST_DAYS). Sobrevive a restart do bridge.
+app.get('/api/starlink-history', (req, res) => {
+  const hours = Math.min(Math.max(+req.query.hours || 24, 1), 24 * 45);
+  const every = Math.min(Math.max(+req.query.every || 1, 1), 60);
+  const rows = starlink.history({ hours, every });
+  res.json({ hours, every, count: rows.length, rows });
+});
+
+// GET /api/starlink-status — consumido pelo card do health.
+app.get('/api/starlink-status', (req, res) => {
+  const snap = starlink.snapshot();
+  const st = starlink.status();
+  if (!st.configured) return res.status(503).json({ error: 'ha_sitio_nao_configurado' });
+  // A URL do HA só pra quem tem o token do bridge (rota registrada antes do gate
+  // global de /api, igual a do Bluetti).
+  const meta = { ...st };
+  if (!_bridgeTokenOk(req)) delete meta.url;
+  res.json({ ...snap, meta });
 });
 
 // ── Solar (SAJ Clean Master Ambiental — Catalão) ─────────────────────────────
@@ -14622,6 +14753,19 @@ function _recalcCamposDisputados() {
   _camposDisputados = new Set([...Object.values(GWM_TOPIC_MAP || {}), ...MIGRATED_TO_HA]);
 }
 
+/// Campos de EVENTO discreto: trava, portas, vidros, teto, AC, ignição. Mudam de
+/// uma vez e a mudança é a informação — não têm ruído numérico pra filtrar (o
+/// APK já aplica voting filter na trava e nos vidros). Exigir os 3 min de
+/// discordância aqui fazia destravar o carro levar 3 min pra aparecer no app, e
+/// se travasse de novo antes disso não aparecia NUNCA: o pubD do APK não
+/// republica valor igual, então o registro não avançava. Pra estes, a GWM
+/// congelada (gwmParado) já é garantia suficiente — assume na hora.
+const CAMPOS_EVENTO = new Set([
+  'lock_state', 'door_fl', 'door_fr', 'door_rl', 'door_rr', 'door_trunk',
+  'window_fl', 'window_fr', 'window_rl', 'window_rr', 'sunroof',
+  'ac_state', 'engine_state', 'charging_state',
+]);
+
 const NAO_ZERO = new Set(['batt_12v_pct', 'soc_pct', 'odometer_km', 'charge_remaining_min',
                           'fuel_pct', 'autonomy_ev_km', 'autonomy_ice_km']);
 function _valorAproveitavel(key, v) {
@@ -14657,7 +14801,7 @@ function _apkAssumeChave(key, apkValue, now = Date.now()) {
 
   const apk = e.apk;
   const discordaHa = apk && _normCmp(key, apk.v) === _normCmp(key, apkValue) ? now - apk.ms : 0;
-  if (discordaHa < APK_TAKEOVER_MIN_MS) return false;
+  if (discordaHa < (CAMPOS_EVENTO.has(key) ? 0 : APK_TAKEOVER_MIN_MS)) return false;
   // "APK mais fresco" se mede pela ATIVIDADE dele, não comparando os timestamps
   // de mudança: com as duas fontes paradas, esses ms refletem só a ordem de
   // registro no boot — arbitrária. Foi o que travou o takeover no primeiro teste,
