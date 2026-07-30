@@ -1,5 +1,7 @@
 package br.com.redesurftank.ecotrip
 
+import br.com.redesurftank.ecotrip.managers.AppLogger
+
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -68,7 +70,7 @@ class MessageActivity : ComponentActivity() {
                 prepareAsync()
             }
         } catch (e: Exception) {
-            android.util.Log.w("MessageActivity", "playAudio falhou: ${e.message}")
+            AppLogger.w("MessageActivity", "playAudio falhou: ${e.message}")
             onDone()
         }
     }

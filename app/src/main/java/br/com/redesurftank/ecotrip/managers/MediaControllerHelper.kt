@@ -15,7 +15,6 @@ import android.os.SystemClock
 import android.provider.Settings
 import android.service.notification.NotificationListenerService
 import android.util.Base64
-import android.util.Log
 import java.io.ByteArrayOutputStream
 
 /**
@@ -55,18 +54,18 @@ class MediaControllerHelper(private val context: Context) {
         val mgr = context.getSystemService(Context.MEDIA_SESSION_SERVICE) as? MediaSessionManager ?: return
         val comp = defaultListenerComponent(context)
         val granted = isNotificationAccessGranted(context, comp)
-        Log.w("EcotripMedia", "start: granted=$granted comp=${comp.flattenToShortString()}")
+        AppLogger.w("EcotripMedia", "start: granted=$granted comp=${comp.flattenToShortString()}")
         if (!granted) return   // sem permissão — re-tenta no próximo start()
         val l = MediaSessionManager.OnActiveSessionsChangedListener { updateControllers(it.orEmpty()) }
         try {
             val active = mgr.getActiveSessions(comp)
-            Log.w("EcotripMedia", "start: getActiveSessions=${active.size} -> ${active.joinToString { it.packageName }}")
+            AppLogger.w("EcotripMedia", "start: getActiveSessions=${active.size} -> ${active.joinToString { it.packageName }}")
             updateControllers(active)
             mgr.addOnActiveSessionsChangedListener(l, comp)
             manager = mgr; sessionsListener = l   // só marca iniciado se deu certo
-            Log.w("EcotripMedia", "start: listener registrado OK")
+            AppLogger.w("EcotripMedia", "start: listener registrado OK")
         } catch (e: SecurityException) {
-            Log.w("EcotripMedia", "start: SecurityException (listener ainda não vinculado pelo sistema) ${e.message}")
+            AppLogger.w("EcotripMedia", "start: SecurityException (listener ainda não vinculado pelo sistema) ${e.message}")
         }
     }
 
@@ -107,7 +106,7 @@ class MediaControllerHelper(private val context: Context) {
             .firstOrNull { hasUsableMetadata(it.metadata) || it.playbackState != null }
 
         main.post {
-            Log.w("EcotripMedia", "publishBest: controllers=${controllers.size} selected=${selected?.packageName ?: "null"}")
+            AppLogger.w("EcotripMedia", "publishBest: controllers=${controllers.size} selected=${selected?.packageName ?: "null"}")
             if (selected == null) { clear(); onChanged?.invoke(); return@post }
             val m = selected.metadata
             val ps = selected.playbackState

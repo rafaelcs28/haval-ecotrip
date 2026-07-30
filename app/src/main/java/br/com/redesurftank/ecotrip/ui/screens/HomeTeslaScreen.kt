@@ -1,10 +1,11 @@
 package br.com.redesurftank.ecotrip.ui.screens
 
+import br.com.redesurftank.ecotrip.managers.AppLogger
+
 import android.annotation.SuppressLint
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
-import android.util.Log
 import android.view.View
 import android.webkit.ConsoleMessage
 import android.webkit.JavascriptInterface
@@ -72,12 +73,12 @@ object HomeTeslaWebHost {
                 isHorizontalScrollBarEnabled = false
                 webViewClient = object : WebViewClient() {
                     override fun onReceivedError(v: WebView?, req: WebResourceRequest?, e: WebResourceError?) {
-                        Log.w("HomeTeslaWeb", "erro ${req?.url}: ${e?.errorCode} ${e?.description}")
+                        AppLogger.w("HomeTeslaWeb", "erro ${req?.url}: ${e?.errorCode} ${e?.description}")
                     }
                 }
                 webChromeClient = object : WebChromeClient() {
                     override fun onConsoleMessage(msg: ConsoleMessage): Boolean {
-                        Log.w("HomeTeslaWeb", "console: ${msg.message()} @${msg.lineNumber()}")
+                        AppLogger.w("HomeTeslaWeb", "console: ${msg.message()} @${msg.lineNumber()}")
                         return true
                     }
                 }
@@ -206,7 +207,7 @@ private fun probeRearKeys() {
         val v = try { car.fetchCurrent(k)?.trim() } catch (_: Exception) { null }
         if (v != null) "${k.substringAfterLast('.')}=$v" else null
     }
-    Log.w("TeslaProbe", if (alive.isEmpty()) "nenhuma chave traseira respondeu" else alive.joinToString(" "))
+    AppLogger.w("TeslaProbe", if (alive.isEmpty()) "nenhuma chave traseira respondeu" else alive.joinToString(" "))
 }
 
 // Leitura de diagnóstico das chaves de powertrain ainda não confirmadas — só loga
@@ -226,7 +227,7 @@ private fun diagPowertrain(rawFrontKw: Double, speed: Double) {
         val mspd = rd(CarConstants.CAR_EV_INFO_MOTOR_SPEED.value)
         val rec = rd(CarConstants.CAR_EV_INFO_ENERGY_RECOVERY_INFO.value)
         val eax = rd(CarConstants.CAR_CONFIGURE_E_AXLE.value)
-        Log.w("TeslaFlow", "speed=${Math.round(speed)} rawFrontKw=${Math.round(rawFrontKw)} " +
+        AppLogger.w("TeslaFlow", "speed=${Math.round(speed)} rawFrontKw=${Math.round(rawFrontKw)} " +
             "hcu_power_train_state=$hcu energy_drive_state=$drv engine_state=$eng " +
             "rear_motor_speed=$rear motor_speed=$mspd energy_recovery_info=$rec e_axle=$eax")
         probeRearKeys()

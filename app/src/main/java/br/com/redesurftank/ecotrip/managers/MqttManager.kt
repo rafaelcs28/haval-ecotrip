@@ -4,7 +4,6 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
-import android.util.Log
 import br.com.redesurftank.ecotrip.BuildConfig
 import br.com.redesurftank.ecotrip.models.CarConstants
 import br.com.redesurftank.ecotrip.models.SharedPreferencesKeys
@@ -554,7 +553,7 @@ class MqttManager private constructor() {
         val now = System.currentTimeMillis()
         // Self-heal: publish anterior travou? Solta o slot.
         if (fastInFlight.get() && (now - fastInFlightSinceMs) > FAST_INFLIGHT_TIMEOUT_MS) {
-            Log.w(TAG, "Fast lane preso há ${now - fastInFlightSinceMs}ms — força reset")
+            AppLogger.w(TAG, "Fast lane preso há ${now - fastInFlightSinceMs}ms — força reset")
             fastInFlight.set(false)
         }
         // CAS atômico: só prossegue se NÃO há publish anterior em andamento.
@@ -564,7 +563,7 @@ class MqttManager private constructor() {
         if (c == null || !c.isConnected) { fastInFlight.set(false); return }
         fastExecutor.schedule({
             try { publishFastTelemetryInternal(c) }
-            catch (e: Exception) { Log.w(TAG, "Fast publish failed: ${e.message}") }
+            catch (e: Exception) { AppLogger.w(TAG, "Fast publish failed: ${e.message}") }
             finally { fastInFlight.set(false) }
         }, CHANGE_FAST_DEBOUNCE_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
     }
@@ -585,7 +584,7 @@ class MqttManager private constructor() {
                 pub("charge_power_kw", fmt2(chargePowerKwNow()))
             }
         } catch (e: Exception) {
-            Log.w(TAG, "publishFastTelemetry failed: ${e.message}")
+            AppLogger.w(TAG, "publishFastTelemetry failed: ${e.message}")
         }
     }
 
@@ -1328,7 +1327,7 @@ class MqttManager private constructor() {
                 snapshotQueue.addLast(queued)
                 while (snapshotQueue.size > MAX_QUEUED_SNAPSHOTS) snapshotQueue.removeFirst()
             }
-            Log.d(TAG, "Offline — snapshot queued (queue size=${snapshotQueue.size})")
+            AppLogger.d(TAG, "Offline — snapshot queued (queue size=${snapshotQueue.size})")
             return
         }
         executor.submit { publishSnapshotInternal(c, queued) }
@@ -1342,11 +1341,11 @@ class MqttManager private constructor() {
      */
     fun syncChargeLimitFromCar(carVal: Int) {
         val pct = carValToPct(carVal) ?: run {
-            Log.w(TAG, "syncChargeLimitFromCar: valor inesperado carVal=$carVal, ignorado")
+            AppLogger.w(TAG, "syncChargeLimitFromCar: valor inesperado carVal=$carVal, ignorado")
             return
         }
         if (pct == lastPublishedChargeLimitPct) {
-            Log.d(TAG, "Charge limit sem mudança ($pct%) — HA já está atualizado")
+            AppLogger.d(TAG, "Charge limit sem mudança ($pct%) — HA já está atualizado")
             return
         }
         AppLogger.i(TAG, "Carro reportou charge limit: carVal=$carVal → ${pct}% (HA tinha ${lastPublishedChargeLimitPct}%) — atualizando HA")
@@ -1360,7 +1359,7 @@ class MqttManager private constructor() {
      */
     fun publishChargeLimitState(pct: Int) {
         if (pct !in setOf(50, 60, 70, 80, 90, 100)) {
-            Log.w(TAG, "publishChargeLimitState: pct=$pct inválido, ignorado")
+            AppLogger.w(TAG, "publishChargeLimitState: pct=$pct inválido, ignorado")
             return
         }
         try {
@@ -1368,7 +1367,7 @@ class MqttManager private constructor() {
             lastPublishedChargeLimitPct = pct
             AppLogger.i(TAG, "Charge limit publicado no HA: ${pct}%")
         } catch (e: Exception) {
-            Log.w(TAG, "publishChargeLimitState falhou: ${e.message}")
+            AppLogger.w(TAG, "publishChargeLimitState falhou: ${e.message}")
         }
     }
 
@@ -1378,7 +1377,7 @@ class MqttManager private constructor() {
             client?.publish("$prefix/ha/charge_custom_target/state", pct.toString().toByteArray(), 1, true)
             AppLogger.i(TAG, "Alvo custom publicado no HA: ${pct}%")
         } catch (e: Exception) {
-            Log.w(TAG, "publishCustomTargetState falhou: ${e.message}")
+            AppLogger.w(TAG, "publishCustomTargetState falhou: ${e.message}")
         }
     }
 
@@ -1423,11 +1422,11 @@ class MqttManager private constructor() {
      */
     fun syncDriveModeFromCar(carVal: Int) {
         if (carVal !in setOf(0, 1, 3)) {
-            Log.w(TAG, "syncDriveModeFromCar: valor inesperado carVal=$carVal, ignorado")
+            AppLogger.w(TAG, "syncDriveModeFromCar: valor inesperado carVal=$carVal, ignorado")
             return
         }
         if (carVal == lastPublishedDriveMode) {
-            Log.d(TAG, "Drive mode sem mudança ($carVal) — HA já atualizado")
+            AppLogger.d(TAG, "Drive mode sem mudança ($carVal) — HA já atualizado")
             return
         }
         AppLogger.i(TAG, "Carro reportou drive_mode=$carVal (HA tinha $lastPublishedDriveMode) — atualizando HA")
@@ -1436,7 +1435,7 @@ class MqttManager private constructor() {
 
     fun publishDriveModeState(mode: Int) {
         if (mode !in setOf(0, 1, 3)) {
-            Log.w(TAG, "publishDriveModeState: mode=$mode inválido, ignorado")
+            AppLogger.w(TAG, "publishDriveModeState: mode=$mode inválido, ignorado")
             return
         }
         try {
@@ -1444,14 +1443,14 @@ class MqttManager private constructor() {
             lastPublishedDriveMode = mode
             AppLogger.i(TAG, "Drive mode publicado no HA: $mode")
         } catch (e: Exception) {
-            Log.w(TAG, "publishDriveModeState falhou: ${e.message}")
+            AppLogger.w(TAG, "publishDriveModeState falhou: ${e.message}")
         }
     }
 
     /** Sub-modo HEV: 1=Inteligente, 2=Prioritário. */
     fun syncPowerReserveFromCar(carVal: Int) {
         if (carVal !in setOf(1, 2)) {
-            Log.w(TAG, "syncPowerReserveFromCar: valor inesperado carVal=$carVal, ignorado")
+            AppLogger.w(TAG, "syncPowerReserveFromCar: valor inesperado carVal=$carVal, ignorado")
             return
         }
         if (carVal == lastPublishedPowerReserve) return
@@ -1466,14 +1465,14 @@ class MqttManager private constructor() {
             lastPublishedPowerReserve = mode
             AppLogger.i(TAG, "Power reserve publicado no HA: $mode")
         } catch (e: Exception) {
-            Log.w(TAG, "publishPowerReserveState falhou: ${e.message}")
+            AppLogger.w(TAG, "publishPowerReserveState falhou: ${e.message}")
         }
     }
 
     /** Alvo de SOC no modo Prioritário HEV: 20..80 (%). */
     fun syncSocTargetFromCar(carVal: Int) {
         if (carVal !in 20..80) {
-            Log.w(TAG, "syncSocTargetFromCar: valor fora da faixa carVal=$carVal, ignorado")
+            AppLogger.w(TAG, "syncSocTargetFromCar: valor fora da faixa carVal=$carVal, ignorado")
             return
         }
         if (carVal == lastPublishedSocTarget) return
@@ -1488,7 +1487,7 @@ class MqttManager private constructor() {
             lastPublishedSocTarget = pct
             AppLogger.i(TAG, "Soc target publicado no HA: $pct%")
         } catch (e: Exception) {
-            Log.w(TAG, "publishSocTargetState falhou: ${e.message}")
+            AppLogger.w(TAG, "publishSocTargetState falhou: ${e.message}")
         }
     }
 
@@ -1506,7 +1505,7 @@ class MqttManager private constructor() {
             client?.publish("$prefix/ha/terrain_mode/state", mode.toString().toByteArray(), 1, true)
             lastPublishedTerrainMode = mode
             AppLogger.i(TAG, "Terrain mode publicado: $mode")
-        } catch (e: Exception) { Log.w(TAG, "publishTerrainModeState falhou: ${e.message}") }
+        } catch (e: Exception) { AppLogger.w(TAG, "publishTerrainModeState falhou: ${e.message}") }
     }
 
     // ── Regen level (car.ev_setting.energy_recovery_level) ───────────────────
@@ -1523,7 +1522,7 @@ class MqttManager private constructor() {
             client?.publish("$prefix/ha/regen_level/state", level.toString().toByteArray(), 1, true)
             lastPublishedRegenLevel = level
             AppLogger.i(TAG, "Regen level publicado: $level")
-        } catch (e: Exception) { Log.w(TAG, "publishRegenLevelState falhou: ${e.message}") }
+        } catch (e: Exception) { AppLogger.w(TAG, "publishRegenLevelState falhou: ${e.message}") }
     }
 
     // ── One-pedal (car.ev.setting.pedal_control_enable) ───────────────────────
@@ -1540,7 +1539,7 @@ class MqttManager private constructor() {
             client?.publish("$prefix/ha/one_pedal/state", enable.toString().toByteArray(), 1, true)
             lastPublishedOnePedal = enable
             AppLogger.i(TAG, "One-pedal publicado: $enable")
-        } catch (e: Exception) { Log.w(TAG, "publishOnePedalState falhou: ${e.message}") }
+        } catch (e: Exception) { AppLogger.w(TAG, "publishOnePedalState falhou: ${e.message}") }
     }
 
     // ── Regen power real-time (car.ev_info.energy_output_percentage) ─────────
@@ -1566,7 +1565,7 @@ class MqttManager private constructor() {
             client?.publish("$prefix/ha/esp/state", enable.toString().toByteArray(), 1, true)
             lastPublishedEsp = enable
             AppLogger.i(TAG, "ESP publicado: $enable")
-        } catch (e: Exception) { Log.w(TAG, "publishEspState falhou: ${e.message}") }
+        } catch (e: Exception) { AppLogger.w(TAG, "publishEspState falhou: ${e.message}") }
     }
 
     // ── Steer mode (car.drive_setting.steering_wheel_assist_mode) ────────────
@@ -1583,7 +1582,7 @@ class MqttManager private constructor() {
             client?.publish("$prefix/ha/steer_mode/state", mode.toString().toByteArray(), 1, true)
             lastPublishedSteerMode = mode
             AppLogger.i(TAG, "Steer mode publicado: $mode")
-        } catch (e: Exception) { Log.w(TAG, "publishSteerModeState falhou: ${e.message}") }
+        } catch (e: Exception) { AppLogger.w(TAG, "publishSteerModeState falhou: ${e.message}") }
     }
 
     /** Converte valor do carro (0–5) para percentual. null se fora do range. */
@@ -1664,7 +1663,7 @@ class MqttManager private constructor() {
             }
             AppLogger.w(TAG, "killStaleInstances: matei processo(s) zumbi do app $others (mantive $myPid) — evita colisão de client-id MQTT")
         } catch (e: Exception) {
-            Log.w(TAG, "killStaleInstances falhou: ${e.message}")
+            AppLogger.w(TAG, "killStaleInstances falhou: ${e.message}")
         }
     }
 
@@ -1703,13 +1702,13 @@ class MqttManager private constructor() {
                         false
                     } else {
                         writeOwnerAtomic(ctx, myPid, now)
-                        if (ownerPid != myPid) Log.i(TAG, "MQTT ownership assumido por pid=$myPid (anterior=$ownerPid, ts +${(now - ownerTs) / 1000}s)")
+                        if (ownerPid != myPid) AppLogger.i(TAG, "MQTT ownership assumido por pid=$myPid (anterior=$ownerPid, ts +${(now - ownerTs) / 1000}s)")
                         true
                     }
                 } finally { try { fl.release() } catch (_: Exception) {} }
             }
         } catch (e: Exception) {
-            Log.w(TAG, "tryBecomeMqttOwner: ${e.message}")
+            AppLogger.w(TAG, "tryBecomeMqttOwner: ${e.message}")
             true   // fail-open: erro de FS não pode impedir o MQTT
         }
     }
@@ -1737,7 +1736,7 @@ class MqttManager private constructor() {
             if (!staleKillDone) { staleKillDone = true; killStaleInstances() }
             val cleanedHost = cleanHost(host)
             val serverUri = if (tls) "ssl://$cleanedHost:$port" else "tcp://$cleanedHost:$port"
-            Log.i(TAG, "Connecting to $serverUri")
+            AppLogger.i(TAG, "Connecting to $serverUri")
             // Fecha o client anterior antes de criar outro: além do leak, o file
             // persistence segura um lock por (dir, clientId) — sem close, o open
             // do novo client falharia com "persistence already in use".
@@ -1755,7 +1754,7 @@ class MqttManager private constructor() {
 
             c.setCallback(object : MqttCallback {
                 override fun connectionLost(cause: Throwable?) {
-                    Log.w(TAG, "Connection lost: ${cause?.message}")
+                    AppLogger.w(TAG, "Connection lost: ${cause?.message}")
                     // Conexão curta seguida (CONNACK ok, mas cai antes de firmar) =
                     // assinatura de takeover por outro cliente com o mesmo id.
                     val age = System.currentTimeMillis() - lastConnectMs
@@ -2057,7 +2056,7 @@ class MqttManager private constructor() {
             snapshotQueue.toList().also { snapshotQueue.clear() }
         }
         if (snapshots.isNotEmpty()) {
-            Log.i(TAG, "Draining ${snapshots.size} queued snapshots")
+            AppLogger.i(TAG, "Draining ${snapshots.size} queued snapshots")
             for (q in snapshots) publishSnapshotInternal(c, q)
         }
     }
@@ -2336,7 +2335,7 @@ class MqttManager private constructor() {
             c.publish("$prefix/last_update", isoNow.toByteArray(), 1, true)
             onStatusChange?.invoke(status) // trigger UI refresh for last-sent time
         } catch (e: Exception) {
-            Log.w(TAG, "publishSnapshot failed: ${e.message}")
+            AppLogger.w(TAG, "publishSnapshot failed: ${e.message}")
         }
     }
 
@@ -2696,7 +2695,7 @@ class MqttManager private constructor() {
         // via GWM API. O EcotripImpulse apenas escuta cmd/charge_limit e publica o estado.
         // Publicar o discovery aqui sobrescreveria o command_topic do Commander e quebraria o fluxo.
 
-        Log.i(TAG, "HA Discovery published (${sensors.size + binarySensors.size + 4} entities)")   // +4 = app_version + last_update + trips_history + charging_history
+        AppLogger.i(TAG, "HA Discovery published (${sensors.size + binarySensors.size + 4} entities)")   // +4 = app_version + last_update + trips_history + charging_history
     }
 
     private fun loadConfig() {
@@ -3523,6 +3522,17 @@ class MqttManager private constructor() {
                     AppLogger.i(TAG, "check_update → $res")
                     try {
                         client?.publish("$prefix/cmd/check_update/result", res.toByteArray(), 1, true)
+                    } catch (_: Exception) {}
+                }
+                "logcat" -> {
+                    // Religa o espelho pro logcat quando precisar depurar por adb.
+                    // Fica OFF por padrão porque o sistema do carro coleta o logcat
+                    // e manda pra nuvem GWM, queimando o pacote de dados.
+                    AppLogger.logcatEnabled = payload.trim() == "1" || payload.trim().lowercase() == "on"
+                    val res = "logcat=${if (AppLogger.logcatEnabled) "ON" else "OFF"}"
+                    AppLogger.i(TAG, res)
+                    try {
+                        client?.publish("$prefix/cmd/logcat/result", res.toByteArray(), 1, true)
                     } catch (_: Exception) {}
                 }
                 "dumplog" -> {

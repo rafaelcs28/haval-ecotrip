@@ -1,7 +1,6 @@
 package br.com.redesurftank.ecotrip.managers
 
 import android.content.pm.PackageManager
-import android.util.Log
 
 /**
  * Lê qual uplink de internet o head unit está roteando para o hotspot, a partir
@@ -53,7 +52,7 @@ object UplinkManager {
                 else -> "?"
             }
         } catch (e: Exception) {
-            Log.w("UplinkManager", "leitura falhou: ${e.message}")
+            AppLogger.w("UplinkManager", "leitura falhou: ${e.message}")
         }
     }
 }

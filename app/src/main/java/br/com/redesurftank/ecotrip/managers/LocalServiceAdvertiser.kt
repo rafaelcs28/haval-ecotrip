@@ -3,7 +3,6 @@ package br.com.redesurftank.ecotrip.managers
 import android.content.Context
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
-import android.util.Log
 
 /**
  * Anuncia o LocalApiServer via mDNS/Bonjour pra que o iPad descubra o APK
@@ -48,24 +47,24 @@ class LocalServiceAdvertiser(private val context: Context) {
         val listener = object : NsdManager.RegistrationListener {
             override fun onServiceRegistered(info: NsdServiceInfo) {
                 registered = true
-                Log.i(TAG, "registrado: ${info.serviceName} em :${info.port}")
+                AppLogger.i(TAG, "registrado: ${info.serviceName} em :${info.port}")
             }
             override fun onRegistrationFailed(info: NsdServiceInfo, errorCode: Int) {
-                Log.w(TAG, "falha no registro: errorCode=$errorCode")
+                AppLogger.w(TAG, "falha no registro: errorCode=$errorCode")
             }
             override fun onServiceUnregistered(info: NsdServiceInfo) {
                 registered = false
-                Log.i(TAG, "desregistrado: ${info.serviceName}")
+                AppLogger.i(TAG, "desregistrado: ${info.serviceName}")
             }
             override fun onUnregistrationFailed(info: NsdServiceInfo, errorCode: Int) {
-                Log.w(TAG, "falha no unregister: errorCode=$errorCode")
+                AppLogger.w(TAG, "falha no unregister: errorCode=$errorCode")
             }
         }
         try {
             nsdManager.registerService(serviceInfo, NsdManager.PROTOCOL_DNS_SD, listener)
             registrationListener = listener
         } catch (e: Exception) {
-            Log.e(TAG, "registerService throw: ${e.message}")
+            AppLogger.e(TAG, "registerService throw: ${e.message}")
         }
     }
 

@@ -6,7 +6,6 @@ import android.content.pm.PackageManager
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
-import android.util.Log
 import androidx.core.content.ContextCompat
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
@@ -118,7 +117,7 @@ class TelemetryRecorder(private val context: Context) {
         ) == PackageManager.PERMISSION_GRANTED
 
         if (!hasFine && !hasCoarse) {
-            Log.w(TAG, "Permissão de localização não concedida — GPS desativado")
+            AppLogger.w(TAG, "Permissão de localização não concedida — GPS desativado")
             return
         }
         try {
@@ -135,11 +134,11 @@ class TelemetryRecorder(private val context: Context) {
                 )
             }
             gpsActive = true
-            Log.i(TAG, "GPS iniciado")
+            AppLogger.i(TAG, "GPS iniciado")
         } catch (e: SecurityException) {
-            Log.w(TAG, "GPS — SecurityException: ${e.message}")
+            AppLogger.w(TAG, "GPS — SecurityException: ${e.message}")
         } catch (e: Exception) {
-            Log.w(TAG, "GPS — erro ao iniciar: ${e.message}")
+            AppLogger.w(TAG, "GPS — erro ao iniciar: ${e.message}")
         }
     }
 
@@ -241,7 +240,7 @@ class TelemetryRecorder(private val context: Context) {
             if (preloadedSamples.isNotEmpty()) samples.addAll(preloadedSamples)
         }
         val extra = if (preloadedSamples.isNotEmpty()) " (${preloadedSamples.size} amostras recuperadas do disco)" else ""
-        Log.i(TAG, "Gravação de telemetria iniciada$extra")
+        AppLogger.i(TAG, "Gravação de telemetria iniciada$extra")
 
         sampleJob = scope.launch {
             // Tick de 500 ms — permite capturar variações sem esperar 1 s inteiro.
@@ -299,7 +298,7 @@ class TelemetryRecorder(private val context: Context) {
                     persistSensors(context)
                     // Heartbeat: log "estou vivo" pra facilitar diagnose futura
                     val sampleCount = synchronized(samples) { samples.size }
-                    Log.i(TAG, "TelemetryRecorder vivo: samples=$sampleCount, spd=$latestSpeedKmh, rpm=$latestEngineRpm, soc=$latestSocPct, evKw=$latestMotorPowerKw")
+                    AppLogger.i(TAG, "TelemetryRecorder vivo: samples=$sampleCount, spd=$latestSpeedKmh, rpm=$latestEngineRpm, soc=$latestSocPct, evKw=$latestMotorPowerKw")
                 }
                 delay(500L)
             }
@@ -314,7 +313,7 @@ class TelemetryRecorder(private val context: Context) {
         flushFile  = null
         return synchronized(samples) {
             val result = samples.toList()
-            Log.i(TAG, "Gravação encerrada: ${result.size} amostras")
+            AppLogger.i(TAG, "Gravação encerrada: ${result.size} amostras")
             result
         }
     }
@@ -361,16 +360,16 @@ class TelemetryRecorder(private val context: Context) {
                         ok++
                         onTripSynced(tripId)
                     } else {
-                        Log.w(TAG, "bulkPost trip $tripId → HTTP $code")
+                        AppLogger.w(TAG, "bulkPost trip $tripId → HTTP $code")
                         fail++
                     }
                 } catch (e: Exception) {
-                    Log.w(TAG, "bulkPost trip $tripId falhou: ${e.message}")
+                    AppLogger.w(TAG, "bulkPost trip $tripId falhou: ${e.message}")
                     fail++
                 }
                 delay(80L)
             }
-            Log.i(TAG, "bulkPostTrips: $ok OK, $fail falhas (total ${trips.size})")
+            AppLogger.i(TAG, "bulkPostTrips: $ok OK, $fail falhas (total ${trips.size})")
             android.os.Handler(android.os.Looper.getMainLooper()).post { onAllDone(ok, fail) }
         }
     }
@@ -388,7 +387,7 @@ class TelemetryRecorder(private val context: Context) {
         onSuccess:    () -> Unit = {},
     ) {
         if (bridgeUrl.isBlank()) {
-            Log.w(TAG, "Bridge URL não configurado — telemetria não enviada")
+            AppLogger.w(TAG, "Bridge URL não configurado — telemetria não enviada")
             return
         }
         scope.launch {
@@ -422,14 +421,14 @@ class TelemetryRecorder(private val context: Context) {
                 conn.outputStream.use { it.write(payload.toByteArray(Charsets.UTF_8)) }
                 val code = conn.responseCode
                 if (code in 200..299) {
-                    Log.i(TAG, "Telemetria enviada: tripId=$tripId (${samples.size} amostras)")
+                    AppLogger.i(TAG, "Telemetria enviada: tripId=$tripId (${samples.size} amostras)")
                     onSuccess()
                 } else {
-                    Log.w(TAG, "Erro HTTP $code ao enviar telemetria")
+                    AppLogger.w(TAG, "Erro HTTP $code ao enviar telemetria")
                 }
                 conn.disconnect()
             } catch (e: Exception) {
-                Log.e(TAG, "Falha ao enviar telemetria: ${e.message}")
+                AppLogger.e(TAG, "Falha ao enviar telemetria: ${e.message}")
             }
         }
     }
@@ -479,14 +478,14 @@ class TelemetryRecorder(private val context: Context) {
                 conn.outputStream.use { it.write(payload.toByteArray(Charsets.UTF_8)) }
                 val code = conn.responseCode
                 if (code in 200..299) {
-                    Log.i(TAG, "Amostras de recarga enviadas: ts=$timestampMs (${samples.size} amostras)")
+                    AppLogger.i(TAG, "Amostras de recarga enviadas: ts=$timestampMs (${samples.size} amostras)")
                     onSuccess()
                 } else {
-                    Log.w(TAG, "Erro HTTP $code ao enviar amostras de recarga")
+                    AppLogger.w(TAG, "Erro HTTP $code ao enviar amostras de recarga")
                 }
                 conn.disconnect()
             } catch (e: Exception) {
-                Log.e(TAG, "Falha ao enviar amostras de recarga: ${e.message}")
+                AppLogger.e(TAG, "Falha ao enviar amostras de recarga: ${e.message}")
             }
         }
     }
@@ -515,7 +514,7 @@ class TelemetryRecorder(private val context: Context) {
                 val body = conn.inputStream.use { it.readBytes().toString(Charsets.UTF_8) }
                 conn.disconnect()
                 if (code !in 200..299) {
-                    Log.w(TAG, "fetchPendingRenames: HTTP $code")
+                    AppLogger.w(TAG, "fetchPendingRenames: HTTP $code")
                     return@launch
                 }
                 val arr   = JSONArray(body)
@@ -530,10 +529,10 @@ class TelemetryRecorder(private val context: Context) {
                         ts     = obj.optLong("ts", 0L),
                     ))
                 }
-                Log.i(TAG, "fetchPendingRenames: ${tasks.size} tarefa(s) recebida(s)")
+                AppLogger.i(TAG, "fetchPendingRenames: ${tasks.size} tarefa(s) recebida(s)")
                 android.os.Handler(android.os.Looper.getMainLooper()).post { onResult(tasks) }
             } catch (e: Exception) {
-                Log.w(TAG, "fetchPendingRenames falhou: ${e.message}")
+                AppLogger.w(TAG, "fetchPendingRenames falhou: ${e.message}")
             }
         }
     }
@@ -564,9 +563,9 @@ class TelemetryRecorder(private val context: Context) {
                 conn.outputStream.use { it.write(payload.toByteArray(Charsets.UTF_8)) }
                 val code = conn.responseCode
                 conn.disconnect()
-                Log.i(TAG, "ackRenames: HTTP $code (${ids.size} ID(s))")
+                AppLogger.i(TAG, "ackRenames: HTTP $code (${ids.size} ID(s))")
             } catch (e: Exception) {
-                Log.w(TAG, "ackRenames falhou: ${e.message}")
+                AppLogger.w(TAG, "ackRenames falhou: ${e.message}")
             }
         }
     }

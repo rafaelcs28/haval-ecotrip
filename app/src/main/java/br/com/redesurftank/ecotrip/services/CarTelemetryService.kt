@@ -1,5 +1,7 @@
 package br.com.redesurftank.ecotrip.services
 
+import br.com.redesurftank.ecotrip.managers.AppLogger
+
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -41,7 +43,7 @@ class CarTelemetryService : Service() {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) ctx.startForegroundService(intent)
                 else ctx.startService(intent)
             } catch (e: Exception) {
-                android.util.Log.w(TAG, "start() falhou: ${e.message}")
+                AppLogger.w(TAG, "start() falhou: ${e.message}")
             }
         }
 
@@ -107,7 +109,7 @@ class CarTelemetryService : Service() {
         // ── Servidor LAN local: respeita pref (default ON)
         if (isLanEnabledPref(this)) applyLanEnabled(true)
 
-        android.util.Log.i(TAG, "CarTelemetryService.onCreate — foreground started")
+        AppLogger.i(TAG, "CarTelemetryService.onCreate — foreground started")
     }
 
     /**
@@ -132,12 +134,12 @@ class CarTelemetryService : Service() {
                         break
                     }
                 } catch (e: Exception) {
-                    android.util.Log.w(TAG, "porta $port falhou: ${e.message}")
+                    AppLogger.w(TAG, "porta $port falhou: ${e.message}")
                 }
             }
             val api = started
             if (api == null) {
-                android.util.Log.e(TAG, "✗ todas as portas em uso — LAN server NÃO iniciado")
+                AppLogger.e(TAG, "✗ todas as portas em uso — LAN server NÃO iniciado")
                 return
             }
             localApi = api
@@ -152,7 +154,7 @@ class CarTelemetryService : Service() {
             val adv = LocalServiceAdvertiser(this)
             adv.start(LocalApiServer.activePort, versionName = packageVersionName())
             advertiser = adv
-            android.util.Log.i(TAG, "✓ LAN server LIGADO em :${LocalApiServer.activePort}")
+            AppLogger.i(TAG, "✓ LAN server LIGADO em :${LocalApiServer.activePort}")
         } else if (!on && localApi != null) {
             try { advertiser?.stop() } catch (_: Exception) {}
             advertiser = null
@@ -163,7 +165,7 @@ class CarTelemetryService : Service() {
                 if (l != null) CarDataManager.getInstance().removeListener(l)
             } catch (_: Exception) {}
             carDataListener = null
-            android.util.Log.i(TAG, "LAN server DESLIGADO")
+            AppLogger.i(TAG, "LAN server DESLIGADO")
         }
     }
 
@@ -194,10 +196,10 @@ class CarTelemetryService : Service() {
                 startForeground(NOTIF_ID, buildNotification("Capturando dados do carro"))
             }
             micForeground = true
-            android.util.Log.i(TAG, "FGS escalado p/ microphone")
+            AppLogger.i(TAG, "FGS escalado p/ microphone")
             true
         } catch (e: Exception) {
-            android.util.Log.w(TAG, "enableMicForeground falhou: ${e.message}")
+            AppLogger.w(TAG, "enableMicForeground falhou: ${e.message}")
             false
         }
     }
@@ -211,9 +213,9 @@ class CarTelemetryService : Service() {
                     android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
             }
             micForeground = false
-            android.util.Log.i(TAG, "FGS rebaixado p/ dataSync")
+            AppLogger.i(TAG, "FGS rebaixado p/ dataSync")
         } catch (e: Exception) {
-            android.util.Log.w(TAG, "disableMicForeground falhou: ${e.message}")
+            AppLogger.w(TAG, "disableMicForeground falhou: ${e.message}")
         }
     }
 
@@ -249,7 +251,7 @@ class CarTelemetryService : Service() {
     }
 
     override fun onDestroy() {
-        android.util.Log.i(TAG, "CarTelemetryService.onDestroy")
+        AppLogger.i(TAG, "CarTelemetryService.onDestroy")
         applyLanEnabled(false)
         try {
             v8Listener?.let { CarDataManager.getInstance().removeListener(it) }

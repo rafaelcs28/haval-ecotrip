@@ -2,7 +2,6 @@ package br.com.redesurftank.ecotrip.managers
 
 import android.content.Context
 import android.content.SharedPreferences
-import android.util.Log
 import br.com.redesurftank.ecotrip.models.CarConstants
 import br.com.redesurftank.ecotrip.models.SharedPreferencesKeys
 import com.google.gson.Gson
@@ -917,7 +916,7 @@ class TripManager private constructor() {
         if (!ok) { consFitted = false; return }
         consA = a.toFloat(); consB = b.toFloat(); consC = c.toFloat()
         consFitted = true; consFitN = pts.size
-        Log.i(TAG, "Modelo consumo: a=%.4f b=%.6f c=%.3f (n=%d)".format(a, b, c, pts.size))
+        AppLogger.i(TAG, "Modelo consumo: a=%.4f b=%.6f c=%.3f (n=%d)".format(a, b, c, pts.size))
     }
 
     private fun solve3x3(m: Array<DoubleArray>): Triple<Double, Double, Double>? {
@@ -1411,7 +1410,7 @@ class TripManager private constructor() {
         synchronized(lock) {
             tankCapacityL = liters.coerceIn(20f, 120f)
             prefs.edit().putFloat(SharedPreferencesKeys.TANK_CAPACITY_L, tankCapacityL).apply()
-            Log.i(TAG, "Tank capacity set to ${tankCapacityL}L")
+            AppLogger.i(TAG, "Tank capacity set to ${tankCapacityL}L")
         }
     }
 
@@ -1492,7 +1491,7 @@ class TripManager private constructor() {
             val sessionEndedCleanly = prefs.getBoolean(SharedPreferencesKeys.SESSION_ENDED_CLEANLY, false)
 
             if (lastShutdownMs > 0L && (now - lastShutdownMs) > THREE_HOURS_MS) {
-                Log.i(TAG, "3h elapsed since shutdown — resetting rolling window")
+                AppLogger.i(TAG, "3h elapsed since shutdown — resetting rolling window")
                 rollingAccFuel       = 0f
                 rollingAccEnergy     = 0f
                 rollingAccRegen      = 0f
@@ -1501,7 +1500,7 @@ class TripManager private constructor() {
                 rollingStartTankL    = 0f
                 rollingStartCaptured = false
             } else if (lastShutdownMs > 0L) {
-                Log.i(TAG, "< 3h since shutdown — continuing rolling window")
+                AppLogger.i(TAG, "< 3h since shutdown — continuing rolling window")
             }
 
             prevFuelPct         = -1f
@@ -1533,7 +1532,7 @@ class TripManager private constructor() {
             prevRollingDist   = -1f
             prevRollingEnergy = -1f
             prevRollingRegen  = -1f
-            Log.i(TAG, "Session started (cleanEnd=$sessionEndedCleanly) — dist=$curDist energy=$curEnergy regen=$curRegen")
+            AppLogger.i(TAG, "Session started (cleanEnd=$sessionEndedCleanly) — dist=$curDist energy=$curEnergy regen=$curRegen")
         }
     }
 
@@ -1582,7 +1581,7 @@ class TripManager private constructor() {
             // Mark as cleanly ended BEFORE saving so loadFromPrefs() will see true next time.
             prefs.edit().putBoolean(SharedPreferencesKeys.SESSION_ENDED_CLEANLY, true).apply()
             saveToPrefs()
-            Log.i(TAG, "Session ended cleanly — trips + rolling persisted, shutdownMs=$lastShutdownMs")
+            AppLogger.i(TAG, "Session ended cleanly — trips + rolling persisted, shutdownMs=$lastShutdownMs")
         }
     }
 
@@ -1868,7 +1867,7 @@ class TripManager private constructor() {
         val value = parseFloat(rawValue) ?: return
         synchronized(lock) {
             if (!sessionActive) {
-                Log.i(TAG, "Auto-starting session on first data ($key)")
+                AppLogger.i(TAG, "Auto-starting session on first data ($key)")
                 onSessionStart()
             }
             when (key) {
@@ -1876,7 +1875,7 @@ class TripManager private constructor() {
                     // Rejeita valores inválidos: o carro pode enviar -1 como "sensor não pronto".
                     // Fora do range (0, 100] é erro — não atualizar latestFuelPct nem acumular.
                     if (value <= 0f || value > 100f) {
-                        Log.w(TAG, "Fuel pct ignorado (fora de range): $value")
+                        AppLogger.w(TAG, "Fuel pct ignorado (fora de range): $value")
                         return
                     }
                     latestFuelPct = value
@@ -1888,7 +1887,7 @@ class TripManager private constructor() {
                 CarConstants.CAR_EV_INFO_BATTERY_CHARGE_PERCENTAGE.value,
                 CarConstants.CAR_EV_INFO_CUR_BATTERY_POWER_PERCENTAGE.value -> {
                     if (value <= 0f || value > 100f) {
-                        Log.w(TAG, "SOC ignorado (fora de range): $value")
+                        AppLogger.w(TAG, "SOC ignorado (fora de range): $value")
                         return
                     }
                     latestSocPct = value
@@ -2141,7 +2140,7 @@ class TripManager private constructor() {
         if (lifeGearPauseStartMs > 0L) lifeGearPauseStartMs = now
 
         saveToPrefs()
-        Log.d(TAG, "Checkpoint — lifeEnergy=$lifeEnergyKwh lifeDist=$lifeDistKm")
+        AppLogger.d(TAG, "Checkpoint — lifeEnergy=$lifeEnergyKwh lifeDist=$lifeDistKm")
     }
 
     fun resetRolling() {
@@ -2158,7 +2157,7 @@ class TripManager private constructor() {
             rollingStartCaptured = latestSocPct > 0f || latestFuelPct > 0f
             saveToPrefs()
             notifyListeners()
-            Log.i(TAG, "Rolling window reset")
+            AppLogger.i(TAG, "Rolling window reset")
         }
     }
 
@@ -2256,11 +2255,11 @@ class TripManager private constructor() {
                 lifeFuelL      += dFuelL   // lifetime: acumula direto (não passa por checkpoint)
                 rollingAccFuel += dFuelL
                 if (segOpen) segFuelL += dFuelL
-                Log.d(TAG, "Fuel drop ${drop}% → ${dFuelL}L (pct=$value)")
+                AppLogger.d(TAG, "Fuel drop ${drop}% → ${dFuelL}L (pct=$value)")
             }
             drop < -5f -> {
                 // Large increase = refuelling — just update baseline, don't subtract
-                Log.i(TAG, "Refuel detected: ${-drop}% increase")
+                AppLogger.i(TAG, "Refuel detected: ${-drop}% increase")
                 val fuelLBefore = prevFuelPct / 100f * tankCapacityL
                 val fuelLAfter  = value / 100f * tankCapacityL
                 val litersAdded = (fuelLAfter - fuelLBefore).coerceAtLeast(0f)

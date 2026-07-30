@@ -1,6 +1,5 @@
 package br.com.redesurftank.ecotrip.managers
 
-import android.util.Log
 import com.google.gson.Gson
 import fi.iki.elonen.NanoHTTPD
 import fi.iki.elonen.NanoWSD
@@ -80,11 +79,11 @@ class LocalApiServer(
         try {
             start(SOCKET_READ_TIMEOUT, false)
             activePort = listeningPort
-            Log.i(TAG, "✓ rodando em 0.0.0.0:$activePort (bind OK, daemon=false)")
-            Log.i(TAG, "  teste: curl http://<ip>:$activePort/")
+            AppLogger.i(TAG, "✓ rodando em 0.0.0.0:$activePort (bind OK, daemon=false)")
+            AppLogger.i(TAG, "  teste: curl http://<ip>:$activePort/")
             startHeartbeat()
         } catch (e: Exception) {
-            Log.e(TAG, "✗ falha ao iniciar na porta $listeningPort: ${e.message}")
+            AppLogger.e(TAG, "✗ falha ao iniciar na porta $listeningPort: ${e.message}")
             activePort = -1
         }
     }
@@ -111,7 +110,7 @@ class LocalApiServer(
         clients.toList().forEach { try { it.close(WebSocketFrame.CloseCode.GoingAway, "shutdown", false) } catch (_: Exception) {} }
         clients.clear()
         try { stop() } catch (_: Exception) {}
-        Log.i(TAG, "parado")
+        AppLogger.i(TAG, "parado")
     }
 
     /**
@@ -126,7 +125,7 @@ class LocalApiServer(
         val json = buildStateJson()
         clients.forEach { ws ->
             try { ws.send(json) } catch (e: Exception) {
-                Log.w(TAG, "send falhou pro client: ${e.message}")
+                AppLogger.w(TAG, "send falhou pro client: ${e.message}")
             }
         }
     }
@@ -137,7 +136,7 @@ class LocalApiServer(
         // Sanity: bloqueia IPs fora da LAN privada
         val remote = session.remoteIpAddress ?: ""
         if (!isPrivateIp(remote)) {
-            Log.w(TAG, "request rejeitado de IP público: $remote")
+            AppLogger.w(TAG, "request rejeitado de IP público: $remote")
             return newFixedLengthResponse(Response.Status.FORBIDDEN, "text/plain", "LAN only")
         }
 
@@ -168,7 +167,7 @@ class LocalApiServer(
             headers.forEach { (k, v) -> resp.addHeader(k, v) }
             resp
         } catch (e: Exception) {
-            Log.e(TAG, "erro processando $method $uri: ${e.message}")
+            AppLogger.e(TAG, "erro processando $method $uri: ${e.message}")
             newFixedLengthResponse(Response.Status.INTERNAL_ERROR, "text/plain", "500: ${e.message}")
         }
     }
@@ -245,12 +244,12 @@ class LocalApiServer(
             val last = lastPhysCmd[cmd]
             if (last != null && last.first == value && now - last.second < PHYS_DEDUP_WINDOW_MS) {
                 lastPhysCmd[cmd] = value to now   // janela deslizante: zera enquanto o spam continua
-                Log.w(TAG, "comando $source IGNORADO (reassert $cmd='$value' < ${PHYS_DEDUP_WINDOW_MS / 1000}s)")
+                AppLogger.w(TAG, "comando $source IGNORADO (reassert $cmd='$value' < ${PHYS_DEDUP_WINDOW_MS / 1000}s)")
                 return false
             }
             lastPhysCmd[cmd] = value to now
         }
-        Log.i(TAG, "comando $source: $cmd = '$value'")
+        AppLogger.i(TAG, "comando $source: $cmd = '$value'")
         mqttManager.dispatchLocalCommand(cmd, value)
         return true
     }
@@ -260,7 +259,7 @@ class LocalApiServer(
     override fun openWebSocket(handshake: IHTTPSession): WebSocket {
         val remote = handshake.remoteIpAddress ?: ""
         if (!isPrivateIp(remote)) {
-            Log.w(TAG, "WS rejeitado de IP público: $remote — close 4003")
+            AppLogger.w(TAG, "WS rejeitado de IP público: $remote — close 4003")
             // Não há jeito direto de rejeitar pre-handshake; deixa abrir e fecha
             // logo. Cliente recebe close imediato.
         }
@@ -273,13 +272,13 @@ class LocalApiServer(
 
         override fun onOpen() {
             clients.add(this)
-            Log.i(TAG, "WS aberto · ${clients.size} clients ativos")
+            AppLogger.i(TAG, "WS aberto · ${clients.size} clients ativos")
             try { send(buildStateJson()) } catch (_: Exception) {}
         }
 
         override fun onClose(code: WebSocketFrame.CloseCode?, reason: String?, initiatedByRemote: Boolean) {
             clients.remove(this)
-            Log.i(TAG, "WS fechado: $code/$reason · ${clients.size} restantes")
+            AppLogger.i(TAG, "WS fechado: $code/$reason · ${clients.size} restantes")
         }
 
         override fun onMessage(message: WebSocketFrame) {
@@ -300,14 +299,14 @@ class LocalApiServer(
                     relayLocalCommand(cmd, value, "WS $remoteIp")
                 }
             } catch (e: Exception) {
-                Log.w(TAG, "WS cmd parse falhou: ${e.message}")
+                AppLogger.w(TAG, "WS cmd parse falhou: ${e.message}")
             }
         }
 
         override fun onPong(pong: WebSocketFrame) { /* heartbeat OK */ }
 
         override fun onException(exception: java.io.IOException) {
-            Log.w(TAG, "WS exception: ${exception.message}")
+            AppLogger.w(TAG, "WS exception: ${exception.message}")
         }
     }
 

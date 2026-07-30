@@ -3,7 +3,6 @@ package br.com.redesurftank.ecotrip.managers
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.util.Log
 import androidx.core.content.FileProvider
 import br.com.redesurftank.ecotrip.BuildConfig
 import br.com.redesurftank.ecotrip.models.SharedPreferencesKeys
@@ -78,7 +77,7 @@ class UpdateManager private constructor() {
             intervalMinutes,
             TimeUnit.MINUTES,
         )
-        Log.d(TAG, "Periodic update check scheduled every ${intervalMinutes}min")
+        AppLogger.d(TAG, "Periodic update check scheduled every ${intervalMinutes}min")
     }
 
     /** Check for a new release in the background. Safe to call multiple times. */
@@ -99,10 +98,10 @@ class UpdateManager private constructor() {
                         downloadAndInstall(ctx)   // auto-download sem interação do usuário
                     }
                 } else {
-                    Log.d(TAG, "Already on latest version (${BuildConfig.VERSION_NAME})")
+                    AppLogger.d(TAG, "Already on latest version (${BuildConfig.VERSION_NAME})")
                 }
             } catch (e: Exception) {
-                Log.w(TAG, "Update check failed: ${e.message}")
+                AppLogger.w(TAG, "Update check failed: ${e.message}")
             } finally {
                 isChecking = false
                 onUpdateStateChanged?.invoke()
@@ -329,11 +328,11 @@ class UpdateManager private constructor() {
     private fun tryShizukuInstall(apkPath: String): Boolean {
         return try {
             if (!Shizuku.pingBinder()) {
-                Log.w(TAG, "Shizuku binder not alive — skipping silent install")
+                AppLogger.w(TAG, "Shizuku binder not alive — skipping silent install")
                 return false
             }
             if (Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) {
-                Log.w(TAG, "Shizuku permission not granted — skipping silent install")
+                AppLogger.w(TAG, "Shizuku permission not granted — skipping silent install")
                 return false
             }
             // newProcess é private no Shizuku v13 API — acessamos via reflexão
@@ -357,7 +356,7 @@ class UpdateManager private constructor() {
             AppLogger.i(TAG, "pm install exit=$exit stdout=${output.trim()} stderr=${errOut.trim()}")
             exit == 0 && output.trim().startsWith("Success")
         } catch (e: Exception) {
-            Log.w(TAG, "tryShizukuInstall exception: ${e.message}")
+            AppLogger.w(TAG, "tryShizukuInstall exception: ${e.message}")
             false
         }
     }
@@ -369,7 +368,7 @@ class UpdateManager private constructor() {
         conn.setRequestProperty("Accept", "application/vnd.github+json")
         conn.setRequestProperty("User-Agent", "EcotripImpulse/${BuildConfig.VERSION_NAME}")
         if (conn.responseCode != 200) {
-            Log.w(TAG, "GitHub API returned ${conn.responseCode}")
+            AppLogger.w(TAG, "GitHub API returned ${conn.responseCode}")
             return null
         }
         val body = conn.inputStream.bufferedReader().readText()

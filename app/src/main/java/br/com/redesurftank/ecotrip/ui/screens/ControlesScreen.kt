@@ -1,10 +1,11 @@
 package br.com.redesurftank.ecotrip.ui.screens
 
+import br.com.redesurftank.ecotrip.managers.AppLogger
+
 import android.annotation.SuppressLint
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
-import android.util.Log
 import android.view.View
 import android.webkit.ConsoleMessage
 import android.webkit.JavascriptInterface
@@ -95,12 +96,12 @@ object ControlesWebHost {
                 isHorizontalScrollBarEnabled = false
                 webViewClient = object : WebViewClient() {
                     override fun onReceivedError(v: WebView?, req: WebResourceRequest?, e: WebResourceError?) {
-                        Log.w("ControlesWeb", "erro ${req?.url}: ${e?.errorCode} ${e?.description}")
+                        AppLogger.w("ControlesWeb", "erro ${req?.url}: ${e?.errorCode} ${e?.description}")
                     }
                 }
                 webChromeClient = object : WebChromeClient() {
                     override fun onConsoleMessage(m: ConsoleMessage): Boolean {
-                        Log.w("ControlesWeb", "console: ${m.message()} @${m.lineNumber()}")
+                        AppLogger.w("ControlesWeb", "console: ${m.message()} @${m.lineNumber()}")
                         return true
                     }
                 }
@@ -248,7 +249,7 @@ private fun syncDriveSettingsFromCar() {
         val op = rd(CarConstants.CAR_EV_SETTING_PEDAL_CONTROL_ENABLE.value)
         val esp = rd(CarConstants.CAR_DRIVE_SETTING_ESP_ENABLE.value)
         val sm = rd(CarConstants.CAR_DRIVE_SETTING_STEER_MODE.value)
-        Log.w("ControlesSync", "drive=$dm reserve=$pr soc=$st terrain=$tm regen=$rg onepedal=$op esp=$esp steer=$sm")
+        AppLogger.w("ControlesSync", "drive=$dm reserve=$pr soc=$st terrain=$tm regen=$rg onepedal=$op esp=$esp steer=$sm")
         dm?.let { m.syncDriveModeFromCar(it) }
         pr?.let { m.syncPowerReserveFromCar(it) }
         st?.let { m.syncSocTargetFromCar(it) }
