@@ -254,6 +254,12 @@ class MqttManager private constructor() {
     private var customCutoffFired = false   // já freou nesta sessão de carga? (corte custom)
     private var prevChargingForCutoff = false // estado anterior pra detectar fim da sessão
     var latestChargeRemainingMin: Int = 0   // minutos restantes de recarga (0 = indisponível)
+    // Alertas de pneu (agregados — o SDK não dá valor por roda). -1 = nunca recebido,
+    // distinto de 0 = recebido e sem alerta. O bridge precisa dessa diferença pra não
+    // tratar "não sei" como "está tudo bem".
+    var latestTpmsWarning: Int = -1
+    var latestTirePressWarning: Int = -1
+    var latestTireTempWarning: Int = -1
     var latestBattPowerPct: Int = 0    // % da potência da bateria (-100=regen total, +100=consumo total)
     var latestEngineRpm:    Int = 0    // rpm — rotação do motor térmico (ICE)
     var latestSocPct:       Float = 0f // % — SOC consolidado (pro LocalApiServer LAN)
@@ -769,6 +775,15 @@ class MqttManager private constructor() {
                 }
                 CarConstants.CAR_EV_INFO_CHARGE_REMAINING_TIME.value -> {
                     latestChargeRemainingMin = value.trim().toIntOrNull() ?: 0
+                }
+                CarConstants.CAR_BASIC_TPMS_WARNING.value -> {
+                    latestTpmsWarning = value.trim().toIntOrNull() ?: 0
+                }
+                CarConstants.CAR_BASIC_TIREPRESS_WARNING.value -> {
+                    latestTirePressWarning = value.trim().toIntOrNull() ?: 0
+                }
+                CarConstants.CAR_BASIC_TIRETEMP_WARNING.value -> {
+                    latestTireTempWarning = value.trim().toIntOrNull() ?: 0
                 }
                 CarConstants.CAR_EV_INFO_ENERGY_OUTPUT_PERCENTAGE.value -> {
                     // % potência motor elétrico em tempo real → barra no iPhone + telemetria
@@ -2170,6 +2185,9 @@ class MqttManager private constructor() {
             // mantém a Live Activity de recarga viva quando carregando em casa sem 4G.
             if (latestOdometerKm > 0f) pubD("odometer_km", latestOdometerKm.toInt().toString())
             if (latestChargingState >= 0) pubD("charging_state", latestChargingState.toString())
+            if (latestTpmsWarning      >= 0) pubD("tpms_warning",      latestTpmsWarning.toString())
+            if (latestTirePressWarning >= 0) pubD("tirepress_warning", latestTirePressWarning.toString())
+            if (latestTireTempWarning  >= 0) pubD("tiretemp_warning",  latestTireTempWarning.toString())
             // lock_state: car.basic.door_lock_status cru = 1 trancado / 0 destrancado
             // (confirmado no barramento 2026-06-05). O bridge usa 'on'=destrancado /
             // 'off'=trancado (encoding INVERTIDO vs o raw do CAN), então publicamos

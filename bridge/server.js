@@ -2702,6 +2702,18 @@ let prevLockState   = null;
 let prevSunroof     = null;
 let prevGearForTrip = null;
 
+// Último instante em que a GWM entregou pressão de pneu. Os campos de pneu NÃO
+// entram no failover por valor (o APK não tem equivalente numérico), então a
+// frescura deles se mede aqui e não pelo _srcChange.
+let _lastTyreGwmMs = 0;
+const TYRE_GWM_STALE_MS = 30 * 60_000;
+/// A telemetria de pneu da GWM parou? Só então o alerta agregado do CAN vale
+/// push: com a GWM fresca, checkTyrePressure já avisa com a roda e o PSI, e
+/// mandar os dois viraria notificação dobrada do mesmo pneu.
+function _pneuGwmParada(now = Date.now()) {
+  return !_gwmAlive(now) || !_lastTyreGwmMs || (now - _lastTyreGwmMs) > TYRE_GWM_STALE_MS;
+}
+
 // ── Alerta de pressão de pneus ────────────────────────────────────────────────
 // PSI a frio. Pneu rodando esquenta e a pressão sobe ~1 PSI a cada 10°C acima
 // da temperatura ambiente (rule of thumb). Sem filtrar por temperatura, a média
@@ -2712,6 +2724,7 @@ const TYRE_PSI_MIN     = 34;   // abaixo → alerta
 const TYRE_PSI_MAX     = 40;   // acima  → alerta
 const TYRE_COLD_MAX_C  = 35;   // pneu acima disso: rodando, ignora pra alerta
 const tyreAlertSent = {};
+const _tyreWarnApkSent = {};   // dedupe dos alertas agregados do CAN
 function checkTyrePressure(pos, psi, isRetained = false, tempC = null) {
   if (!psi || psi < 5) return;
   // Pneu quente: skip — pressão real (a frio) é menor que o lido aqui.
@@ -3099,6 +3112,12 @@ const state = {
   tyre_temp_fr:     0,
   tyre_temp_rl:     0,
   tyre_temp_rr:     0,
+  // Alertas agregados do CAN (via APK). São o único backup possível: o SDK do
+  // carro não expõe pressão/temperatura por roda, só a telemetria da GWM.
+  // -1 = o carro nunca informou (≠ 0, que é "informou e está tudo bem").
+  tpms_warning:      -1,
+  tirepress_warning: -1,
+  tiretemp_warning:  -1,
 
   rolling: {
     kwh_per_100km: 0, km_per_l: 0, distance_km: 0, fuel_l: 0, cost_brl: 0,
@@ -19722,7 +19741,7 @@ function applyMqttMessage(key, value, isRetained = false) {
       console.log(`[lock:raw] value='${value}' isRetained=${isRetained}`);
       break;
     }
-    case 'tyre_pressure_fl': { state.tyre_pressure_fl = num(value); checkTyrePressure('FL', num(value), isRetained, state.tyre_temp_fl); checkTyreDrop('fl', num(value)); break; }
+    case 'tyre_pressure_fl': { _lastTyreGwmMs = Date.now(); state.tyre_pressure_fl = num(value); checkTyrePressure('FL', num(value), isRetained, state.tyre_temp_fl); checkTyreDrop('fl', num(value)); break; }
     case 'tyre_pressure_fr': { state.tyre_pressure_fr = num(value); checkTyrePressure('FR', num(value), isRetained, state.tyre_temp_fr); checkTyreDrop('fr', num(value)); break; }
     case 'tyre_pressure_rl': { state.tyre_pressure_rl = num(value); checkTyrePressure('RL', num(value), isRetained, state.tyre_temp_rl); checkTyreDrop('rl', num(value)); break; }
     case 'tyre_pressure_rr': { state.tyre_pressure_rr = num(value); checkTyrePressure('RR', num(value), isRetained, state.tyre_temp_rr); checkTyreDrop('rr', num(value)); break; }
@@ -19896,6 +19915,28 @@ function applyMqttMessage(key, value, isRetained = false) {
       }
       // Event-driven: tempo restante mudou → tenta atualizar a LA (throttle interno gateia).
       if (state.charging_state === 'Carregando') sendChargeLiveUpdate(false);
+      break;
+    }
+    // Alertas de pneu agregados, do CAN. Sem valor por roda — o SDK do carro não
+    // tem essa chave. Servem pra você não ficar cego quando a GWM congela.
+    case 'tpms_warning':
+    case 'tirepress_warning':
+    case 'tiretemp_warning': {
+      const w = parseInt(value, 10);
+      if (!Number.isFinite(w)) break;
+      const antes = state[key];
+      state[key] = w;
+      if (w > 0 && antes !== w && !isRetained && _pneuGwmParada()) {
+        if (!_tyreWarnApkSent[key]) {
+          _tyreWarnApkSent[key] = true;
+          const oque = key === 'tiretemp_warning' ? 'temperatura' : 'pressão';
+          sendPush('⚠️ Alerta de pneu no carro',
+                   `O painel acusou ${oque}. A telemetria da GWM está fora, então não temos qual roda nem o valor — confira no carro.`,
+                   'tyre_low');
+        }
+      } else if (w === 0) {
+        delete _tyreWarnApkSent[key];   // normalizou: libera o próximo alerta
+      }
       break;
     }
     case 'network/info': {

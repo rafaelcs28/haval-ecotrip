@@ -15,6 +15,13 @@ enum class CarConstants(val value: String) {
     // Fuel tank
     CAR_BASIC_REMAIN_FUEL_PERCENTAGE("car.basic.remain_fuel_percentage"),
 
+    // Pneus — o SDK NÃO expõe pressão/temperatura por roda (só a GWM, via nuvem).
+    // Estes 3 são agregados: servem de backup pra saber que EXISTE alerta de pneu
+    // quando a telemetria da GWM congela. Perde-se o número e qual roda.
+    CAR_BASIC_TPMS_WARNING("car.basic.tpms_warning"),
+    CAR_BASIC_TIREPRESS_WARNING("car.basic.tirepress_warning"),
+    CAR_BASIC_TIRETEMP_WARNING("car.basic.tiretemp_warning"),
+
     // Distance, speed & state
     CAR_BASIC_CUR_JOURNEY_ODOMETER("car.basic.cur_journey_odometer"),
     CAR_BASIC_TOTAL_ODOMETER("car.basic.total_odometer"),
