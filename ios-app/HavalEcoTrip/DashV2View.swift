@@ -751,8 +751,13 @@ struct DashV2View: View {
                 }
             } else {
                 miniCell("ODÔMETRO", Fmt.int(store.odometerKm), "km")
+                // Dormindo, o sub mostrava SÓ a frescura e engolia o percentual — o
+                // card virava "12,7" sem mais nada, que é justamente quando saber a
+                // carga da 12V importa (carro parado é quando ela descarrega). Agora
+                // o % entra nos dois casos; o badge DORMINDO no header já diz o
+                // estado, a frescura aqui só quantifica.
                 miniCell("BATERIA 12V", store.batt12vV > 0 ? Fmt.dec1(store.batt12vV) : "—",
-                         isSleeping ? freshness : batt12vSub("V"))
+                         batt12vSub(isSleeping ? freshness : "V"))
             }
         }
     }
