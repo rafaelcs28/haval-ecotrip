@@ -14779,16 +14779,38 @@ function _recalcCamposDisputados() {
 /// cada métrica numérica levaria 8min+3min pra migrar e a primeira meia hora
 /// fora de cobertura mostraria dado velho.
 const GWM_CEGA_MS = 5 * 60_000;
+const GWM_CEGA_WIFI_MS = 90_000;
+/// Quanto esperar antes de declarar a nuvem cega. Depende de QUAL rede a
+/// multimídia está usando, porque os dois canais são independentes:
+///
+///   - a GWM só fala com o carro pelo chip 4G dele (Claro). Sem pacote ou sem
+///     sinal da Claro, ela não recebe NADA — não importa que a multimídia tenha
+///     internet por outro caminho.
+///   - o APK publica por onde tiver: o mesmo 4G, o WiFi de casa, Starlink ou
+///     hotspot do celular (Vivo).
+///
+/// Então com o APK em WiFi ele tem rota própria e comprovada, e a GWM quieta é
+/// atribuível a ela — 90s bastam. Em 4G os dois dependem do mesmo chip, e
+/// silêncio pode ser o carro dormindo, então mantém os 5min. Isso só encurta a
+/// detecção de um silêncio que JÁ existe: se o 4G do carro está bom, a GWM traz
+/// valor novo e nada disso dispara (caso da garagem com WiFi + 4G ativo).
+function _gwmCegaLimiteMs() {
+  return state.car_network && state.car_network.type && state.car_network.type !== 'cellular'
+    ? GWM_CEGA_WIFI_MS : GWM_CEGA_MS;
+}
 let _gwmCegaCache = { ms: 0, v: false };
 function _gwmCega(now = Date.now()) {
   if (now - _gwmCegaCache.ms < 15_000) return _gwmCegaCache.v;   // 31 campos por mensagem: cacheia
   let algumFresco = false;
   for (const e of Object.values(_srcChange)) {
-    if (e && e.gwm && now - e.gwm.ms < GWM_CEGA_MS) { algumFresco = true; break; }
+    if (e && e.gwm && now - e.gwm.ms < _gwmCegaLimiteMs()) { algumFresco = true; break; }
   }
   const apkVivo = !!state.last_apk_live_ms && (now - state.last_apk_live_ms) < APK_ALIVE_MS;
   const v = !algumFresco && apkVivo;
-  if (v !== _gwmCegaCache.v) console.log(`[failover] GWM ${v ? 'CEGA' : 'voltou a ler o carro'}`);
+  if (v !== _gwmCegaCache.v) {
+    console.log(`[failover] GWM ${v ? 'CEGA' : 'voltou a ler o carro'} `
+              + `(rede do carro: ${state.car_network?.type || '?'}, limite ${_gwmCegaLimiteMs() / 1000}s)`);
+  }
   _gwmCegaCache = { ms: now, v };
   return v;
 }
@@ -17013,6 +17035,7 @@ const PRECLIMAT_BUSY_PHASES = ['starting', 'engine_on', 'cooling', 'restoring'];
 // Detecção de AUTO-START (motor ligou sem comando nosso e sem ninguém entrar).
 let _lastEngineOnCmdMs = 0;   // último engine_on comandado por nós (app/pré-clima)
 let _lastDoorOpenMs    = 0;   // última porta aberta (sinal de que alguém entrou)
+let _apkAcordouMs      = 0;   // quando o APK voltou de um período mudo (app reiniciado)
 
 function _motorContentState(active) {
   return {
@@ -19621,6 +19644,12 @@ function applyMqttMessage(key, value, isRetained = false) {
     // reconnect (LWT dropped + reconnect). ≥4 reconnects em 15min = zombie.
     const wasStale = state.last_apk_ms && (_now - state.last_apk_ms > 60_000);
     if (wasStale) _recordApkReconnect(_now);
+    // Carro dormindo encerra o app: quando ele volta, perdemos tudo que aconteceu
+    // antes — inclusive a porta que o motorista abriu pra entrar. Marca o retorno
+    // pra o check de auto-start não interpretar essa cegueira como "ligou sozinho".
+    if (!isRetained && state.last_apk_live_ms && (_now - state.last_apk_live_ms > 2 * 60_000)) {
+      _apkAcordouMs = _now;
+    }
     state.last_apk_ms  = _now;
     state.last_apk_key = key;
     if (!isRetained) {
@@ -19730,7 +19759,15 @@ function applyMqttMessage(key, value, isRetained = false) {
           const _commandedByUs = (_nowEng - _lastEngineOnCmdMs < 30_000)
             || PRECLIMAT_BUSY_PHASES.includes(preclimatStatus.phase);
           const _someoneEntered = (_nowEng - _lastDoorOpenMs < 180_000);
-          if (!_commandedByUs && !_someoneEntered) {
+          // Com o carro dormindo o app está encerrado, então a porta que o
+          // motorista abriu pra entrar NÃO foi publicada por ninguém — o APK só
+          // acorda junto com o motor. Sem esta guarda, toda partida manual depois
+          // de o carro dormir virava "motor ligou sozinho" (2 falsos em 30/07).
+          // Auto-start de verdade acontece com o app JÁ publicando (o carro está
+          // em ACC/ligado), então exigir o APK acordado há um tempo não esconde o
+          // caso real.
+          const _apkAcabouDeAcordar = _apkAcordouMs && (_nowEng - _apkAcordouMs < 90_000);
+          if (!_commandedByUs && !_someoneEntered && !_apkAcabouDeAcordar) {
             addEvent('engine_self_start', 'Motor ligou sozinho (sem comando e sem ninguém entrar) — provável auto-start do carro');
             sendPush('⚠️ Motor ligou sozinho', 'O motor ligou sem comando do app e sem ninguém entrar — provável auto-start do PHEV ou remote start externo.', 'engine_self_start');
             console.log('[engine] ⚠️ AUTO-START detectado (sem comando nosso, sem porta aberta recente)');
@@ -19908,6 +19945,16 @@ function applyMqttMessage(key, value, isRetained = false) {
       // Trava de segurança da pré-clima: porta aberta = motorista entrou →
       // cancela o desligamento remoto NA HORA (sem esperar a histerese de 3s).
       if (norm === 'on' && _preclimatAutoOffPending()) _abortPreclimatAutoOff('porta aberta');
+      // _lastDoorOpenMs também NA HORA, pelo mesmo motivo. Ele só serve pra
+      // correlacionar "alguém entrou" com o motor ligando, e o engine_state chega
+      // poucos segundos depois da porta: gravar só no fim da histerese fazia o
+      // check do auto-start ler timestamp velho e acusar "motor ligou sozinho"
+      // numa partida manual normal (2 falsos em 30/07, às 16:01 e 16:03 — a porta
+      // abriu 3s antes do motor e o push de porta saiu DEPOIS do alerta).
+      // A histerese existe pra não mandar push de porta a cada oscilação do
+      // latch; pra correlação, errar por antecipar só suprime um alerta — o lado
+      // seguro, já que o falso positivo é que incomoda.
+      if (norm === 'on') _lastDoorOpenMs = Date.now();
       if (norm === _hystPending[key]) break;
       _hystPending[key] = norm;
       clearTimeout(_hystTimers[key]);
