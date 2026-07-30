@@ -14535,7 +14535,21 @@ function _gwmAlive(now = Date.now()) {
 // estar no comando. Foi o que fez o primeiro teste do failover não atuar.
 const SRC_CHANGE_FILE = path.join(DATA_DIR, 'src_change.json');
 let _srcChange = {};                         // key → { gwm:{v,ms}, apk:{v,ms} }
-try { _srcChange = JSON.parse(fs.readFileSync(SRC_CHANGE_FILE, 'utf8')) || {}; } catch (_) {}
+let _fieldSourcePersistido = {};             // key → 'apk'|'gwm' do processo anterior
+// Restaura _srcChange E quem estava no comando. Sem persistir a fonte, um
+// restart do bridge zerava o takeover: com o carro dormindo (só retained
+// chegando, nenhum publish ao vivo) o APK não conseguia REENTRAR, e o dado
+// congelado da GWM voltava a pintar o app. O formato antigo era o mapa cru, daí
+// o fallback pra ler os dois.
+try {
+  const _raw = JSON.parse(fs.readFileSync(SRC_CHANGE_FILE, 'utf8')) || {};
+  if (_raw && _raw.__v === 2) {
+    _srcChange = _raw.valores || {};
+    _fieldSourcePersistido = _raw.fontes || {};
+  } else {
+    _srcChange = _raw;
+  }
+} catch (_) {}
 const GWM_VALUE_STALE_MS  = 8 * 60_000;      // valor parado > isso = suspeito
 const APK_TAKEOVER_MIN_MS = 3 * 60_000;      // e o APK precisa estar discordando há isso
 const APK_ALIVE_MS        = 15 * 60_000;     // janela de 'APK vivo': com o carro dormindo ele publica a cada ~4min
@@ -14545,7 +14559,8 @@ function _saveSrcChangeSoon() {
   if (_srcChangeSaveTimer) return;           // debounce: roda a cada mensagem MQTT
   _srcChangeSaveTimer = setTimeout(() => {
     _srcChangeSaveTimer = null;
-    try { fs.writeFileSync(SRC_CHANGE_FILE, JSON.stringify(_srcChange)); }
+    try { fs.writeFileSync(SRC_CHANGE_FILE,
+            JSON.stringify({ __v: 2, valores: _srcChange, fontes: _fieldSource })); }
     catch (e) { console.warn('[failover] falha ao salvar src_change:', e.message); }
   }, 15_000);
 }
@@ -14652,7 +14667,11 @@ function _apkAssumeChave(key, apkValue, now = Date.now()) {
   // publica a cada ~4min, então um limite curto o considerava morto justamente
   // no cenário que mais importa — carro desligado e a nuvem insistindo que está
   // ligado. Só descarta o APK quando ele está de fato fora (offline há 15min+).
-  return !!state.last_apk_ms && (now - state.last_apk_ms) < APK_ALIVE_MS;
+  // last_apk_live_ms, NÃO last_apk_ms: o segundo é atualizado por mensagem
+  // retained também, inclusive pela re-injeção que este failover faz em
+  // applyGwmEntity — ela se auto-alimentava e o APK parecia vivo pra sempre.
+  // Só publish AO VIVO conta como prova de que o carro está publicando.
+  return !!state.last_apk_live_ms && (now - state.last_apk_live_ms) < APK_ALIVE_MS;
 }
 
 // Chaves que migraram pro HA — handlers do app são ignorados aqui pra evitar
@@ -19313,6 +19332,38 @@ function applyGwmEntity(id, value, isRetained = false) {
 // Atualizado em applyMqttMessage / applyGwmEntity. Exposto via /api/state pro
 // PWA mostrar ícone 🚗/📡 ao lado de cada métrica.
 const _fieldSource = {};
+// Retoma o takeover de antes do restart (ver o load do SRC_CHANGE_FILE): sem
+// isso o bridge reiniciava "neutro" e, com o carro dormindo, o APK não tinha
+// como reentrar — só chegam retained, e reentrar exige publish ao vivo.
+Object.assign(_fieldSource, _fieldSourcePersistido);
+// Além do que foi salvo, DERIVA o comando do próprio histórico: com o carro
+// dormindo só chegam retained, e reentrar no takeover exige publish ao vivo —
+// então sem isto o bridge subia entregando o campo pra GWM congelada e o app
+// voltava a mostrar dado velho (SOC 88% com o CAN em 74%). Aqui não há sinal ao
+// vivo pra consultar, então o critério é a frescura dos REGISTROS: a GWM parada
+// além do limite e o APK tendo observado depois dela, discordando.
+for (const [k, e] of Object.entries(_srcChange)) {
+  // Só pula se o APK JÁ está no comando. Se o que ficou salvo foi 'gwm' — o
+  // estado errado que motivou isto — a derivação tem que poder corrigir, senão
+  // o próprio arquivo perpetua o dado congelado.
+  if (_fieldSource[k] === 'apk' || !e || !e.gwm || !e.apk) continue;
+  if (Date.now() - e.gwm.ms <= GWM_VALUE_STALE_MS) continue;
+  // Odômetro só cresce, então o MAIOR valor é o mais atual — não precisa (nem
+  // deve) depender de qual registro é mais recente, que empata quando os dois
+  // foram observados no mesmo replay.
+  const monotonico = k === 'odometer_km' && +e.apk.v > +e.gwm.v;
+  if (!monotonico && e.apk.ms <= e.gwm.ms) continue;
+  if (_normCmp(k, e.gwm.v) === _normCmp(k, e.apk.v)) continue;
+  if (!_valorAproveitavel(k, e.apk.v)) continue;
+  _fieldSource[k] = 'apk';
+  console.log(`[failover] ${k}: APK retoma no boot ('${e.apk.v}') — GWM parada em '${e.gwm.v}'`);
+}
+// Salva periodicamente, não só quando um valor muda: o takeover em si é estado
+// que precisa sobreviver a restart, e com o carro dormindo nenhum valor novo
+// chega pra disparar o save por mudança.
+setInterval(() => { try {
+  fs.writeFileSync(SRC_CHANGE_FILE, JSON.stringify({ __v: 2, valores: _srcChange, fontes: _fieldSource }));
+} catch (_) {} }, 60_000).unref();
 
 // Detector de flapping: a conexão saudável do carro publica 'offline' raramente
 // (sleep/desligamento). Colisão de client-id ou rede ruim faz a LWT 'offline'
