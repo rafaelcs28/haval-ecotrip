@@ -368,6 +368,65 @@ func arrivalSocColor(_ soc: Int) -> Color {
     return DS.green
 }
 
+/// Favorito que vive NO BRIDGE, valendo pro iPhone e pra multimídia do carro.
+///
+/// O PlacesStore abaixo guarda em UserDefaults do aparelho, então favorito
+/// salvo aqui nunca chegava no carro e vice-versa. Estes vêm de
+/// /api/nav-favorites, que junta os favoritos próprios com os lugares de
+/// automação que servem de destino (`origem` distingue: só 'fav' pode apagar).
+struct NavFav: Identifiable, Decodable, Equatable {
+    var id: String { idFromApi ?? "\(name)|\(lat),\(lng)" }
+    private var idFromApi: String?
+    var name: String
+    var lat: Double
+    var lng: Double
+    var distKm: Double?
+    var origem: String?
+    var podeApagar: Bool { (origem ?? "") == "fav" && idFromApi != nil }
+    var apiId: String? { idFromApi }
+    enum CodingKeys: String, CodingKey { case idFromApi = "id", name, lat, lng, distKm, origem }
+}
+
+@MainActor
+final class NavFavStore: ObservableObject {
+    static let shared = NavFavStore()
+    @Published private(set) var items: [NavFav] = []
+    @Published var erro: String?
+    private var base: String { BridgeRouter.shared.currentURL }
+
+    private func req(_ path: String, _ method: String, _ body: [String: Any]? = nil) -> URLRequest? {
+        guard !base.isEmpty, let u = URL(string: base + path) else { return nil }
+        var r = URLRequest(url: u); r.httpMethod = method; r.timeoutInterval = 12
+        r.addValue("Bearer " + Settings.bridgeToken, forHTTPHeaderField: "Authorization")
+        if let b = body {
+            r.addValue("application/json", forHTTPHeaderField: "Content-Type")
+            r.httpBody = try? JSONSerialization.data(withJSONObject: b)
+        }
+        return r
+    }
+
+    func load() async {
+        guard let r = req("/api/nav-favorites", "GET") else { return }
+        guard let (d, resp) = try? await URLSession.shared.data(for: r),
+              (resp as? HTTPURLResponse)?.statusCode == 200 else { erro = "não carregou"; return }
+        struct Resp: Decodable { let items: [NavFav] }
+        if let j = try? JSONDecoder().decode(Resp.self, from: d) { items = j.items; erro = nil }
+    }
+
+    /// Salva no bridge — é isso que faz o favorito aparecer na multimídia.
+    func add(name: String, lat: Double, lng: Double) async {
+        guard let r = req("/api/nav-favorites", "POST", ["name": name, "lat": lat, "lng": lng]) else { return }
+        _ = try? await URLSession.shared.data(for: r)
+        await load()
+    }
+
+    func remove(_ f: NavFav) async {
+        guard let id = f.apiId, let r = req("/api/nav-favorites/\(id)", "DELETE") else { return }
+        _ = try? await URLSession.shared.data(for: r)
+        await load()
+    }
+}
+
 // Endereço salvo: recente (busca anterior) ou favorito com apelido (Casa, Trabalho…).
 struct SavedPlace: Codable, Identifiable, Equatable {
     var id = UUID()
@@ -432,6 +491,8 @@ struct ArrivalSheet: View {
     /// Destino ATIVO no painel do carro vem do CarStore (o `store` daqui é o
     /// ArrivalStore, que só conhece o plano sendo montado nesta tela).
     @ObservedObject private var carro = CarStore.shared
+    /// Favoritos compartilhados com a multimídia (moram no bridge).
+    @ObservedObject private var favsCarro = NavFavStore.shared
     @State private var dest = ""
     @State private var origin = ""                        // vazio = local atual do carro
     @State private var destCoord: (Double, Double)? = nil
@@ -570,6 +631,7 @@ struct ArrivalSheet: View {
                 }
             }
             .onAppear { focusedField = .dest }
+            .task { await favsCarro.load() }
             .sheet(isPresented: $showMapPicker) {
                 MapPickerSheet(start: mapInitial ?? destCoord.map { .init(latitude: $0.0, longitude: $0.1) } ?? CarStore.shared.coordinate,
                                initial: mapInitial) { c, nm in
@@ -581,7 +643,12 @@ struct ArrivalSheet: View {
                 TextField("Nome (Casa, Trabalho…)", text: $favName)
                 Button("Salvar") {
                     let nm = favName.trimmingCharacters(in: .whitespaces)
-                    places.favorite(place, label: nm.isEmpty ? place.name : nm)
+                    let apelido = nm.isEmpty ? place.name : nm
+                    places.favorite(place, label: apelido)
+                    // Vai pro bridge também: é o que faz o favorito aparecer na
+                    // multimídia do carro. Salvar só local deixava as duas listas
+                    // divergindo sem ninguém perceber.
+                    Task { await favsCarro.add(name: apelido, lat: place.lat, lng: place.lng) }
                     favTarget = nil; favName = ""
                 }
                 Button("Cancelar", role: .cancel) { favTarget = nil; favName = "" }
@@ -685,6 +752,47 @@ struct ArrivalSheet: View {
 
     // Favoritos/recentes pra usar como PARADA (aparece no campo de parada sem busca ativa).
     @ViewBuilder private var stopPlacesPicker: some View {
+        // Favoritos que valem nos DOIS aparelhos (bridge). Vêm primeiro porque são
+        // os que o carro também mostra — os locais abaixo continuam só no iPhone.
+        if !favsCarro.items.isEmpty {
+            DSCard {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("FAVORITOS (CARRO + IPHONE)")
+                        .font(.system(size: 8.5, weight: .bold)).foregroundStyle(DS.muted).tracking(0.8)
+                    ForEach(favsCarro.items) { f in
+                        HStack(spacing: 8) {
+                            Button {
+                                dest = f.name
+                                Task { await store.compute(query: f.name, trips: [], toLat: f.lat, toLng: f.lng) }
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Image(systemName: f.podeApagar ? "star.fill" : "mappin.circle.fill")
+                                        .font(.system(size: 13, weight: .bold))
+                                        .foregroundStyle(f.podeApagar ? DS.orange : DS.teal)
+                                    Text(f.name).font(.system(size: 15, weight: .semibold))
+                                        .foregroundStyle(DS.text).lineLimit(1)
+                                    Spacer()
+                                    if let km = f.distKm {
+                                        Text(Fmt.dec1(km) + " km")
+                                            .font(.system(size: 12, weight: .medium)).foregroundStyle(DS.muted)
+                                    }
+                                }
+                            }
+                            .buttonStyle(.plain)
+                            // Apagar só o que é favorito de verdade: lugar de
+                            // automação (portaria, cancela) não se apaga por aqui.
+                            if f.podeApagar {
+                                Button { Task { await favsCarro.remove(f) } } label: {
+                                    Image(systemName: "trash").font(.system(size: 12, weight: .semibold))
+                                        .foregroundStyle(DS.red)
+                                }.buttonStyle(.plain)
+                            }
+                        }
+                        .frame(height: 34)
+                    }
+                }
+            }
+        }
         if !places.favorites.isEmpty || !places.recents.isEmpty {
             VStack(alignment: .leading, spacing: 8) {
                 if !places.favorites.isEmpty {
