@@ -140,6 +140,25 @@ class DestinoOverlayService : Service() {
         wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
         wm?.addView(tv, lp)
         botao = tv
+        // 'no_ar' não provou nada: o addView passou e o botão não aparecia. Mede a
+        // view DEPOIS do layout e reporta — tamanho 0, coordenada fora da tela ou
+        // view não anexada dão sintomas idênticos ("não vejo nada") e correções
+        // diferentes. Sem isto o diagnóstico vira chute.
+        tv.post {
+            val m = resources.displayMetrics
+            relatar("medido",
+                "pos=${lp.x},${lp.y} tam=${tv.width}x${tv.height} " +
+                "anexada=${tv.isAttachedToWindow} vis=${tv.visibility} " +
+                "tela=${m.widthPixels}x${m.heightPixels} dens=${m.density} tipo=$tipo")
+            // Fora da tela (posição salva de outra resolução, por exemplo) → recentra
+            // em vez de deixar o botão inalcançável pra sempre.
+            if (lp.x > m.widthPixels - 40 || lp.y > m.heightPixels - 40 || lp.x < -40 || lp.y < -40) {
+                lp.x = m.widthPixels / 2; lp.y = m.heightPixels / 2
+                runCatching { wm?.updateViewLayout(tv, lp) }
+                prefs.edit().putInt(K_X, lp.x).putInt(K_Y, lp.y).apply()
+                relatar("recentrado", "pos=${lp.x},${lp.y}")
+            }
+        }
         AppLogger.i(TAG, "overlay de destino no ar (x=${lp.x} y=${lp.y})")
     }
 
