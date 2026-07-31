@@ -98,8 +98,9 @@ class DestinoOverlayService : Service() {
                 setColor(Color.parseColor("#00E5CC"))
                 setStroke(3, Color.parseColor("#0F1520"))
             }
-            // 64dp de alvo: é pra acertar dirigindo, não pra ser discreto.
-            val d = (64 * resources.displayMetrics.density).toInt()
+            // A medição no carro deu density=1.0, então dp==px: 64 virava 64px numa
+            // tela de 1792 — 3,5% da largura. 100px é o alvo que se acerta dirigindo.
+            val d = (100 * resources.displayMetrics.density).toInt()
             minWidth = d; minHeight = d
         }
 
@@ -119,8 +120,13 @@ class DestinoOverlayService : Service() {
             android.graphics.PixelFormat.TRANSLUCENT,
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = prefs.getInt(K_X, 24)
-            y = prefs.getInt(K_Y, 220)
+            // Padrão longe da BARRA LATERAL do sistema: a medição provou que o botão
+            // estava desenhado, visível e anexado em x=24 — e invisível de fato,
+            // porque a barra de atalhos do head unit (home, grid, clima) ocupa essa
+            // faixa da esquerda e fica na frente. Nasce à direita, na área do app.
+            val mDef = resources.displayMetrics
+            x = prefs.getInt(K_X, (mDef.widthPixels * 0.80f).toInt())
+            y = prefs.getInt(K_Y, (mDef.heightPixels * 0.62f).toInt())
         }
 
         // Arrastar move; toque curto abre. O limiar separa os dois: sem ele, um
@@ -168,8 +174,11 @@ class DestinoOverlayService : Service() {
                 "tela=${m.widthPixels}x${m.heightPixels} dens=${m.density} tipo=$tipo")
             // Fora da tela (posição salva de outra resolução, por exemplo) → recentra
             // em vez de deixar o botão inalcançável pra sempre.
-            if (lp.x > m.widthPixels - 40 || lp.y > m.heightPixels - 40 || lp.x < -40 || lp.y < -40) {
-                lp.x = m.widthPixels / 2; lp.y = m.heightPixels / 2
+            // Inclui x pequeno: a faixa da esquerda é da barra do sistema, então
+            // "dentro da tela" não basta — ali o botão existe e não se vê.
+            val naBarraLateral = lp.x < (m.widthPixels * 0.14f)
+            if (naBarraLateral || lp.x > m.widthPixels - 40 || lp.y > m.heightPixels - 40 || lp.y < -40) {
+                lp.x = (m.widthPixels * 0.80f).toInt(); lp.y = (m.heightPixels * 0.62f).toInt()
                 runCatching { wm?.updateViewLayout(tv, lp) }
                 prefs.edit().putInt(K_X, lp.x).putInt(K_Y, lp.y).apply()
                 relatar("recentrado", "pos=${lp.x},${lp.y}")
