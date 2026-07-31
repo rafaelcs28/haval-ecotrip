@@ -178,10 +178,15 @@ class DestinoOverlayService : Service() {
                 "tela=${m.widthPixels}x${m.heightPixels} dens=${m.density} tipo=$tipo")
             // Fora da tela (posição salva de outra resolução, por exemplo) → recentra
             // em vez de deixar o botão inalcançável pra sempre.
-            // Inclui x pequeno: a faixa da esquerda é da barra do sistema, então
-            // "dentro da tela" não basta — ali o botão existe e não se vê.
-            val naBarraLateral = lp.x < (m.widthPixels * 0.14f)
-            if (naBarraLateral || lp.x > m.widthPixels - 40 || lp.y > m.heightPixels - 40 || lp.y < -40) {
+            // Só resgata posição REALMENTE inalcançável, e só quando o dono nunca
+            // escolheu uma. A versão anterior tratava todo x na faixa esquerda como
+            // inválido e recentrava — apagando a posição escolhida a cada abertura,
+            // que é o oposto de persistir. Se você arrastou pra algum canto, aquilo
+            // é a sua decisão, mesmo perto da barra do sistema.
+            val escolhida = prefs.contains(K_X) && prefs.contains(K_Y)
+            val foraDaTela = lp.x > m.widthPixels - 30 || lp.y > m.heightPixels - 30 ||
+                             lp.x < -30 || lp.y < -30
+            if (foraDaTela || (!escolhida && lp.x < (m.widthPixels * 0.14f))) {
                 lp.x = (m.widthPixels * 0.50f).toInt(); lp.y = (m.heightPixels * 0.50f).toInt()
                 runCatching { wm?.updateViewLayout(tv, lp) }
                 prefs.edit().putInt(K_X, lp.x).putInt(K_Y, lp.y).apply()
