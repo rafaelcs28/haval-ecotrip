@@ -4649,7 +4649,16 @@ app.use((req, _res, next) => {
     // "bateu no bridge". Loga método, rota e status, pra fechar o diagnóstico do
     // lado do servidor sem depender de ler o Toast no celular.
     if (/macrodroid/i.test(_ua)) {
-      _res.on('finish', () => console.log(`[macrodroid] ${req.method} ${req.originalUrl} → HTTP ${_res.statusCode}`));
+      // Mascara o token: só presença, prefixo e tamanho. Suficiente pra separar
+      // "header não chegou" de "placeholder não foi trocado" sem vazar segredo no
+      // log, que é lido em texto puro.
+      const _a = req.headers['authorization'] || '';
+      const _t = _a.startsWith('Bearer ') ? _a.slice(7).trim() : '';
+      const _tinfo = !_a ? 'SEM header Authorization'
+                   : !_t ? `header presente mas sem 'Bearer ' (${_a.slice(0, 12)}…)`
+                   : `Bearer ${_t.slice(0, 4)}… (${_t.length} chars)`;
+      _res.on('finish', () => console.log(
+        `[macrodroid] ${req.method} ${req.originalUrl} → HTTP ${_res.statusCode} | auth: ${_tinfo}`));
     }
     if (_ua.startsWith('ecotrip-funnel-probe') || _ua.startsWith('funnel-watchdog')) return next();
     const h = String(req.headers.host || '?').toLowerCase().split(':')[0];
@@ -18499,6 +18508,17 @@ async function _handleSharedDest(value) {
 // Body { text }. Resolve, publica nav_dest pro carro e devolve o nome resolvido.
 app.post('/api/share-dest', async (req, res) => {
   const text = (req.body && (req.body.text || req.body.url)) || '';
+  // Loga o texto CRU: quando a macro do MacroDroid manda a variável sem expandir,
+  // o geocoder acha algum logradouro parecido e o destino sai plausível mas
+  // errado (em 31/07 virou "Rua Lv" a 630 km, em Minas). Sem ver o texto de
+  // entrada, isso passa por "geocode ruim" em vez de "variável não expandiu".
+  console.log(`[shareDest] texto recebido: ${JSON.stringify(String(text).slice(0, 200))}`);
+  // _extras: dicionário completo dos intent extras, mandado pela macro só pra
+  // descobrir sob qual chave o Android entrega o texto compartilhado — o schema
+  // do MacroDroid documenta o dicionário mas não a chave.
+  if (req.body && req.body._extras) {
+    console.log(`[shareDest] extras do intent: ${String(req.body._extras).slice(0, 400)}`);
+  }
   if (!String(text).trim()) return res.status(400).json({ ok: false, error: 'text obrigatório' });
   const d = await _handleSharedDest(String(text));
   if (!d) return res.status(422).json({ ok: false, error: 'não consegui o destino' });

@@ -1,0 +1,80 @@
+{
+  "macroExportVersion": 1,
+  "macro": {
+    "m_name": "Destino do Waze pro carro v3",
+    "m_description": "Compartilhe um lugar do Waze ou Maps pro MacroDroid e o bridge Haval resolve a coordenada e manda pro carro.",
+    "m_enabled": true,
+    "m_completed": true,
+    "m_GUID": 0,
+    "aiGenerated": 1,
+    "m_category": "Haval",
+    "m_triggerList": [
+      {
+        "m_classType": "ShareTextTrigger",
+        "m_SIGUID": 0,
+        "textToCheck": ".*",
+        "matchOption": 1,
+        "ignoreCase": true,
+        "saveExtrasToDict": true,
+        "extrasDictVarName": "share_extras",
+        "m_comment": "Regex .* = casa com qualquer texto compartilhado. Vazio pode ser lido como 'nao configurado' e nunca disparar.",
+        "enableRegex": true
+      }
+    ],
+    "m_actionList": [
+      {
+        "m_classType": "ToastAction",
+        "m_SIGUID": 0,
+        "m_messageText": "Share recebido — extras: {lv=share_extras}",
+        "m_comment": "Diagnostico: se este toast NAO aparece, o problema e o gatilho, nao o HTTP."
+      },
+      {
+        "m_classType": "HttpRequestAction",
+        "m_SIGUID": 0,
+        "requestConfig": {
+          "requestType": 1,
+          "urlToOpen": "https://bridge.malha.dev/api/share-dest",
+          "contentType": "application/json",
+          "contentBodySource": 0,
+          "contentBodyText": "{\"text\":\"{lv=share_extras}[android.intent.extra.TEXT]\",\"_extras\":\"{lv=share_extras}\"}",
+          "requestTimeOutSeconds": 30,
+          "blockNextAction": true,
+          "headerParams": [
+            {
+              "paramName": "Authorization",
+              "paramValue": "Bearer COLE_SEU_TOKEN_AQUI"
+            },
+            {
+              "paramName": "Content-Type",
+              "paramValue": "application/json"
+            }
+          ],
+          "saveReturnCodeToVariable": true,
+          "returnCodeVariableName": "http_code"
+        },
+        "m_comment": "_extras manda o dicionario completo pro bridge logar as chaves reais. Some depois que a chave certa estiver confirmada."
+      },
+      {
+        "m_classType": "ToastAction",
+        "m_SIGUID": 0,
+        "m_comment": "Confirmacao visual. Pode apagar depois de validar.",
+        "m_messageText": "Destino pro carro: HTTP {lv=http_code}"
+      }
+    ],
+    "m_constraintList": [],
+    "localVariables": [
+      {
+        "m_name": "share_extras",
+        "m_type": 4,
+        "dictionary": {
+          "entries": [],
+          "isArray": false
+        },
+        "isLocalVar": true
+      }
+    ]
+  },
+  "globalVariables": [],
+  "userIcons": null,
+  "aiFeedback": "v3: declara share_extras como variavel local de dicionario (a v2 referenciava sem declarar, entao {lv=share_extras}[...] nao expandia e o texto literal ia pro geocoder — virou 'Rua Lv' a 630km). Manda o dicionario inteiro em _extras pro servidor descobrir a chave real do texto compartilhado."
+}
