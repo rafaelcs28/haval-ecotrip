@@ -91,9 +91,12 @@ object ConnectivityStatusReader {
                 }
             } ?: o.put("ok", false).put("erro", "provider ausente")
         } catch (e: SecurityException) {
-            // Chave de assinatura diferente entre EcoTrip e Impulse: a permissão é
-            // signature, então isto é config de build, não falha de runtime.
-            o.put("ok", false).put("erro", "sem permissão (assinatura difere?)")
+            // A permissão é `signature`, então isto é divergência de keystore — config
+            // de build, não falha de runtime. Compara os dois digests e manda no
+            // payload: sem isso o dono não tem como saber QUAL app assinar de novo.
+            o.put("ok", false).put("erro", "sem permissão (assinatura difere)")
+            o.put("assinaturaEcotrip", digestAssinatura(ctx, ctx.packageName))
+            o.put("assinaturaImpulse", digestAssinatura(ctx, "br.com.redesurftank.havalshisuku"))
             AppLogger.w(TAG, "SecurityException no provider: ${e.message}")
         } catch (e: Exception) {
             o.put("ok", false).put("erro", e.javaClass.simpleName + ": " + (e.message ?: ""))
@@ -109,6 +112,22 @@ object ConnectivityStatusReader {
         if (mudou) AppLogger.i(TAG, "uplink ($origem): $json")
         MqttManager.getInstance().publicarUplinkStatus(json)
     }
+
+    /// SHA-256 curto do certificado de assinatura de um pacote. Serve pra provar se
+    /// EcoTrip e Impulse foram assinados com a MESMA keystore — a permissão é
+    /// `signature`, e comparar os dois digests transforma "não funciona" em "estes
+    /// são os dois valores, reassine o que estiver diferente".
+    private fun digestAssinatura(ctx: Context, pkg: String): String = try {
+        @Suppress("DEPRECATION")
+        val info = ctx.packageManager.getPackageInfo(pkg, android.content.pm.PackageManager.GET_SIGNATURES)
+        @Suppress("DEPRECATION")
+        val sigs = info.signatures
+        if (sigs.isNullOrEmpty()) "sem-assinatura" else {
+            val md = java.security.MessageDigest.getInstance("SHA-256")
+            md.digest(sigs[0].toByteArray()).take(8)
+                .joinToString("") { "%02x".format(it) }
+        }
+    } catch (e: Exception) { "erro:" + e.javaClass.simpleName }
 
     /// Estado atual pra quem já está no processo (a UI usa isto sem re-consultar).
     fun ultimo(): JSONObject? = ultimoJson?.let { runCatching { JSONObject(it) }.getOrNull() }

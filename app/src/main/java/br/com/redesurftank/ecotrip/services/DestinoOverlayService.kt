@@ -39,6 +39,15 @@ class DestinoOverlayService : Service() {
         tentar()
     }
 
+    /// cmd/overlay chama startService num serviço que já está rodando, e aí o
+    /// Android entrega em onStartCommand — NÃO em onCreate. Sem isto o comando de
+    /// retentativa não fazia absolutamente nada, e eu ficava lendo um retained
+    /// antigo achando que era a tentativa nova.
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (botao == null) tentar() else relatar("ja_no_ar")
+        return START_STICKY
+    }
+
     /// Publica o diagnóstico em debug/overlay. O AppLogger tem buffer de 300 e o
     /// dumplog entrega 80 — o que acontece no arranque do serviço rola pra fora
     /// antes de dar tempo de pedir. Num tópico o estado fica disponível a
