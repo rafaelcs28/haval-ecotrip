@@ -18426,9 +18426,39 @@ function _cleanShareName(raw, url) {
 // Estratégia: pega a 1ª URL → tenta parsear coordenada direto → se for link curto
 // (maps.app.goo.gl / ul.waze.com), segue o redirect e parseia o destino final →
 // se ainda não houver coordenada, geocodifica o texto restante via Nominatim.
+/// Casa o texto compartilhado com um LUGAR SALVO antes de tentar geocodificar.
+///
+/// O link de percurso do Waze (`a=share_drive`) não tem coordenada nenhuma — só
+/// `a`, `locale` e `sd` —, então sobra o nome no texto ("...dirigir até Sítio
+/// Recanto da Paz..."). Jogar esse nome no geocoder pega homônimo: em 31/07
+/// resolveu "Sitio Recanto Da Paz I" a 348 km, quando o lugar salvo do dono
+/// estava a 87 km. Destino plausível e errado é pior que falha explícita.
+///
+/// Exige nome com 5+ caracteres: "Casa" ou "Sítio" casariam com quase tudo.
+/// Entre vários matches vence o nome MAIS LONGO, que é o mais específico.
+function _lugarSalvoNoTexto(texto) {
+  const norm = (x) => String(x || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const alvo = norm(texto);
+  if (!alvo) return null;
+  let melhor = null;
+  for (const p of (automationPlaces || [])) {
+    const nome = p && (p.name || p.nome);
+    if (!nome || String(nome).trim().length < 5) continue;
+    if (!_validLatLng(p.lat, p.lng)) continue;
+    if (!alvo.includes(norm(nome))) continue;
+    if (!melhor || String(nome).length > String(melhor.name).length) {
+      melhor = { name: String(nome), lat: +p.lat, lng: +p.lng };
+    }
+  }
+  return melhor;
+}
+
 async function _resolveSharedDest(text) {
   if (!text) return null;
   const raw = String(text).trim();
+  // Lugar salvo primeiro: é coordenada que VOCÊ conferiu, contra um palpite do
+  // geocoder. Só perde pra coordenada explícita na URL, tratada abaixo.
+  const _salvo = _lugarSalvoNoTexto(raw);
   const urlMatch = raw.match(/https?:\/\/[^\s]+/);
   const url = urlMatch ? urlMatch[0] : '';
   if (url) {
@@ -18456,6 +18486,11 @@ async function _resolveSharedDest(text) {
   if (m && m[1].trim()) q = m[1].trim();
   // Remove ruído da frase do Waze caso não tenha casado o nome.
   if (/usando o Waze|using Waze|percurso em tempo real|map of Waze/i.test(q)) q = '';
+  // Antes do geocoder: se o texto menciona um lugar seu, usa a coordenada dele.
+  if (_salvo) {
+    console.log(`[shareDest] casou com lugar salvo: ${_salvo.name} (${_salvo.lat},${_salvo.lng})`);
+    return _salvo;
+  }
   if (q) { const g = await _geocode(q); if (g) return g; }
   return null;
 }
