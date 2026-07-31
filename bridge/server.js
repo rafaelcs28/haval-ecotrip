@@ -14413,6 +14413,7 @@ function handleDiagMessage(key, raw) {
 }
 
 mqttClient.on('message', (topic, payload, packet) => {
+  if (topic.includes('uplink')) console.log(`[dbg-uplink] chegou: ${topic} len=${payload.length} retained=${!!(packet && packet.retain)}`);
   // Áudio ao vivo (carro→fone): frame binário PCM. Intercepta ANTES do toString
   // (é binário, não texto) e reenvia direto pros clientes WS de áudio. Caminho
   // quente — sem log, sem parse.
@@ -20758,6 +20759,32 @@ function applyMqttMessage(key, value, isRetained = false) {
     case 'debug/window_status_raw': {
       // Log do CSV cru que o Android publicou — ajuda a diagnosticar oscilação
       console.log(`[window:raw] csv='${value}' isRetained=${isRetained}`);
+      // O BRIDGE interpreta o cru, em vez de confiar no window_* que o APK derivou.
+      //
+      // Medido no carro em 31/07 com só o vidro do motorista aberto: {2,1,1,1}.
+      // Logo 1 = FECHADO e 2 = aberto. O APK publica `if (raw != 0) 1 else 0`, ou
+      // seja trata 1 como aberto — e o painel mostrava "4 abertas" com o carro
+      // todo fechado. Mesma armadilha do lock_state: "não-zero" não é "ativo".
+      //
+      // Interpretar aqui conserta sem depender de atualizar o carro e blinda
+      // contra o APK errar de novo. 0 = desconhecido: mantém o que havia.
+      const _wr = String(value).replace(/[{}\s]/g, '').split(',').map(x => parseInt(x, 10));
+      if (_wr.length >= 4) {
+        const campos = ['window_fl', 'window_fr', 'window_rl', 'window_rr'];
+        let mudou = false;
+        _wr.slice(0, 4).forEach((v, i) => {
+          if (!Number.isFinite(v) || v === 0) return;          // 0 = sem leitura
+          const norm = v === 1 ? 'off' : 'on';                 // 1 fechado · 2+ aberto
+          const k = campos[i];
+          if (state[k] !== norm) {
+            state[k] = norm; _fieldSource[k] = 'apk';
+            _notaValorFonte(k, 'apk', norm === 'on' ? '1' : '0');
+            mudou = true;
+            console.log(`[window] ${k} derivado do raw ${v}: ${norm === 'on' ? 'aberto' : 'fechado'}`);
+          }
+        });
+        if (mudou) { broadcast('update', state); _evalSecurityAlert(); }
+      }
       break;
     }
     case 'debug/door_status_raw': {
