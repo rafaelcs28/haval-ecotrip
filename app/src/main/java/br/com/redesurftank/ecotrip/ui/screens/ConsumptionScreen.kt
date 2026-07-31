@@ -204,6 +204,17 @@ fun ConsumptionScreen() {
     var showSettings      by remember { mutableStateOf(false) }
     var showSocArrival    by remember { mutableStateOf(false) }
     var showDestino       by remember { mutableStateOf(false) }
+    // Toque no botão de overlay chega como extra na Activity: abre a tela direto,
+    // sem o motorista ter que achar o botão dentro do app.
+    val ctxAct = LocalContext.current
+    LaunchedEffect(Unit) {
+        (ctxAct as? android.app.Activity)?.intent?.let { it ->
+            if (it.getBooleanExtra(br.com.redesurftank.ecotrip.services.DestinoOverlayService.EXTRA_ABRIR_DESTINO, false)) {
+                showDestino = true
+                it.removeExtra(br.com.redesurftank.ecotrip.services.DestinoOverlayService.EXTRA_ABRIR_DESTINO)
+            }
+        }
+    }
     var navDest           by remember { mutableStateOf<MqttManager.NavDest?>(null) }
     var navPlan           by remember { mutableStateOf<RoutePlan?>(null) }
     val undoScope         = rememberCoroutineScope()

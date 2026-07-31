@@ -3,6 +3,7 @@
 
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
@@ -55,6 +56,13 @@
             android:screenOrientation="landscape"
             android:showWhenLocked="true"
             android:turnScreenOn="true" />
+
+        <!-- Botão de destino por cima de qualquer app (inclusive o de
+             espelhamento, pra aparecer sobre o Waze). Exige o usuário conceder
+             "desenhar sobre outros apps" uma vez. -->
+        <service
+            android:name=".services.DestinoOverlayService"
+            android:exported="false" />
 
         <service
             android:name=".services.CarTelemetryService"

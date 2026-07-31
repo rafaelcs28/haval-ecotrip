@@ -105,6 +105,11 @@ class MainActivity : ComponentActivity() {
         val compose = androidx.compose.ui.platform.ComposeView(this).apply {
             setContent { EcotripTheme { ConsumptionScreen() } }
         }
+        // Botão de destino por cima de qualquer app. Fora do apply do ComposeView:
+        // ali o `this` é a View, não a Activity, e o serviço precisa do Context da
+        // Activity. Sobe aqui (e não no boot) porque depende da permissão de
+        // overlay, concedida uma vez na tela do sistema.
+        br.com.redesurftank.ecotrip.services.DestinoOverlayService.ligar(this)
         root.addView(
             compose,
             android.widget.FrameLayout.LayoutParams(
