@@ -95,9 +95,12 @@ class DestinoOverlayService : Service() {
             gravity = Gravity.CENTER
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
-                setColor(Color.parseColor("#00E5CC"))
-                setStroke(3, Color.parseColor("#0F1520"))
+                // Translúcido (~66%): fica por cima do mapa do Waze o tempo todo, e
+                // opaco competia com a tela em vez de ser um atalho discreto.
+                setColor(Color.parseColor("#A800E5CC"))
+                setStroke(2, Color.parseColor("#66000000"))
             }
+            alpha = 0.88f
             // A medição no carro deu density=1.0, então dp==px: 64 virava 64px numa
             // tela de 1792 — 3,5% da largura. 100px é o alvo que se acerta dirigindo.
             val d = (100 * resources.displayMetrics.density).toInt()
@@ -254,8 +257,14 @@ class DestinoOverlayService : Service() {
                 setTextColor(Color.parseColor("#5B7394")); textSize = 15f
             })
         }
-        for (f in favs.take(6)) {
-            col.addView(TextView(this).apply {
+        // Rolagem: antes a lista era cortada em 6 itens sem aviso e o resto ficava
+        // inalcançável. Agora todos entram e a altura mostra ~5 — o suficiente pra
+        // decidir sem virar uma parede de texto no carro.
+        val listaCol = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+        }
+        for (f in favs) {
+            listaCol.addView(TextView(this).apply {
                 val km = f.optDouble("distKm").let { if (it.isNaN()) "" else "   ${"%.1f".format(it)} km" }
                 text = f.optString("name") + km
                 setTextColor(Color.parseColor("#EEF4FF")); textSize = 17f
@@ -272,10 +281,16 @@ class DestinoOverlayService : Service() {
                     postDelayed({ fecharPainel() }, 900)
                 }
             }, android.widget.LinearLayout.LayoutParams(
-                dp(300), android.widget.LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                dp(320), android.widget.LinearLayout.LayoutParams.WRAP_CONTENT).apply {
                 bottomMargin = dp(8)
             })
         }
+        // ScrollView com altura de ~5 linhas (item ~54dp + margem 8dp).
+        col.addView(android.widget.ScrollView(this).apply {
+            isVerticalScrollBarEnabled = true
+            addView(listaCol)
+        }, android.widget.LinearLayout.LayoutParams(
+            android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, dp(5 * 62)))
 
         col.addView(TextView(this).apply {
             text = "🔍  Buscar outro lugar…"

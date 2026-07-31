@@ -6,6 +6,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -774,13 +775,17 @@ fun ConsumptionScreen() {
         // Alvo grande (64dp) no canto de baixo à direita: é pra acertar de primeira
         // saindo de casa ou parado no trânsito, não pra caber discretamente.
         if (!controlesOpen && !anyOverlay && !showDestino && !showSocArrival) {
+            // Topo direito e pequeno: o alvo grande agora é o botão FLUTUANTE, que
+            // funciona por cima de qualquer app. Aqui dentro do app basta um atalho
+            // discreto, na mesma faixa dos outros ícones.
             Button(
                 onClick = { showDestino = true },
-                modifier = Modifier.align(Alignment.BottomEnd).padding(20.dp).height(64.dp),
-                shape = RoundedCornerShape(18.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = AuroraTeal),
+                modifier = Modifier.align(Alignment.TopEnd).padding(top = 6.dp, end = 12.dp).height(30.dp),
+                shape = RoundedCornerShape(9.dp),
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = AuroraTeal.copy(alpha = 0.22f)),
             ) {
-                Text("🧭  DESTINO", fontWeight = FontWeight.Bold, color = VoidBlack, fontSize = 19.sp)
+                Text("🧭 Destino", fontWeight = FontWeight.Bold, color = AuroraTeal, fontSize = 12.sp)
             }
         }
         // DESENHADO POR ÚLTIMO de propósito: no Box do Compose a ordem define
