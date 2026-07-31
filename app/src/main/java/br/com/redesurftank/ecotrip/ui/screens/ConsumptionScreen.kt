@@ -633,6 +633,35 @@ fun ConsumptionScreen() {
         // WebView fica acima do ComposeView → esconde o home Tesla quando há
         // overlay Compose aberto (Settings/Recargas/Viagens/Log), senão ficaria atrás.
         val anyOverlay = showSettings || showChargeHistory || showAutoTrips || showLog
+        // Sem "desenhar sobre outros apps" o botão flutuante não existe, e antes
+        // isso falhava calado (o serviço logava e desistia). Aqui o app PEDE: um
+        // toque abre a tela do sistema já no app certo.
+        var semOverlay by remember {
+            mutableStateOf(!br.com.redesurftank.ecotrip.services.DestinoOverlayService.temPermissao(ctxAct))
+        }
+        if (semOverlay && !controlesOpen && !anyOverlay && !showDestino) {
+            Row(
+                Modifier.align(Alignment.BottomStart).padding(20.dp)
+                    .background(MoltenOrange.copy(alpha = 0.16f), RoundedCornerShape(14.dp))
+                    .clickable {
+                        br.com.redesurftank.ecotrip.services.DestinoOverlayService.pedirPermissao(ctxAct)
+                    }
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("⚠  Ativar botão de destino sobre o Waze",
+                    color = MoltenOrange, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+            }
+        }
+        // Volta do Ajustes com a permissão concedida → sobe o overlay na hora, sem
+        // precisar reabrir o app.
+        LaunchedEffect(showDestino, anyOverlay) {
+            val ok = br.com.redesurftank.ecotrip.services.DestinoOverlayService.temPermissao(ctxAct)
+            if (ok && semOverlay) {
+                semOverlay = false
+                br.com.redesurftank.ecotrip.services.DestinoOverlayService.ligar(ctxAct)
+            }
+        }
         // Alvo grande (64dp) no canto de baixo à direita: é pra acertar de primeira
         // saindo de casa ou parado no trânsito, não pra caber discretamente.
         if (!controlesOpen && !anyOverlay && !showDestino && !showSocArrival) {
