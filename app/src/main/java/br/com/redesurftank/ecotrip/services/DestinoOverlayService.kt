@@ -286,16 +286,21 @@ class DestinoOverlayService : Service() {
                     postDelayed({ fecharPainel() }, 900)
                 }
             }, android.widget.LinearLayout.LayoutParams(
-                dp(320), android.widget.LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT).apply {
                 bottomMargin = dp(8)
             })
         }
         // ScrollView com altura de ~5 linhas (item ~54dp + margem 8dp).
+        // Largura EXPLÍCITA na ScrollView e na lista interna. Com WRAP_CONTENT e sem
+        // LayoutParams no filho, a largura degenerou e o popup virou uma faixa
+        // vertical fina no meio da tela (visto no carro em 31/07) — ScrollView não
+        // propaga a largura dos filhos como um LinearLayout faria.
         col.addView(android.widget.ScrollView(this).apply {
             isVerticalScrollBarEnabled = true
-            addView(listaCol)
-        }, android.widget.LinearLayout.LayoutParams(
-            android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, dp(5 * 62)))
+            addView(listaCol, android.widget.FrameLayout.LayoutParams(
+                dp(330), android.widget.FrameLayout.LayoutParams.WRAP_CONTENT))
+        }, android.widget.LinearLayout.LayoutParams(dp(330), dp(5 * 62)))
 
         col.addView(TextView(this).apply {
             text = "🔍  Buscar outro lugar…"
