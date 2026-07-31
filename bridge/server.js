@@ -14518,6 +14518,61 @@ mqttClient.on('message', (topic, payload, packet) => {
 
   // Dispatcher: tópicos da integração GWM Brasil vão pro handler dedicado;
   // outros caem no handler legado do app.
+  // Busca de lugares pedida PELA MULTIMÍDIA, por MQTT.
+  //
+  // Por MQTT e não por HTTP porque o APK não manda Authorization — a conexão
+  // MQTT dele já é autenticada, então é o canal com menos peça nova. A chave do
+  // Google continua só no servidor: o carro manda texto, recebe candidatos.
+  if (topic === MQTT_PREFIX + '/cmd/place_search') {
+    if (isRetained) return;
+    (async () => {
+      const q = String(value || '').trim();
+      const pub = (o) => { try {
+        mqttClient.publish(`${MQTT_PREFIX}/place_search/result`, JSON.stringify(o), { qos: 1, retain: false });
+      } catch (_) {} };
+      if (q.length < 3) return pub({ ok: false, error: 'texto curto', q });
+      const key = process.env.GOOGLE_MAPS_API_KEY;
+      if (!key) return pub({ ok: false, error: 'sem chave do Google', q });
+      const lat = +state.gps_lat, lng = +state.gps_lng;
+      const loc = (lat && lng) ? `&location=${lat},${lng}&radius=60000` : '';
+      try {
+        const r = await fetch(
+          `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${encodeURIComponent(q)}`
+          + `${loc}&language=pt-BR&region=br&key=${key}`, { signal: AbortSignal.timeout(9000) });
+        const j = await r.json();
+        if (j.status !== 'OK' && j.status !== 'ZERO_RESULTS') return pub({ ok: false, error: j.status, q });
+        const items = (j.results || []).slice(0, 6).map(x => ({
+          name: x.name, address: x.formatted_address || '',
+          lat: x.geometry?.location?.lat, lng: x.geometry?.location?.lng,
+          distKm: (lat && lng && x.geometry?.location)
+            ? +(haversineM(lat, lng, x.geometry.location.lat, x.geometry.location.lng) / 1000).toFixed(1) : null,
+        })).filter(x => _validLatLng(x.lat, x.lng));
+        console.log(`[place_search] carro pediu '${q}' → ${items.length} resultado(s)`);
+        pub({ ok: true, q, items });
+      } catch (e) { pub({ ok: false, error: e.message, q }); }
+    })();
+    return;
+  }
+
+  // Favoritos pro carro montar a lista. Retido: a tela abre já com a lista,
+  // sem esperar round-trip.
+  if (topic === MQTT_PREFIX + '/cmd/nav_favorites') {
+    if (isRetained) return;
+    const lat = +state.gps_lat, lng = +state.gps_lng;
+    const ruido = /portaria|cancela|rotat|passagem|sa[ií]da estacionamento/i;
+    const items = (automationPlaces || [])
+      .filter(p => p && (p.name || p.nome) && _validLatLng(p.lat, p.lng))
+      .map(p => ({ name: String(p.name || p.nome), lat: +p.lat, lng: +p.lng }))
+      .filter(p => !ruido.test(p.name))
+      .map(p => ({ ...p, distKm: (lat && lng) ? +(haversineM(lat, lng, p.lat, p.lng) / 1000).toFixed(1) : null }));
+    try {
+      mqttClient.publish(`${MQTT_PREFIX}/nav_favorites/result`,
+        JSON.stringify({ ok: true, items }), { qos: 1, retain: true });
+    } catch (_) {}
+    console.log(`[nav_favorites] carro pediu → ${items.length} favorito(s)`);
+    return;
+  }
+
   // Destino escolhido NA MULTIMÍDIA (tela de chegada do APK, botão Maps/Waze).
   // O APK publicava isso desde sempre e NINGUÉM ouvia — era pro NavRelay que
   // nunca existiu, mesma história do car_dest_raw. Ligar aqui é o que permite
