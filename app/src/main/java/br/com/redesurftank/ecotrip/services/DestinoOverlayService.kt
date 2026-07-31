@@ -44,7 +44,14 @@ class DestinoOverlayService : Service() {
     /// retentativa não fazia absolutamente nada, e eu ficava lendo um retained
     /// antigo achando que era a tentativa nova.
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (botao == null) tentar() else relatar("ja_no_ar")
+        if (botao == null) { tentar(); return START_STICKY }
+        // Já no ar: RECRIA em vez de só relatar. "ja_no_ar" não dizia nada de útil —
+        // e é justamente quando o botão existe mas não é visto que preciso da
+        // medição. Remover e readicionar força um layout novo e um relatório fresco.
+        relatar("recriando")
+        runCatching { botao?.let { wm?.removeView(it) } }
+        botao = null
+        tentar()
         return START_STICKY
     }
 
