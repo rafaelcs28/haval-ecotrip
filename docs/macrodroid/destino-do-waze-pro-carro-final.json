@@ -1,0 +1,76 @@
+{
+  "macroExportVersion": 1,
+  "macro": {
+    "m_name": "Destino do Waze pro carro",
+    "m_description": "Compartilhe um lugar do Waze/Maps pro MacroDroid e o bridge resolve a coordenada e manda pro carro.",
+    "m_enabled": true,
+    "m_completed": true,
+    "m_GUID": 0,
+    "aiGenerated": 1,
+    "m_category": "Haval",
+    "localVariables": [
+      {
+        "m_name": "http_code",
+        "m_type": 2,
+        "m_stringValue": "",
+        "isLocalVar": true
+      },
+      {
+        "m_name": "http_body",
+        "m_type": 2,
+        "m_stringValue": "",
+        "isLocalVar": true
+      }
+    ],
+    "m_triggerList": [
+      {
+        "m_classType": "ShareTextTrigger",
+        "m_SIGUID": 0,
+        "textToCheck": "*",
+        "enableRegex": false,
+        "matchOption": 0,
+        "ignoreCase": true,
+        "m_comment": "Wildcard glob '*' — a tela diz 'Operadores suportados: * e ?', nao regex. Modo 'Exatamente igual' com * casa qualquer texto."
+      }
+    ],
+    "m_actionList": [
+      {
+        "m_classType": "HttpRequestAction",
+        "m_SIGUID": 0,
+        "requestConfig": {
+          "requestType": 1,
+          "urlToOpen": "https://bridge.malha.dev/api/share-dest",
+          "contentType": "application/json",
+          "contentBodySource": 0,
+          "contentBodyText": "{\"text\":\"{shared_text}\"}",
+          "requestTimeOutSeconds": 30,
+          "blockNextAction": true,
+          "headerParams": [
+            {
+              "paramName": "Authorization",
+              "paramValue": "Bearer COLE_SEU_TOKEN_AQUI"
+            },
+            {
+              "paramName": "Content-Type",
+              "paramValue": "application/json"
+            }
+          ],
+          "saveReturnCodeToVariable": true,
+          "returnCodeVariableName": "http_code",
+          "saveResponseType": 1,
+          "responseVariableName": "http_body"
+        },
+        "m_comment": "{shared_text} e o magic text do proprio gatilho — a tela do MacroDroid documenta isso. Nao precisa de dicionario de extras."
+      },
+      {
+        "m_classType": "ToastAction",
+        "m_SIGUID": 0,
+        "m_messageText": "HTTP {lv=http_code} — {lv=http_body}"
+      }
+    ],
+    "m_constraintList": []
+  },
+  "globalVariables": [],
+  "userIcons": null,
+  "aiFeedback": "Final: {shared_text} pro texto e wildcard * pro filtro, os dois confirmados na tela do gatilho."
+}
