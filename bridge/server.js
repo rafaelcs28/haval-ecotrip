@@ -4343,6 +4343,33 @@ const recentNavDests = [];
 // Dispositivos NavRelay online: alimentado por mensagens retidas em nav_devices/<id>.
 // LWT esvazia retain ao desconectar — entry é apagada no handler do mqtt.
 const _navDevices = {};
+/// Espelha o destino no Waze do Android do carro (espelhamento/Android Auto).
+///
+/// Direção deliberada: o bridge manda pros DOIS, em vez de ler o Waze. O Waze não
+/// expõe o destino atual — a notificação dele traz próxima manobra e ETA, não o
+/// endereço — então capturar de lá exigiria ler a tela por acessibilidade, que
+/// quebra a cada update. O deep link `waze://?ll=…&navigate=yes` é estável, e o
+/// MacroDroid só executa o intent quando recebe o webhook.
+///
+/// Fica desligado sem WAZE_WEBHOOK_URL no .env. Falha nunca propaga: destino no
+/// carro não pode depender do celular estar acordado.
+const WAZE_WEBHOOK_URL = process.env.WAZE_WEBHOOK_URL || '';
+function _espelhaDestinoNoWaze(lat, lng, name) {
+  if (!WAZE_WEBHOOK_URL) return;
+  const la = +lat, ln = +lng;
+  if (!Number.isFinite(la) || !Number.isFinite(ln) || (!la && !ln)) return;
+  const u = new URL(WAZE_WEBHOOK_URL);
+  u.searchParams.set('lat', la.toFixed(6));
+  u.searchParams.set('lng', ln.toFixed(6));
+  if (name) u.searchParams.set('name', String(name).slice(0, 60));
+  const ctl = new AbortController();
+  const to = setTimeout(() => ctl.abort(), 8000);
+  fetch(u.toString(), { signal: ctl.signal })
+    .then(r => console.log(`[waze] destino '${name}' → MacroDroid HTTP ${r.status}`))
+    .catch(e => console.warn('[waze] webhook falhou:', e.message))
+    .finally(() => clearTimeout(to));
+}
+
 let _navDestRetained = false;   // há um nav_dest retido no broker? (pra limpar ao expirar)
 function _navDestNameFor(lat, lng) {
   if (!lat || !lng) return null;
@@ -5058,6 +5085,7 @@ app.post('/api/departure/accept', async (req, res) => {
   try {
     const payload = JSON.stringify({ lat: to.lat, lng: to.lng, name: destName });
     mqttClient.publish(`${MQTT_PREFIX}/cmd/nav_dest`, payload, { qos: 1, retain: true });
+    _espelhaDestinoNoWaze(to.lat, to.lng, destName);
     recentNavDests.push({ name: destName, lat: to.lat, lng: to.lng, ts: Date.now() });
     if (recentNavDests.length > 30) recentNavDests.shift();
   } catch (e) { console.warn('[departure/accept] nav_dest falhou:', e.message); }
@@ -18447,6 +18475,7 @@ async function _handleSharedDest(value) {
     scheduleStateSave();
     const payload = JSON.stringify({ lat: d.lat, lng: d.lng, name: d.name, etaClock, ts: Date.now() });
     mqttClient.publish(`${MQTT_PREFIX}/cmd/nav_dest`, payload, { qos: 1, retain: true });
+    _espelhaDestinoNoWaze(d.lat, d.lng, d.name);
     _navDestRetained = true;
     mqttClient.publish(`${MQTT_PREFIX}/car_dest_result`,
       JSON.stringify({ ok: true, name: d.name, ts: Date.now() }), { qos: 1, retain: false });
@@ -18528,6 +18557,7 @@ app.post('/api/nav-to', (req, res) => {
   // Se pediu Maps/Waze/Google Maps, manda pro Nav Relay abrir a navegação.
   if (app === 'maps' || app === 'waze' || app === 'gmaps') {
     const payload = JSON.stringify({ lat, lng, name, app, target, device, stops, ts: Date.now() });
+    _espelhaDestinoNoWaze(lat, lng, name);
     if (device) {
       // Direcionado a UM device específico — só ele recebe. retain:true pra o NavRelay
       // puxar o último destino ao reconectar (estava offline na hora do envio). O
