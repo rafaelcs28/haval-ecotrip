@@ -99,9 +99,14 @@ object ConnectivityStatusReader {
             o.put("ok", false).put("erro", e.javaClass.simpleName + ": " + (e.message ?: ""))
         }
         val json = o.toString()
-        if (json == ultimoJson) return
+        // Publica SEMPRE, mesmo sem mudança. Guardar "já publiquei isso" só em
+        // memória deixa o tópico órfão: se o retained for limpo no broker (restart,
+        // limpeza manual), o carro nunca republica e o bridge fica sem estado pra
+        // sempre. Uma mensagem por minuto é irrelevante; estado órfão não é.
+        // O log é que fica gateado por mudança, pra não encher o buffer de 300.
+        val mudou = json != ultimoJson
         ultimoJson = json
-        AppLogger.i(TAG, "uplink ($origem): $json")
+        if (mudou) AppLogger.i(TAG, "uplink ($origem): $json")
         MqttManager.getInstance().publicarUplinkStatus(json)
     }
 

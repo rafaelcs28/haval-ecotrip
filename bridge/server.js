@@ -14528,6 +14528,7 @@ mqttClient.on('message', (topic, payload, packet) => {
   // Isto substitui a dedução por `network/info`, que só dizia "wifi" e não
   // distinguia Starlink de qualquer outra rede.
   if (topic === MQTT_PREFIX + '/uplink/status') {
+    if (!String(value).trim()) { state.uplink = null; return; }   // limpeza do retained, não erro
     try {
       const o = JSON.parse(value);
       const antes = state.uplink && state.uplink.displayText;
