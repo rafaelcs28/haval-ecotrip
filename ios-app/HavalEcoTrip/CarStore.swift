@@ -541,6 +541,19 @@ final class CarStore: ObservableObject {
     var heading: Double { num("car_heading") }   // rumo (graus, 0=N) p/ girar o ícone
 
     // Bateria 12V, hodômetro, pneus
+    /// Por onde o carro roteia a internet (Starlink/WiFi ou 4G), lido do Impulse
+    /// pelo APK e publicado pelo bridge. Vem PRONTO pra exibir: quem monta o texto
+    /// é o Impulse, então app e multimídia mostram exatamente a mesma coisa.
+    var uplinkRaw: [String: Any]? { raw["uplink"] as? [String: Any] }
+    /// nil = o Impulse pede pra esconder (sem hotspot e sem controle de dados).
+    var uplinkTexto: String? {
+        guard let u = uplinkRaw, (u["ok"] as? Bool) == true else { return nil }
+        let t = u["texto"] as? String
+        return (t?.isEmpty == false) ? t : nil
+    }
+    var uplinkNivel: String { (uplinkRaw?["nivel"] as? String) ?? "muted" }
+    var uplinkModo: String  { (uplinkRaw?["modo"]  as? String) ?? "" }
+
     var batt12vPct: Double { num("batt_12v_pct") }
     var batt12vV: Double { num("batt_12v_v") }
     var odometerKm: Double  { num("odometer_km") }

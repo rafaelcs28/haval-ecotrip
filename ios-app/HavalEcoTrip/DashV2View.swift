@@ -111,6 +111,10 @@ struct DashV2View: View {
                 .saturation(isSleeping ? 0.7 : 1)
                 .brightness(isSleeping ? -0.13 : 0)
                 if isSleeping { sleepInfoRow }
+                // Por onde o carro roteia. Fica no header e não nas mini-métricas
+                // porque é estado de infraestrutura, não medida de condução — e o
+                // que importa é perceber "estou gastando 4G" ao olhar o painel.
+                if let up = store.uplinkTexto { uplinkRow(up) }
                 actionsGrid
                 quickRow
                 if !isDriving { lastTripRow }
@@ -483,6 +487,34 @@ struct DashV2View: View {
     }
 
     // MARK: linha dormindo (3c)
+
+    /// Cor pelo nível que o Impulse mandou: 4G roteando vem 'warn' porque é o caso
+    /// de queimar pacote — foi assim que 2 GB foram embora em menos de um mês.
+    private func uplinkRow(_ texto: String) -> some View {
+        let cor: Color = switch store.uplinkNivel {
+            case "good": DS.green
+            case "warn": DS.orange
+            case "bad":  DS.red
+            default:     DS.muted
+        }
+        let icone = switch store.uplinkModo {
+            case "WLAN": "antenna.radiowaves.left.and.right"
+            case "4G":   "cellularbars"
+            case "STARTING": "arrow.triangle.2.circlepath"
+            case "ERROR": "exclamationmark.triangle.fill"
+            default:     "wifi.slash"
+        }
+        return HStack(spacing: 7) {
+            Image(systemName: icone).font(.system(size: 12, weight: .bold)).foregroundStyle(cor)
+            Text(texto).font(.system(size: 12, weight: .semibold)).foregroundStyle(DS.text)
+                .lineLimit(1).minimumScaleFactor(0.8)
+            Spacer()
+        }
+        .padding(.horizontal, 13).padding(.vertical, 9)
+        .background(cor.opacity(0.10))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(cor.opacity(0.35), lineWidth: 1))
+    }
 
     private var sleepInfoRow: some View {
         let ts = pv == "dormindo"
