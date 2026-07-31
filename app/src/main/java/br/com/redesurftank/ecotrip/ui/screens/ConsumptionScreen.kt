@@ -783,9 +783,10 @@ fun ConsumptionScreen() {
                 modifier = Modifier.align(Alignment.TopEnd).padding(top = 6.dp, end = 12.dp).height(30.dp),
                 shape = RoundedCornerShape(9.dp),
                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = AuroraTeal.copy(alpha = 0.22f)),
+                // 0.22 ficava invisível — sobre a WebView escura o contraste desaparecia.
+                colors = ButtonDefaults.buttonColors(containerColor = AuroraTeal),
             ) {
-                Text("🧭 Destino", fontWeight = FontWeight.Bold, color = AuroraTeal, fontSize = 12.sp)
+                Text("🧭 Destino", fontWeight = FontWeight.Bold, color = VoidBlack, fontSize = 12.sp)
             }
         }
         // DESENHADO POR ÚLTIMO de propósito: no Box do Compose a ordem define

@@ -95,12 +95,12 @@ class DestinoOverlayService : Service() {
             gravity = Gravity.CENTER
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
-                // Translúcido (~66%): fica por cima do mapa do Waze o tempo todo, e
-                // opaco competia com a tela em vez de ser um atalho discreto.
-                setColor(Color.parseColor("#A800E5CC"))
-                setStroke(2, Color.parseColor("#66000000"))
+                // ~85%: translúcido o bastante pra não competir com o mapa, opaco o
+                // bastante pra ser achado. A tentativa anterior somava dois efeitos
+                // (cor a 66% × alpha 0.88 = 58%) e o botão sumia sobre fundo claro.
+                setColor(Color.parseColor("#DA00E5CC"))
+                setStroke(3, Color.parseColor("#99000000"))
             }
-            alpha = 0.88f
             // A medição no carro deu density=1.0, então dp==px: 64 virava 64px numa
             // tela de 1792 — 3,5% da largura. 100px é o alvo que se acerta dirigindo.
             val d = (100 * resources.displayMetrics.density).toInt()
