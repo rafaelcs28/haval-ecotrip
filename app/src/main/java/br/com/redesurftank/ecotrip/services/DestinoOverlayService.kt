@@ -120,13 +120,14 @@ class DestinoOverlayService : Service() {
             android.graphics.PixelFormat.TRANSLUCENT,
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            // Padrão longe da BARRA LATERAL do sistema: a medição provou que o botão
-            // estava desenhado, visível e anexado em x=24 — e invisível de fato,
-            // porque a barra de atalhos do head unit (home, grid, clima) ocupa essa
-            // faixa da esquerda e fica na frente. Nasce à direita, na área do app.
+            // Nasce no CENTRO da tela, onde é impossível estar coberto: a medição
+            // provou que em x=24 o botão estava desenhado, visível e anexado — e
+            // invisível de fato, porque a barra de atalhos do head unit (home, grid,
+            // clima) ocupa a faixa da esquerda e fica na frente. Do centro o dono
+            // arrasta pro canto que preferir, e a posição fica salva.
             val mDef = resources.displayMetrics
-            x = prefs.getInt(K_X, (mDef.widthPixels * 0.80f).toInt())
-            y = prefs.getInt(K_Y, (mDef.heightPixels * 0.62f).toInt())
+            x = prefs.getInt(K_X, (mDef.widthPixels * 0.50f).toInt())
+            y = prefs.getInt(K_Y, (mDef.heightPixels * 0.50f).toInt())
         }
 
         // Arrastar move; toque curto abre. O limiar separa os dois: sem ele, um
@@ -178,7 +179,7 @@ class DestinoOverlayService : Service() {
             // "dentro da tela" não basta — ali o botão existe e não se vê.
             val naBarraLateral = lp.x < (m.widthPixels * 0.14f)
             if (naBarraLateral || lp.x > m.widthPixels - 40 || lp.y > m.heightPixels - 40 || lp.y < -40) {
-                lp.x = (m.widthPixels * 0.80f).toInt(); lp.y = (m.heightPixels * 0.62f).toInt()
+                lp.x = (m.widthPixels * 0.50f).toInt(); lp.y = (m.heightPixels * 0.50f).toInt()
                 runCatching { wm?.updateViewLayout(tv, lp) }
                 prefs.edit().putInt(K_X, lp.x).putInt(K_Y, lp.y).apply()
                 relatar("recentrado", "pos=${lp.x},${lp.y}")
