@@ -90,6 +90,12 @@ class CarTelemetryService : Service() {
     private var carDataListener: ((String, String) -> Unit)? = null
 
     override fun onCreate() {
+        // Botão flutuante de destino sobe COM O SERVIÇO, não com a Activity.
+        // Na v6.164-6.166 eu chamava isso no MainActivity.onCreate, mas o APK roda
+        // como serviço em background e a Activity só existe quando o usuário abre o
+        // app — então o overlay nunca subia sozinho. Aqui ele existe desde o boot,
+        // que é o ponto: o atalho tem que estar lá quando o Waze está na frente.
+        runCatching { DestinoOverlayService.ligar(this) }
         super.onCreate()
         current = this
         createChannel()
