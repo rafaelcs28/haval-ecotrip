@@ -14523,7 +14523,10 @@ mqttClient.on('message', (topic, payload, packet) => {
   // Por MQTT e não por HTTP porque o APK não manda Authorization — a conexão
   // MQTT dele já é autenticada, então é o canal com menos peça nova. A chave do
   // Google continua só no servidor: o carro manda texto, recebe candidatos.
-  if (topic === MQTT_PREFIX + '/cmd/place_search') {
+  // 'nav_search' e não 'cmd/place_search': cmd/# é o canal bridge→CARRO e o APK
+  // o subscreve inteiro, então um pedido do carro nesse prefixo voltaria como eco
+  // pra ele mesmo. Pedido do carro fica fora de cmd/.
+  if (topic === MQTT_PREFIX + '/nav_search') {
     if (isRetained) return;
     (async () => {
       const q = String(value || '').trim();
@@ -14556,7 +14559,7 @@ mqttClient.on('message', (topic, payload, packet) => {
 
   // Favoritos pro carro montar a lista. Retido: a tela abre já com a lista,
   // sem esperar round-trip.
-  if (topic === MQTT_PREFIX + '/cmd/nav_favorites') {
+  if (topic === MQTT_PREFIX + '/nav_favorites_req') {
     if (isRetained) return;
     const lat = +state.gps_lat, lng = +state.gps_lng;
     const ruido = /portaria|cancela|rotat|passagem|sa[ií]da estacionamento/i;
