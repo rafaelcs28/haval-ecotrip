@@ -18516,9 +18516,12 @@ app.post('/api/share-dest', async (req, res) => {
   // _extras: dicionário completo dos intent extras, mandado pela macro só pra
   // descobrir sob qual chave o Android entrega o texto compartilhado — o schema
   // do MacroDroid documenta o dicionário mas não a chave.
-  if (req.body && req.body._extras) {
-    console.log(`[shareDest] extras do intent: ${String(req.body._extras).slice(0, 400)}`);
-  }
+  // Header, não campo do body: o dicionário serializado do MacroDroid tem aspas
+  // e vírgulas, e mandá-lo DENTRO do JSON fazia o express.json() rejeitar com 400
+  // antes de qualquer handler — o request parecia falhar por auth/rota quando o
+  // problema era o próprio payload.
+  const _dbgExtras = req.headers['x-debug-extras'];
+  if (_dbgExtras) console.log(`[shareDest] extras do intent: ${String(_dbgExtras).slice(0, 400)}`);
   if (!String(text).trim()) return res.status(400).json({ ok: false, error: 'text obrigatório' });
   const d = await _handleSharedDest(String(text));
   if (!d) return res.status(422).json({ ok: false, error: 'não consegui o destino' });
