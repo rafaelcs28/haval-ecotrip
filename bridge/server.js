@@ -18327,6 +18327,25 @@ function _shortPlaceName(primary, full) {
 // Geocodifica com VIÉS na posição atual do carro (proximity), pra não cair noutra
 // cidade (ex.: Brasília em vez de Goiânia). Mapbox c/ proximity quando há token;
 // senão Nominatim com viewbox em torno do carro. Retorna nome curto.
+/// Teto de distância pro geocoder. `proximity` (Mapbox) e `viewbox` sem
+/// `bounded` (Nominatim) são só VIESES: se o nome casa melhor longe, o
+/// resultado vem de longe. Em 31/07 "Espaço Zune", em Goiânia, virou "Rua
+/// Zuneide Aparecida Marin" em Campinas — 800 km — e "Sítio Recanto da Paz"
+/// virou um homônimo a 348 km. Como o link de percurso do Waze não traz
+/// coordenada, o nome é tudo que existe, e um palpite errado vira navegação
+/// pro lugar errado sem nenhum sinal.
+///
+/// Recusar é melhor que chutar: o endpoint responde 422 e o Toast mostra a
+/// falha. Destino recorrente deve estar nos lugares salvos, que têm prioridade
+/// e não passam por aqui; coordenada explícita na URL também não passa.
+const GEOCODE_MAX_KM = +(process.env.GEOCODE_MAX_KM || 300);
+function _geocodeLongeDemais(lat, lng) {
+  const cLat = +state.gps_lat, cLng = +state.gps_lng;
+  if (!cLat || !cLng) return null;                 // sem referência, não julga
+  const km = haversineM(cLat, cLng, lat, lng) / 1000;
+  return km > GEOCODE_MAX_KM ? km : null;
+}
+
 async function _geocode(q) {
   const nearLat = +state.gps_lat, nearLng = +state.gps_lng;
   const tok = process.env.MAPBOX_TOKEN;
@@ -18339,7 +18358,13 @@ async function _geocode(q) {
       const j = await r.json();
       const f = j && j.features && j.features[0];
       if (f && Array.isArray(f.center)) {
-        return { lat: f.center[1], lng: f.center[0], name: _shortPlaceName(f.text, f.place_name) };
+        const _far = _geocodeLongeDemais(f.center[1], f.center[0]);
+        if (_far) {
+          console.warn(`[geocode] Mapbox devolveu '${_shortPlaceName(f.text, f.place_name)}' a `
+                     + `${Math.round(_far)}km de '${q}' — recusado (teto ${GEOCODE_MAX_KM}km)`);
+        } else {
+          return { lat: f.center[1], lng: f.center[0], name: _shortPlaceName(f.text, f.place_name) };
+        }
       }
     } catch (e) { console.warn('[geocode] Mapbox falhou, Nominatim:', e.message); }
   }
@@ -18351,7 +18376,14 @@ async function _geocode(q) {
   const r = await fetch(url, { headers: { 'User-Agent': 'EcotripImpulse/1.0 (haval ecotrip)' }, signal: AbortSignal.timeout(8000) });
   const j = await r.json();
   if (!Array.isArray(j) || !j.length) return null;
-  return { lat: +j[0].lat, lng: +j[0].lon, name: _shortPlaceName(j[0].name, j[0].display_name) };
+  const _nlat = +j[0].lat, _nlng = +j[0].lon;
+  const _nfar = _geocodeLongeDemais(_nlat, _nlng);
+  if (_nfar) {
+    console.warn(`[geocode] Nominatim devolveu '${_shortPlaceName(j[0].name, j[0].display_name)}' a `
+               + `${Math.round(_nfar)}km de '${q}' — recusado (teto ${GEOCODE_MAX_KM}km)`);
+    return null;
+  }
+  return { lat: _nlat, lng: _nlng, name: _shortPlaceName(j[0].name, j[0].display_name) };
 }
 
 // Extrai lat/lng de uma URL de Maps/Waze. Cobre os formatos mais comuns do
