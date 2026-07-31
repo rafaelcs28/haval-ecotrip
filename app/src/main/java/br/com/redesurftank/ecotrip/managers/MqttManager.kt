@@ -2255,7 +2255,15 @@ class MqttManager private constructor() {
                              ?.trim()?.toFloatOrNull()?.takeIf { it > 0f }
                          ?: CarDataManager.getInstance().fetchCurrent("car.ev_info.battery_charge_percentage")
                              ?.trim()?.toFloatOrNull()?.takeIf { it > 0f }
-            batt12?.let { pubD("batt_12v_pct", it.toInt().toString()) }
+            batt12?.let {
+                pubD("batt_12v_pct", it.toInt().toString())
+                // Alimenta o campo que o LocalApiServer serve na LAN direta. Ele era
+                // declarado e NUNCA atribuído, então a LAN respondia 0 — e como o app
+                // iOS tem batt_12v_pct em lanPassthrough, o 0 sobrescrevia o valor
+                // bom do bridge e o % PISCAVA (some no update da LAN, volta no do
+                // bridge).
+                latestBatt12vPct = it
+            }
             pub("debug/batt12v", "ev_charge_pct=" +
                 "${CarDataManager.getInstance().fetchCurrent("car.ev_info.battery_charge_percentage")?.trim()}" +
                 " basic_power_level=${CarDataManager.getInstance().fetchCurrent("car.basic.battery_power_level")?.trim()}" +
