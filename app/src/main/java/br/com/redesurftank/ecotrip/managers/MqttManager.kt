@@ -2280,20 +2280,28 @@ class MqttManager private constructor() {
             if (latestTpmsWarning      >= 0) pubD("tpms_warning",      latestTpmsWarning.toString())
             if (latestTirePressWarning >= 0) pubD("tirepress_warning", latestTirePressWarning.toString())
             if (latestTireTempWarning  >= 0) pubD("tiretemp_warning",  latestTireTempWarning.toString())
-            // lock_state: car.basic.door_lock_status cru = 1 trancado; 0 e 3 destrancado
-            // (o 3 observado em 30/07 com o carro destrancado de fato — o barramento
-            // usa mais valores que os dois vistos em 2026-06-05). O bridge usa
-            // 'on'=destrancado / 'off'=trancado (encoding INVERTIDO vs o raw do CAN),
-            // então publicamos invertido: CAN 1→'0' (trancado), resto→'1'.
+            // lock_state: car.basic.door_lock_status. Semântica medida no barramento
+            // em 31/07, com o carro TRAVADO reportando 3:
             //
-            // O filtro antigo aceitava SÓ 0 e 1, então com raw=3 nada era publicado e
-            // o tópico congelava no último valor: destravar o carro deixava o app
-            // mostrando "travado" pra sempre. Agora qualquer valor != 1 conta como
-            // destrancado — errar pro lado de "está aberto" avisa à toa, errar pro
-            // outro esconde carro destrancado, que é o pior dos dois.
-            // Guarda snLockMs>0 pra não publicar antes do voting filter confirmar.
-            if (snLockMs > 0 && snLockStat >= 0) {
-                pubD("lock_state", if (snLockStat == 1) "0" else "1")
+            //   0 = destrancado   (raro no log: destrava e entra em segundos)
+            //   1 = trancado      (confirmado em 2026-06-05)
+            //   3 = trancado      (outro modo de travamento; 794 ocorrências)
+            //
+            // Em 30/07 eu li 1→3 no minuto em que a trava foi aberta e concluí que 3
+            // era destrancado. Errado: o carro travado fica em 3, e a versão 6.156-6.160
+            // reportou "destravado" o tempo todo — a LA de alerta não sumia nem
+            // travando o carro.
+            //
+            // O bridge usa 'on'=destrancado / 'off'=trancado, INVERTIDO vs o raw.
+            // Valor desconhecido não vira palpite: mantém o último e loga, porque
+            // adivinhar aqui gera alerta falso permanente (ou pior, esconde carro
+            // aberto).
+            if (snLockMs > 0) {
+                when (snLockStat) {
+                    0          -> pubD("lock_state", "1")   // destrancado
+                    1, 3       -> pubD("lock_state", "0")   // trancado
+                    else       -> AppLogger.w(TAG, "door_lock_status desconhecido=$snLockStat — mantendo estado")
+                }
             }
 
             // Debug — valores crus do barramento + resultado do parsing (sem afetar lógica)
