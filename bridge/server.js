@@ -17616,6 +17616,33 @@ function _evalSecurityAlert() {
   // transição de porta que pode vir "retida" após restart do bridge.
   const seated  = _anyoneSeated();
   const exposed = seated === false ? true : (seated === true ? false : _exitedSincePark);
+  // O estado da trava só vale enquanto o APK está publicando. O motorista trava o
+  // carro DEPOIS de sair, e o app dorme antes disso — então o último valor lido
+  // fica "destrancado" pra sempre e o alerta nunca sumia, mesmo com o carro
+  // trancado (relatado em 30-31/07). Sem leitura ao vivo o dado é velho, não
+  // errado: melhor não acusar do que acusar pelo que não se sabe.
+  //
+  // A GWM cobre esse caso quando está saudável — a telemetria dela é
+  // awake-independent. Com ela congelada (4G sem pacote) não há fonte confiável,
+  // e aí ficar calado é o certo.
+  const _lockAoVivo = !!state.last_apk_live_ms && (Date.now() - state.last_apk_live_ms) < 5 * 60_000;
+  const _lockDaGwm  = _fieldSource['lock_state'] === 'gwm' && _gwmAlive();
+  const _travaConfiavel = _lockAoVivo || _lockDaGwm;
+  const _soTrava = snap.issues.length === 1 && /destranc|trava/i.test(String(snap.issues[0]));
+  if (_soTrava && !_travaConfiavel) {
+    if (_securityActive) {
+      console.log('[security] só a trava acusa e o dado não é ao vivo — encerrando alerta');
+      _securityActive = false; _securitySig = '';
+      state._security_la_active = false; state._security_la_sig = '';
+      state._security_la_since = 0; scheduleStateSave();
+      const endCs = _securityContentState(snap, false);
+      endCs.summary = 'Encerrado · sem leitura ao vivo da trava';
+      apnsLive.pushUpdate(SECURITY_LA_TYPE, {}, endCs,
+        { isFinal: true, dismissalDate: Date.now() + 8_000 })
+        .catch(e => console.warn('[apns] security end falhou:', e.message));
+    }
+    return;
+  }
   if (parked && exposed && snap.issues.length > 0 && notifPrefs.la_security !== false) {
     const cs  = _securityContentState(snap, true);
     // Assinatura só dos campos que importam (ignora updatedAtMs) — evita reenviar
@@ -20716,7 +20743,17 @@ function applyMqttMessage(key, value, isRetained = false) {
       const _rawLk = parseInt(value, 10);
       if (Number.isFinite(_rawLk)) {
         _lockRawMs = Date.now();
-        const norm = _rawLk === 0 ? 'on' : (_rawLk === 1 || _rawLk === 3) ? 'off' : null;
+        // 1 = trancado · 0 e 3 = destrancado.
+        //
+        // Errei isso duas vezes hoje. Primeiro achei que 3 fosse destrancado (certo),
+        // depois "corrigi" pra trancado porque o carro travado reportava 3 — mas
+        // aquele 3 era RETAINED, lido com o carro offline, não leitura ao vivo.
+        //
+        // A causa real do alerta que não sumia: o motorista trava o carro DEPOIS que
+        // o app dormiu. O APK nunca vê o travamento, então o último valor publicado
+        // fica 3 (destrancado) pra sempre. O estado não está errado — está VELHO, e
+        // é o alerta que precisa saber disso (ver _lockConfiavel abaixo).
+        const norm = _rawLk === 1 ? 'off' : (_rawLk === 0 || _rawLk === 3) ? 'on' : null;
         if (norm === null) {
           console.warn(`[lock:raw] valor desconhecido ${_rawLk} — mantendo '${state.lock_state}'`);
         } else if (state.lock_state !== norm) {
