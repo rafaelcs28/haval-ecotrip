@@ -592,12 +592,6 @@ fun ConsumptionScreen() {
             }
         }
         IconButton(onClick = { showSocArrival = true }) { Icon(Icons.Default.Place, "SOC na chegada", tint = NeonLime) }
-        // Destino em BOTÃO, não em ícone de 24dp: o acesso antigo era impossível
-        // de acertar saindo de casa ou parado no trânsito.
-        Button(onClick = { showDestino = true }, modifier = Modifier.height(44.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = AuroraTeal)) {
-            Text("🧭 DESTINO", fontWeight = FontWeight.Bold, color = VoidBlack, fontSize = 15.sp)
-        }
         IconButton(onClick = { showLog = true }) { Icon(Icons.Default.BugReport, "Log", tint = TextSecondary) }
         IconButton(onClick = { showChargeHistory = true }) { Icon(Icons.Default.BatteryChargingFull, "Recargas", tint = AuroraTeal) }
         IconButton(onClick = { showAutoTrips = true }) { Icon(Icons.Default.DirectionsCar, "Viagens Auto", tint = AccentBlue) }
@@ -608,6 +602,16 @@ fun ConsumptionScreen() {
     // a dock esquerda (128px) e a barra de status (60px) do sistema ficam fora.
     // O layout Controles (WebView) preenche essa área (HTML sem reservar faixas).
     Box(modifier = Modifier.fillMaxSize().systemBarsPadding()) {
+        // Botão de destino FLUTUANTE, desenhado por cima do layout ativo.
+        //
+        // A primeira tentativa foi um botão ao lado do ícone de SOC na chegada, mas
+        // aquele trecho vive dentro de `if (liveScore.valid)` — só existia com
+        // score de condução válido, ou seja dirigindo. E a home padrão é uma
+        // WebView, então não há Compose no fluxo dela pra ancorar nada. Flutuando
+        // no Box, aparece em qualquer layout e em qualquer estado.
+        //
+        // Fica no canto de baixo à direita e some quando há overlay aberto, pra
+        // não cobrir botão de outra tela.
         // Tela favorita (sempre desenhada por trás). A Controles é um overlay
         // (WebView fora do Compose) mostrado quando controlesOpen=true.
         when (homeLayout) {
@@ -618,6 +622,18 @@ fun ConsumptionScreen() {
         // WebView fica acima do ComposeView → esconde o home Tesla quando há
         // overlay Compose aberto (Settings/Recargas/Viagens/Log), senão ficaria atrás.
         val anyOverlay = showSettings || showChargeHistory || showAutoTrips || showLog
+        // Alvo grande (64dp) no canto de baixo à direita: é pra acertar de primeira
+        // saindo de casa ou parado no trânsito, não pra caber discretamente.
+        if (!controlesOpen && !anyOverlay && !showDestino && !showSocArrival) {
+            Button(
+                onClick = { showDestino = true },
+                modifier = Modifier.align(Alignment.BottomEnd).padding(20.dp).height(64.dp),
+                shape = RoundedCornerShape(18.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = AuroraTeal),
+            ) {
+                Text("🧭  DESTINO", fontWeight = FontWeight.Bold, color = VoidBlack, fontSize = 19.sp)
+            }
+        }
         if (homeLayout == 0 && !controlesOpen && !anyOverlay) {
             HomeTeslaWebLayout(
                 hd,
