@@ -14518,6 +14518,37 @@ mqttClient.on('message', (topic, payload, packet) => {
 
   // Dispatcher: tópicos da integração GWM Brasil vão pro handler dedicado;
   // outros caem no handler legado do app.
+  // Destino escolhido NA MULTIMÍDIA (tela de chegada do APK, botão Maps/Waze).
+  // O APK publicava isso desde sempre e NINGUÉM ouvia — era pro NavRelay que
+  // nunca existiu, mesma história do car_dest_raw. Ligar aqui é o que permite
+  // resolver destino sem pegar o celular: toca na tela do carro, o painel recebe
+  // e o Waze do celular abre pelo webhook, passivamente.
+  if (topic === MQTT_PREFIX + '/nav_to') {
+    if (isRetained) return;                       // eco do broker, não escolha nova
+    try {
+      const o = JSON.parse(value);
+      const lat = +o.lat, lng = +o.lng;
+      const nome = String(o.name || '').trim() || 'Destino';
+      if (!_validLatLng(lat, lng)) { console.warn('[nav_to] coordenada inválida:', value.slice(0, 120)); return; }
+      console.log(`[nav_to] multimídia escolheu '${nome}' (${lat},${lng}) app=${o.app || '?'}`);
+      recentNavDests.push({ name: nome, lat, lng, ts: Date.now() });
+      if (recentNavDests.length > 30) recentNavDests.shift();
+      // state.route junto, não só o tópico: _maybeComputeArrival recalcula a
+      // partir dela e republica o cmd/nav_dest. Sem atualizar aqui, o destino
+      // novo aparecia por um instante e o recálculo o trocava de volta pelo
+      // anterior — foi o que aconteceu no primeiro teste.
+      state.route = { wps: [{ lat, lng, name: nome, isFinal: true }],
+                      completedIdx: -1, undo: null, ts: Date.now() };
+      mqttClient.publish(`${MQTT_PREFIX}/cmd/nav_dest`,
+        JSON.stringify({ lat, lng, name: nome, ts: Date.now() }), { qos: 1, retain: true });
+      _navDestRetained = true;
+      // Espelha no Waze do celular. O app escolhido na tela ('maps' ou 'waze')
+      // não muda isso: quem decide o app é o intent da macro no celular.
+      _espelhaDestinoNoWaze(lat, lng, nome);
+      _maybeComputeArrival().catch(() => {});
+    } catch (e) { console.warn('[nav_to] payload inválido:', e.message); }
+    return;
+  }
   if (topic === MQTT_PREFIX + '/car_dest_raw') {
     // Nav Relay (celular) compartilhou um destino do Maps/Waze. Resolve a
     // coordenada e devolve pro carro em cmd/nav_dest → Ecotrip abre a Chegada.
@@ -18661,6 +18692,61 @@ async function _handleSharedDest(value) {
 // que o Waze publica ao iniciar navegação — se o destino estiver ali, o
 // compartilhamento vira automático e ninguém precisa tocar em nada. Não resolve
 // nem seta destino de propósito: é instrumentação, não caminho de produção.
+// GET /api/place-search?q=... — busca de lugares pro APK do carro.
+//
+// A chave do Google fica NO SERVIDOR: embutir no APK vazaria (APK é
+// descompilável) e daria pra qualquer um queimar a cota. O carro manda o texto,
+// o bridge devolve os candidatos já com coordenada.
+app.get('/api/place-search', async (req, res) => {
+  const q = String(req.query.q || '').trim();
+  if (q.length < 3) return res.status(400).json({ error: 'q com ao menos 3 caracteres' });
+  const key = process.env.GOOGLE_MAPS_API_KEY;
+  if (!key) return res.status(503).json({ error: 'GOOGLE_MAPS_API_KEY não configurada' });
+  const lat = +state.gps_lat, lng = +state.gps_lng;
+  const loc = (lat && lng) ? `&location=${lat},${lng}&radius=60000` : '';
+  try {
+    const r = await fetch(
+      `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${encodeURIComponent(q)}`
+      + `${loc}&language=pt-BR&region=br&key=${key}`, { signal: AbortSignal.timeout(9000) });
+    const j = await r.json();
+    if (j.status !== 'OK' && j.status !== 'ZERO_RESULTS') {
+      console.warn(`[place-search] Google status=${j.status} ${j.error_message || ''}`);
+      return res.status(502).json({ error: j.status, detail: j.error_message || '' });
+    }
+    const itens = (j.results || []).slice(0, 8).map(x => ({
+      name: x.name,
+      address: x.formatted_address || '',
+      lat: x.geometry?.location?.lat,
+      lng: x.geometry?.location?.lng,
+      // Distância do carro pra a tela poder ordenar e o motorista perceber
+      // resultado absurdo antes de mandar.
+      distKm: (lat && lng && x.geometry?.location)
+        ? +(haversineM(lat, lng, x.geometry.location.lat, x.geometry.location.lng) / 1000).toFixed(1)
+        : null,
+    })).filter(x => _validLatLng(x.lat, x.lng));
+    console.log(`[place-search] '${q}' → ${itens.length} resultado(s)`);
+    res.json({ ok: true, items: itens });
+  } catch (e) {
+    console.warn('[place-search] falhou:', e.message);
+    res.status(502).json({ error: e.message });
+  }
+});
+
+// GET /api/nav-favorites — lugares salvos que servem como DESTINO, pro APK
+// montar a lista de favoritos. Filtra os geofences operacionais (portaria,
+// cancela, rotatória), que existem pra automação e não são lugares pra onde se
+// dirige.
+app.get('/api/nav-favorites', (_req, res) => {
+  const lat = +state.gps_lat, lng = +state.gps_lng;
+  const ruido = /portaria|cancela|rotat|passagem|sa[ií]da estacionamento/i;
+  const itens = (automationPlaces || [])
+    .filter(p => p && (p.name || p.nome) && _validLatLng(p.lat, p.lng))
+    .map(p => ({ name: String(p.name || p.nome), lat: +p.lat, lng: +p.lng }))
+    .filter(p => !ruido.test(p.name))
+    .map(p => ({ ...p, distKm: (lat && lng) ? +(haversineM(lat, lng, p.lat, p.lng) / 1000).toFixed(1) : null }));
+  res.json({ ok: true, items: itens });
+});
+
 app.post('/api/nav-probe', (req, res) => {
   const b = req.body || {};
   console.log(`[nav-probe] app=${JSON.stringify(b.app || '')} titulo=${JSON.stringify(b.titulo || '')}`);
