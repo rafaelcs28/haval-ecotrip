@@ -1,0 +1,41 @@
+{
+  "macroExportVersion": 1,
+  "macro": {
+    "m_name": "Waze: destino do carro",
+    "m_description": "Recebe lat/lng do bridge Haval por webhook e abre o Waze navegando pro destino. Evita digitar o endereco duas vezes (carro e Waze).",
+    "m_enabled": true,
+    "m_completed": true,
+    "m_GUID": 0,
+    "aiGenerated": 1,
+    "m_category": "Haval",
+    "localVariables": [
+      { "m_name": "lat",  "m_type": 2, "m_stringValue": "", "isLocalVar": true },
+      { "m_name": "lng",  "m_type": 2, "m_stringValue": "", "isLocalVar": true },
+      { "m_name": "name", "m_type": 2, "m_stringValue": "", "isLocalVar": true }
+    ],
+    "m_triggerList": [
+      {
+        "m_classType": "WebHookTrigger",
+        "m_SIGUID": 0,
+        "identifier": "waze_dest",
+        "variableWhiteListEnabled": true,
+        "variableWhiteList": ["lat", "lng", "name"],
+        "m_comment": "URL fica https://trigger.macrodroid.com/<device_id>/waze_dest — copie e mande pro Rafael por o bridge chamar. Os query params lat/lng/name atualizam as variaveis locais de mesmo nome."
+      }
+    ],
+    "m_actionList": [
+      {
+        "m_classType": "OpenWebPageAction",
+        "m_SIGUID": 0,
+        "m_urlToOpen": "waze://?ll={lv=lat},{lv=lng}&navigate=yes",
+        "m_httpGet": false,
+        "m_disableUrlEncode": true,
+        "m_comment": "disableUrlEncode ligado de proposito: encodar quebraria o :// e a virgula do deep link."
+      }
+    ],
+    "m_constraintList": []
+  },
+  "globalVariables": [],
+  "userIcons": null,
+  "aiFeedback": "Macro 1 de 2. Os query params do webhook atualizam as variaveis locais lat/lng/name pelo nome (variableWhiteList). Se o Waze abrir sem navegar, verifique se as tres variaveis locais existem apos um disparo de teste."
+}
