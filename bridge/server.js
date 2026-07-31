@@ -14561,18 +14561,27 @@ mqttClient.on('message', (topic, payload, packet) => {
   // sem esperar round-trip.
   if (topic === MQTT_PREFIX + '/nav_favorites_req') {
     if (isRetained) return;
-    const lat = +state.gps_lat, lng = +state.gps_lng;
-    const ruido = /portaria|cancela|rotat|passagem|sa[ií]da estacionamento/i;
-    const items = (automationPlaces || [])
-      .filter(p => p && (p.name || p.nome) && _validLatLng(p.lat, p.lng))
-      .map(p => ({ name: String(p.name || p.nome), lat: +p.lat, lng: +p.lng }))
-      .filter(p => !ruido.test(p.name))
-      .map(p => ({ ...p, distKm: (lat && lng) ? +(haversineM(lat, lng, p.lat, p.lng) / 1000).toFixed(1) : null }));
+    _publicaNavFavs();
+    console.log(`[nav_favorites] carro pediu → ${_navFavsParaUI().length} item(ns)`);
+    return;
+  }
+
+  // Favoritar direto da multimídia: o carro manda nome + coordenada e o favorito
+  // passa a valer nos dois aparelhos, porque a lista mora no bridge.
+  if (topic === MQTT_PREFIX + '/nav_fav_add') {
+    if (isRetained) return;
     try {
-      mqttClient.publish(`${MQTT_PREFIX}/nav_favorites/result`,
-        JSON.stringify({ ok: true, items }), { qos: 1, retain: true });
-    } catch (_) {}
-    console.log(`[nav_favorites] carro pediu → ${items.length} favorito(s)`);
+      const o = JSON.parse(value);
+      const name = String(o.name || '').trim().slice(0, 60);
+      const lat = +o.lat, lng = +o.lng;
+      if (!name || !_validLatLng(lat, lng)) { console.warn('[nav-fav] payload inválido:', value.slice(0, 120)); return; }
+      const i = navFavorites.findIndex(f => f.name.toLowerCase() === name.toLowerCase());
+      const item = { id: i >= 0 ? navFavorites[i].id : `fav_${Date.now().toString(36)}`,
+                     name, lat, lng, ts: Date.now() };
+      if (i >= 0) navFavorites[i] = item; else navFavorites.push(item);
+      _salvaNavFavs(); _publicaNavFavs();
+      console.log(`[nav-fav] carro ${i >= 0 ? 'atualizou' : 'salvou'}: ${name}`);
+    } catch (e) { console.warn('[nav-fav] payload inválido:', e.message); }
     return;
   }
 
@@ -18750,6 +18759,64 @@ async function _handleSharedDest(value) {
 // que o Waze publica ao iniciar navegação — se o destino estiver ali, o
 // compartilhamento vira automático e ninguém precisa tocar em nada. Não resolve
 // nem seta destino de propósito: é instrumentação, não caminho de produção.
+// ── Favoritos de NAVEGAÇÃO (fonte única: carro + iPhone) ─────────────────────
+// Separado de automationPlaces de propósito: aquilo é geofence de automação
+// (portaria, cancela, rotatória) e não lugar pra onde se dirige. E separado do
+// PlacesStore do iPhone, que gravava só em UserDefaults do aparelho — por isso
+// favorito salvo no carro não aparecia no celular e vice-versa.
+const NAV_FAVS_FILE = path.join(DATA_DIR, 'nav_favorites.json');
+let navFavorites = [];
+try { navFavorites = JSON.parse(fs.readFileSync(NAV_FAVS_FILE, 'utf8')) || []; } catch (_) {}
+function _salvaNavFavs() {
+  try { fs.writeFileSync(NAV_FAVS_FILE, JSON.stringify(navFavorites, null, 2)); }
+  catch (e) { console.warn('[nav-fav] falha ao salvar:', e.message); }
+}
+/// Lista pronta pra UI: favoritos próprios + geofences que servem de destino,
+/// com distância do carro. `origem` diz de onde veio, pra a tela só permitir
+/// apagar o que é favorito de verdade.
+function _navFavsParaUI() {
+  const lat = +state.gps_lat, lng = +state.gps_lng;
+  const dist = (a, b) => (lat && lng) ? +(haversineM(lat, lng, a, b) / 1000).toFixed(1) : null;
+  const ruido = /portaria|cancela|rotat|passagem|sa[ií]da estacionamento/i;
+  const proprios = navFavorites.map(f => ({ ...f, origem: 'fav', distKm: dist(f.lat, f.lng) }));
+  const nomes = new Set(proprios.map(f => f.name.toLowerCase()));
+  const geo = (automationPlaces || [])
+    .filter(p => p && (p.name || p.nome) && _validLatLng(p.lat, p.lng))
+    .map(p => ({ name: String(p.name || p.nome), lat: +p.lat, lng: +p.lng }))
+    .filter(p => !ruido.test(p.name) && !nomes.has(p.name.toLowerCase()))
+    .map(p => ({ ...p, origem: 'lugar', distKm: dist(p.lat, p.lng) }));
+  return [...proprios, ...geo].sort((a, b) => (a.distKm ?? 9e9) - (b.distKm ?? 9e9));
+}
+function _publicaNavFavs() {
+  try {
+    mqttClient.publish(`${MQTT_PREFIX}/nav_favorites/result`,
+      JSON.stringify({ ok: true, items: _navFavsParaUI() }), { qos: 1, retain: true });
+  } catch (_) {}
+}
+
+app.post('/api/nav-favorites', (req, res) => {
+  const b = req.body || {};
+  const name = String(b.name || '').trim().slice(0, 60);
+  const lat = +b.lat, lng = +b.lng;
+  if (!name) return res.status(400).json({ error: 'name obrigatório' });
+  if (!_validLatLng(lat, lng)) return res.status(400).json({ error: 'lat/lng inválidos' });
+  const i = navFavorites.findIndex(f => f.name.toLowerCase() === name.toLowerCase());
+  const item = { id: i >= 0 ? navFavorites[i].id : `fav_${Date.now().toString(36)}`,
+                 name, lat, lng, ts: Date.now() };
+  if (i >= 0) navFavorites[i] = item; else navFavorites.push(item);
+  _salvaNavFavs(); _publicaNavFavs();
+  console.log(`[nav-fav] ${i >= 0 ? 'atualizado' : 'salvo'}: ${name} (${lat},${lng})`);
+  res.json({ ok: true, item });
+});
+
+app.delete('/api/nav-favorites/:id', (req, res) => {
+  const antes = navFavorites.length;
+  navFavorites = navFavorites.filter(f => f.id !== req.params.id);
+  if (navFavorites.length === antes) return res.status(404).json({ error: 'não encontrado' });
+  _salvaNavFavs(); _publicaNavFavs();
+  res.json({ ok: true });
+});
+
 // GET /api/place-search?q=... — busca de lugares pro APK do carro.
 //
 // A chave do Google fica NO SERVIDOR: embutir no APK vazaria (APK é
@@ -18794,16 +18861,7 @@ app.get('/api/place-search', async (req, res) => {
 // montar a lista de favoritos. Filtra os geofences operacionais (portaria,
 // cancela, rotatória), que existem pra automação e não são lugares pra onde se
 // dirige.
-app.get('/api/nav-favorites', (_req, res) => {
-  const lat = +state.gps_lat, lng = +state.gps_lng;
-  const ruido = /portaria|cancela|rotat|passagem|sa[ií]da estacionamento/i;
-  const itens = (automationPlaces || [])
-    .filter(p => p && (p.name || p.nome) && _validLatLng(p.lat, p.lng))
-    .map(p => ({ name: String(p.name || p.nome), lat: +p.lat, lng: +p.lng }))
-    .filter(p => !ruido.test(p.name))
-    .map(p => ({ ...p, distKm: (lat && lng) ? +(haversineM(lat, lng, p.lat, p.lng) / 1000).toFixed(1) : null }));
-  res.json({ ok: true, items: itens });
-});
+app.get('/api/nav-favorites', (_req, res) => res.json({ ok: true, items: _navFavsParaUI() }));
 
 app.post('/api/nav-probe', (req, res) => {
   const b = req.body || {};
