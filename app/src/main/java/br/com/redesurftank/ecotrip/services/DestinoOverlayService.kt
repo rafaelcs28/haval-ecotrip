@@ -95,10 +95,10 @@ class DestinoOverlayService : Service() {
             gravity = Gravity.CENTER
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
-                // ~85%: translúcido o bastante pra não competir com o mapa, opaco o
-                // bastante pra ser achado. A tentativa anterior somava dois efeitos
-                // (cor a 66% × alpha 0.88 = 58%) e o botão sumia sobre fundo claro.
-                setColor(Color.parseColor("#DA00E5CC"))
+                // ~70%. Antes eu somei dois efeitos (cor 66% × alpha 0.88 = 58%) e o
+                // botão sumia sobre fundo claro; 85% ficou forte demais. A borda
+                // escura é que garante o contorno visível em qualquer fundo.
+                setColor(Color.parseColor("#B300E5CC"))
                 setStroke(3, Color.parseColor("#99000000"))
             }
             // A medição no carro deu density=1.0, então dp==px: 64 virava 64px numa

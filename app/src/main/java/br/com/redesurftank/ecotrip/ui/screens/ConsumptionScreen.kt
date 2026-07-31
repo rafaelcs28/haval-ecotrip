@@ -18,6 +18,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.material.icons.filled.BatteryChargingFull
 import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.LocalGasStation
+import androidx.compose.material.icons.filled.Navigation
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Settings
@@ -604,7 +605,9 @@ fun ConsumptionScreen() {
             }
         }
         IconButton(onClick = { showSocArrival = true }) { Icon(Icons.Default.Place, "SOC na chegada", tint = NeonLime) }
-        IconButton(onClick = { showLog = true }) { Icon(Icons.Default.BugReport, "Log", tint = TextSecondary) }
+        // Destino ocupa o lugar do antigo botão de Log, que não era usado. Na fileira
+        // e não flutuando: por cima ele cobria outro ícone.
+        IconButton(onClick = { showDestino = true }) { Icon(Icons.Default.Navigation, "Destino", tint = AuroraTeal) }
         IconButton(onClick = { showChargeHistory = true }) { Icon(Icons.Default.BatteryChargingFull, "Recargas", tint = AuroraTeal) }
         IconButton(onClick = { showAutoTrips = true }) { Icon(Icons.Default.DirectionsCar, "Viagens Auto", tint = AccentBlue) }
         IconButton(onClick = { showSettings = true }) { Icon(Icons.Default.Settings, "Configurações", tint = TextSecondary) }
@@ -775,19 +778,6 @@ fun ConsumptionScreen() {
         // Alvo grande (64dp) no canto de baixo à direita: é pra acertar de primeira
         // saindo de casa ou parado no trânsito, não pra caber discretamente.
         if (!controlesOpen && !anyOverlay && !showDestino && !showSocArrival) {
-            // Topo direito e pequeno: o alvo grande agora é o botão FLUTUANTE, que
-            // funciona por cima de qualquer app. Aqui dentro do app basta um atalho
-            // discreto, na mesma faixa dos outros ícones.
-            Button(
-                onClick = { showDestino = true },
-                modifier = Modifier.align(Alignment.TopEnd).padding(top = 6.dp, end = 12.dp).height(30.dp),
-                shape = RoundedCornerShape(9.dp),
-                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
-                // 0.22 ficava invisível — sobre a WebView escura o contraste desaparecia.
-                colors = ButtonDefaults.buttonColors(containerColor = AuroraTeal),
-            ) {
-                Text("🧭 Destino", fontWeight = FontWeight.Bold, color = VoidBlack, fontSize = 12.sp)
-            }
         }
         // DESENHADO POR ÚLTIMO de propósito: no Box do Compose a ordem define
         // profundidade, e o HomeTeslaWebLayout (WebView) cobria o aviso e o botão

@@ -14414,7 +14414,6 @@ function handleDiagMessage(key, raw) {
 }
 
 mqttClient.on('message', (topic, payload, packet) => {
-  if (topic.includes('uplink')) console.log(`[dbg-uplink] chegou: ${topic} len=${payload.length} retained=${!!(packet && packet.retain)}`);
   // Áudio ao vivo (carro→fone): frame binário PCM. Intercepta ANTES do toString
   // (é binário, não texto) e reenvia direto pros clientes WS de áudio. Caminho
   // quente — sem log, sem parse.
@@ -18844,7 +18843,7 @@ async function _handleSharedDest(value) {
 const NAV_RECENTES_FILE = path.join(DATA_DIR, 'nav_recentes.json');
 let navRecentes = [];
 try { navRecentes = JSON.parse(fs.readFileSync(NAV_RECENTES_FILE, 'utf8')) || []; } catch (_) {}
-const NAV_RECENTES_MAX = 20;
+const NAV_RECENTES_MAX = 50;
 function _salvaRecentes() {
   try { fs.writeFileSync(NAV_RECENTES_FILE, JSON.stringify(navRecentes, null, 2)); }
   catch (e) { console.warn('[nav-rec] falha ao salvar:', e.message); }
@@ -18882,6 +18881,7 @@ function _navListasParaUI() {
     favoritos: base.filter(f => f.origem === 'fav'),
     // Recente que já virou favorito sai da aba: estaria nas duas.
     recentes: navRecentes
+      .slice(0, 50)
       .filter(r => !nomesFixos.has(String(r.name).toLowerCase()))
       .map(r => ({ ...r, origem: 'recente', distKm: dist(r.lat, r.lng) })),
   };
@@ -18890,13 +18890,16 @@ function _navListasParaUI() {
 function _navFavsParaUI() {
   const lat = +state.gps_lat, lng = +state.gps_lng;
   const dist = (a, b) => (lat && lng) ? +(haversineM(lat, lng, a, b) / 1000).toFixed(1) : null;
-  const ruido = /portaria|cancela|rotat|passagem|sa[ií]da estacionamento/i;
+  // SEM filtro de nome. Eu removia portaria/cancela/rotatória por achar que
+  // geofence de automação não é destino — e isso escondia 7 dos 10 lugares do
+  // dono, que reclamou de "só aparecem três". Quem decide o que serve de destino
+  // é ele; a lista rola e a distância ajuda a escolher.
   const proprios = navFavorites.map(f => ({ ...f, origem: 'fav', distKm: dist(f.lat, f.lng) }));
   const nomes = new Set(proprios.map(f => f.name.toLowerCase()));
   const geo = (automationPlaces || [])
     .filter(p => p && (p.name || p.nome) && _validLatLng(p.lat, p.lng))
     .map(p => ({ name: String(p.name || p.nome), lat: +p.lat, lng: +p.lng }))
-    .filter(p => !ruido.test(p.name) && !nomes.has(p.name.toLowerCase()))
+    .filter(p => !nomes.has(p.name.toLowerCase()))
     .map(p => ({ ...p, origem: 'lugar', distKm: dist(p.lat, p.lng) }));
   return [...proprios, ...geo].sort((a, b) => (a.distKm ?? 9e9) - (b.distKm ?? 9e9));
 }
