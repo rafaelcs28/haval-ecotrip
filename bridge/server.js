@@ -18339,6 +18339,28 @@ function _shortPlaceName(primary, full) {
 /// falha. Destino recorrente deve estar nos lugares salvos, que têm prioridade
 /// e não passam por aqui; coordenada explícita na URL também não passa.
 const GEOCODE_MAX_KM = +(process.env.GEOCODE_MAX_KM || 300);
+
+/// O resultado tem relação com o que foi pedido?
+///
+/// O teto de distância não pega erro perto: buscar "Vertte - Clínica de
+/// Quiropraxia em Goiânia" devolveu "Rua Goiânia" a 27 km — o geocoder pegou só
+/// a palavra da CIDADE e ignorou o nome do lugar. "Moove Home Brasal" virou
+/// "Home". Nos dois casos o nome próprio desapareceu da resposta.
+///
+/// Heurística: o primeiro token PRÓPRIO da busca (4+ letras, fora dos genéricos)
+/// tem que aparecer no nome devolvido. Não é perfeito — quando o próprio nome do
+/// lugar é genérico ("Praça Cívica") ainda passa — mas mata o caso comum de o
+/// geocoder responder só a cidade ou a via.
+const _GEO_GENERICOS = new Set(['rua','avenida','praca','praça','alameda','travessa','rodovia',
+  'estrada','clinica','clínica','shopping','edificio','edifício','condominio','condomínio',
+  'setor','bairro','quadra','lote','centro','goiania','goiânia','brasil','sitio','sítio','espaco','espaço']);
+function _geocodeSemRelacao(q, nomeResultado) {
+  const norm = (x) => String(x || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const tokens = norm(q).split(/[^a-z0-9]+/).filter(t => t.length >= 4 && !_GEO_GENERICOS.has(t));
+  if (!tokens.length) return false;                  // busca só de genéricos: não julga
+  const alvo = norm(nomeResultado);
+  return !tokens.some(t => alvo.includes(t));
+}
 function _geocodeLongeDemais(lat, lng) {
   const cLat = +state.gps_lat, cLng = +state.gps_lng;
   if (!cLat || !cLng) return null;                 // sem referência, não julga
@@ -18410,9 +18432,14 @@ async function _geocode(q) {
       const j = await r.json();
       const f = j && j.features && j.features[0];
       if (f && Array.isArray(f.center)) {
-        const _far = _geocodeLongeDemais(f.center[1], f.center[0]);
-        if (_far) {
-          console.warn(`[geocode] Mapbox devolveu '${_shortPlaceName(f.text, f.place_name)}' a `
+        const _nomeMb = _shortPlaceName(f.text, f.place_name);
+        const _semRel = _geocodeSemRelacao(q, _nomeMb);
+        if (_semRel) {
+          console.warn(`[geocode] Mapbox devolveu '${_nomeMb}' pra '${q}' — nome próprio não aparece, recusado`);
+        }
+        const _far = _semRel ? null : _geocodeLongeDemais(f.center[1], f.center[0]);
+        if (_semRel || _far) {
+          if (_far) console.warn(`[geocode] Mapbox devolveu '${_nomeMb}' a `
                      + `${Math.round(_far)}km de '${q}' — recusado (teto ${GEOCODE_MAX_KM}km)`);
         } else {
           return { lat: f.center[1], lng: f.center[0], name: _shortPlaceName(f.text, f.place_name) };
@@ -18429,9 +18456,14 @@ async function _geocode(q) {
   const j = await r.json();
   if (!Array.isArray(j) || !j.length) return null;
   const _nlat = +j[0].lat, _nlng = +j[0].lon;
+  const _nomeNom = _shortPlaceName(j[0].name, j[0].display_name);
+  if (_geocodeSemRelacao(q, _nomeNom)) {
+    console.warn(`[geocode] Nominatim devolveu '${_nomeNom}' pra '${q}' — nome próprio não aparece, recusado`);
+    return null;
+  }
   const _nfar = _geocodeLongeDemais(_nlat, _nlng);
   if (_nfar) {
-    console.warn(`[geocode] Nominatim devolveu '${_shortPlaceName(j[0].name, j[0].display_name)}' a `
+    console.warn(`[geocode] Nominatim devolveu '${_nomeNom}' a `
                + `${Math.round(_nfar)}km de '${q}' — recusado (teto ${GEOCODE_MAX_KM}km)`);
     return null;
   }
