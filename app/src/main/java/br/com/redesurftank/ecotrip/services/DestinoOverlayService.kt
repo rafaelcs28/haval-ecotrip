@@ -196,9 +196,15 @@ class DestinoOverlayService : Service() {
     /// aceitar foco — o que rouba o teclado do app de baixo. Busca abre o app.
     private var painel: View? = null
 
+    /// Aba visível, lembrada entre aberturas: quem usa "Recentes" tende a usar de
+    /// novo, e voltar sempre pra primeira aba obrigaria dois toques cada vez.
+    private var abaAtiva = 0
+
     private fun mostrarPainel() {
         if (painel != null) { fecharPainel(); return }
-        val favs = lerFavoritos()
+        val abas = lerAbas()
+        if (abaAtiva >= abas.size) abaAtiva = 0
+        val favs = abas.getOrNull(abaAtiva)?.second ?: emptyList()
         val dp: (Int) -> Int = { v -> (v * resources.displayMetrics.density).toInt() }
 
         val col = android.widget.LinearLayout(this).apply {
@@ -217,9 +223,34 @@ class DestinoOverlayService : Service() {
             setPadding(0, 0, 0, dp(10))
         })
 
+        if (abas.size > 1) {
+            val linha = android.widget.LinearLayout(this).apply {
+                orientation = android.widget.LinearLayout.HORIZONTAL
+                setPadding(0, 0, 0, dp(10))
+            }
+            abas.forEachIndexed { i, (titulo, itens) ->
+                linha.addView(TextView(this).apply {
+                    // Contagem no rótulo: evita trocar de aba pra descobrir que está vazia.
+                    text = "$titulo (${itens.size})"
+                    textSize = 14f
+                    setTypeface(null, android.graphics.Typeface.BOLD)
+                    setTextColor(Color.parseColor(if (i == abaAtiva) "#06080C" else "#5B7394"))
+                    setPadding(dp(10), dp(8), dp(10), dp(8))
+                    background = GradientDrawable().apply {
+                        cornerRadius = dp(10).toFloat()
+                        setColor(Color.parseColor(if (i == abaAtiva) "#00E5CC" else "#141A24"))
+                    }
+                    setOnClickListener { abaAtiva = i; fecharPainel(); mostrarPainel() }
+                }, android.widget.LinearLayout.LayoutParams(
+                    android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
+                    android.widget.LinearLayout.LayoutParams.WRAP_CONTENT).apply { rightMargin = dp(6) })
+            }
+            col.addView(linha)
+        }
+
         if (favs.isEmpty()) {
             col.addView(TextView(this).apply {
-                text = "Sem favoritos ainda."
+                text = "Nada nesta aba ainda."
                 setTextColor(Color.parseColor("#5B7394")); textSize = 15f
             })
         }
@@ -275,12 +306,23 @@ class DestinoOverlayService : Service() {
         painel = null
     }
 
-    private fun lerFavoritos(): List<org.json.JSONObject> {
+    /// As três abas: lugares salvos, favoritados numa busca, e histórico. Cai pra
+    /// `items` (lista única) se o bridge for antigo e não mandar `abas`.
+    private fun lerAbas(): List<Pair<String, List<org.json.JSONObject>>> {
         val raw = MqttManager.getInstance().navFavoritosJson ?: return emptyList()
         return runCatching {
-            val arr = org.json.JSONObject(raw).optJSONArray("items") ?: return emptyList()
-            (0 until arr.length()).mapNotNull { arr.optJSONObject(it) }
-                .filter { it.optString("name").isNotBlank() }
+            val o = org.json.JSONObject(raw)
+            fun lista(arr: org.json.JSONArray?): List<org.json.JSONObject> =
+                if (arr == null) emptyList()
+                else (0 until arr.length()).mapNotNull { arr.optJSONObject(it) }
+                    .filter { it.optString("name").isNotBlank() }
+            val abas = o.optJSONObject("abas")
+            if (abas == null) listOf("Locais" to lista(o.optJSONArray("items")))
+            else listOf(
+                "Meus locais" to lista(abas.optJSONArray("lugares")),
+                "Favoritos"   to lista(abas.optJSONArray("favoritos")),
+                "Recentes"    to lista(abas.optJSONArray("recentes")),
+            )
         }.getOrDefault(emptyList())
     }
 

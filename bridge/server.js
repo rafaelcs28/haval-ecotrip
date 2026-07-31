@@ -5106,6 +5106,7 @@ app.post('/api/departure/accept', async (req, res) => {
     mqttClient.publish(`${MQTT_PREFIX}/cmd/nav_dest`, payload, { qos: 1, retain: true });
     _espelhaDestinoNoWaze(to.lat, to.lng, destName);
     recentNavDests.push({ name: destName, lat: to.lat, lng: to.lng, ts: Date.now() });
+    _registraRecente(destName, to.lat, to.lng);
     if (recentNavDests.length > 30) recentNavDests.shift();
   } catch (e) { console.warn('[departure/accept] nav_dest falhou:', e.message); }
   // 2. share pra Grasi
@@ -14640,6 +14641,7 @@ mqttClient.on('message', (topic, payload, packet) => {
       console.log(`[nav_to] multimídia escolheu '${nome}' (${lat},${lng}) app=${o.app || '?'}`);
       recentNavDests.push({ name: nome, lat, lng, ts: Date.now() });
       if (recentNavDests.length > 30) recentNavDests.shift();
+      _registraRecente(nome, lat, lng);   // alimenta a aba "Recentes"
       // state.route junto, não só o tópico: _maybeComputeArrival recalcula a
       // partir dela e republica o cmd/nav_dest. Sem atualizar aqui, o destino
       // novo aparecia por um instante e o recálculo o trocava de volta pelo
@@ -18805,6 +18807,7 @@ async function _handleSharedDest(value) {
     // Guarda o destino compartilhado pra nomear a viagem que terminar perto dele
     // (ex.: "Shopping Flamboyant" em vez de "Bairro, Cidade") — ver _navDestNameFor.
     recentNavDests.push({ name: d.name, lat: d.lat, lng: d.lng, ts: Date.now() });
+    _registraRecente(d.name, d.lat, d.lng);
     if (recentNavDests.length > 30) recentNavDests.shift();
     // Destino único compartilhado → rota de uma perna (PERSISTIDA, sobrevive ao desligar).
     state.route = { wps: [{ lat: d.lat, lng: d.lng, name: d.name, isFinal: true }], completedIdx: -1, undo: null, ts: Date.now() };
@@ -18835,6 +18838,28 @@ async function _handleSharedDest(value) {
 // (portaria, cancela, rotatória) e não lugar pra onde se dirige. E separado do
 // PlacesStore do iPhone, que gravava só em UserDefaults do aparelho — por isso
 // favorito salvo no carro não aparecia no celular e vice-versa.
+/// Histórico de buscas de destino — a aba "Recentes" do carro e do app.
+/// Guardado no bridge (não no carro) pelo mesmo motivo dos favoritos: o que você
+/// buscou na multimídia deve aparecer no iPhone e vice-versa.
+const NAV_RECENTES_FILE = path.join(DATA_DIR, 'nav_recentes.json');
+let navRecentes = [];
+try { navRecentes = JSON.parse(fs.readFileSync(NAV_RECENTES_FILE, 'utf8')) || []; } catch (_) {}
+const NAV_RECENTES_MAX = 20;
+function _salvaRecentes() {
+  try { fs.writeFileSync(NAV_RECENTES_FILE, JSON.stringify(navRecentes, null, 2)); }
+  catch (e) { console.warn('[nav-rec] falha ao salvar:', e.message); }
+}
+/// Registra um destino ESCOLHIDO (não toda busca): a lista serve pra voltar a um
+/// lugar, e resultado que você viu e descartou só ocuparia espaço.
+function _registraRecente(name, lat, lng) {
+  if (!name || !_validLatLng(lat, lng)) return;
+  const chave = String(name).toLowerCase();
+  navRecentes = navRecentes.filter(r => String(r.name).toLowerCase() !== chave);
+  navRecentes.unshift({ name: String(name).slice(0, 60), lat: +lat, lng: +lng, ts: Date.now() });
+  if (navRecentes.length > NAV_RECENTES_MAX) navRecentes.length = NAV_RECENTES_MAX;
+  _salvaRecentes();
+}
+
 const NAV_FAVS_FILE = path.join(DATA_DIR, 'nav_favorites.json');
 let navFavorites = [];
 try { navFavorites = JSON.parse(fs.readFileSync(NAV_FAVS_FILE, 'utf8')) || []; } catch (_) {}
@@ -18845,6 +18870,23 @@ function _salvaNavFavs() {
 /// Lista pronta pra UI: favoritos próprios + geofences que servem de destino,
 /// com distância do carro. `origem` diz de onde veio, pra a tela só permitir
 /// apagar o que é favorito de verdade.
+/// As três abas, já com distância do carro. `origem` diz de qual aba o item é:
+/// 'lugar' = lugares salvos · 'fav' = favoritado numa busca · 'recente' = histórico.
+function _navListasParaUI() {
+  const lat = +state.gps_lat, lng = +state.gps_lng;
+  const dist = (a, b) => (lat && lng) ? +(haversineM(lat, lng, a, b) / 1000).toFixed(1) : null;
+  const base = _navFavsParaUI();
+  const nomesFixos = new Set(base.map(f => f.name.toLowerCase()));
+  return {
+    lugares: base.filter(f => f.origem === 'lugar'),
+    favoritos: base.filter(f => f.origem === 'fav'),
+    // Recente que já virou favorito sai da aba: estaria nas duas.
+    recentes: navRecentes
+      .filter(r => !nomesFixos.has(String(r.name).toLowerCase()))
+      .map(r => ({ ...r, origem: 'recente', distKm: dist(r.lat, r.lng) })),
+  };
+}
+
 function _navFavsParaUI() {
   const lat = +state.gps_lat, lng = +state.gps_lng;
   const dist = (a, b) => (lat && lng) ? +(haversineM(lat, lng, a, b) / 1000).toFixed(1) : null;
@@ -18860,8 +18902,11 @@ function _navFavsParaUI() {
 }
 function _publicaNavFavs() {
   try {
+    const l = _navListasParaUI();
     mqttClient.publish(`${MQTT_PREFIX}/nav_favorites/result`,
-      JSON.stringify({ ok: true, items: _navFavsParaUI() }), { qos: 1, retain: true });
+      // `items` continua sendo a lista única (compatível com o APK atual, que só
+      // conhece esse campo); as três abas vão em paralelo pro APK novo.
+      JSON.stringify({ ok: true, items: _navFavsParaUI(), abas: l }), { qos: 1, retain: true });
   } catch (_) {}
 }
 
