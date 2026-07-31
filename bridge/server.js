@@ -18876,9 +18876,13 @@ function _navListasParaUI() {
   const dist = (a, b) => (lat && lng) ? +(haversineM(lat, lng, a, b) / 1000).toFixed(1) : null;
   const base = _navFavsParaUI();
   const nomesFixos = new Set(base.map(f => f.name.toLowerCase()));
+  // Alfabética em Meus locais e Favoritos: são listas que o dono conhece de cor,
+  // e nome é o que ele procura. Recentes fica em ordem de USO (mais novo primeiro),
+  // porque ali o critério é "o que eu acabei de fazer", não o nome.
+  const porNome = (a, b) => a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' });
   return {
-    lugares: base.filter(f => f.origem === 'lugar'),
-    favoritos: base.filter(f => f.origem === 'fav'),
+    lugares: base.filter(f => f.origem === 'lugar').sort(porNome),
+    favoritos: base.filter(f => f.origem === 'fav').sort(porNome),
     // Recente que já virou favorito sai da aba: estaria nas duas.
     recentes: navRecentes
       .slice(0, 50)
