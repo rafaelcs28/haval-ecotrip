@@ -36,19 +36,34 @@ class DestinoOverlayService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        tentar()
+    }
+
+    /// Publica o diagnóstico em debug/overlay. O AppLogger tem buffer de 300 e o
+    /// dumplog entrega 80 — o que acontece no arranque do serviço rola pra fora
+    /// antes de dar tempo de pedir. Num tópico o estado fica disponível a
+    /// qualquer momento, sem depender do buffer.
+    private fun relatar(etapa: String, detalhe: String = "") {
+        val msg = "perm=${temPermissao(this)} etapa=$etapa" + if (detalhe.isEmpty()) "" else " $detalhe"
+        AppLogger.i(TAG, msg)
+        runCatching { MqttManager.getInstance().publicarDebugOverlay(msg) }
+    }
+
+    /// Separado do onCreate pra poder ser reexecutado por cmd/overlay sem reiniciar
+    /// o app — tentar de novo custava um ciclo inteiro de release e despertar.
+    fun tentar() {
         if (!temPermissao(this)) {
-            // Antes de desistir, tenta liberar por Shizuku: o head unit do Haval não
-            // expõe a tela de Ajustes de "desenhar sobre outros apps" (verificado em
-            // 31/07), e SYSTEM_ALERT_WINDOW é appop — `pm grant` não serve. Sem este
-            // caminho o botão flutuante seria impossível nesse hardware.
-            AppLogger.i(TAG, "sem permissão de overlay — tentando liberar via Shizuku")
-            if (!br.com.redesurftank.ecotrip.managers.ShizukuPerms.concederOverlay(this)) {
-                AppLogger.w(TAG, "overlay indisponível: sem permissão e o Shizuku não liberou")
-                stopSelf(); return
-            }
+            // O head unit do Haval não expõe a tela de Ajustes de "desenhar sobre
+            // outros apps" (verificado no carro em 31/07), e SYSTEM_ALERT_WINDOW é
+            // appop — `pm grant` não serve. Sem este caminho o botão flutuante
+            // seria impossível nesse hardware.
+            relatar("sem_permissao_tentando_shizuku")
+            val ok = br.com.redesurftank.ecotrip.managers.ShizukuPerms.concederOverlay(this)
+            relatar(if (ok) "shizuku_liberou" else "shizuku_falhou")
+            if (!ok) { stopSelf(); return }
         }
-        runCatching { mostrar() }.onFailure {
-            AppLogger.e(TAG, "falha ao criar overlay", it as? Exception ?: Exception(it))
+        runCatching { mostrar(); relatar("no_ar") }.onFailure {
+            relatar("addview_falhou", it.message ?: it.javaClass.simpleName)
             stopSelf()
         }
     }

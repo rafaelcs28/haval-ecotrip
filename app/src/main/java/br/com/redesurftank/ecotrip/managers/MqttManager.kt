@@ -337,6 +337,18 @@ class MqttManager private constructor() {
         }
     }
 
+    /// Diagnóstico do overlay num tópico próprio: o buffer do AppLogger é curto e
+    /// o que o serviço loga no arranque rola pra fora antes de dar tempo de pedir
+    /// o dumplog.
+    fun publicarDebugOverlay(msg: String) {
+        executor.submit {
+            val c = client ?: return@submit
+            if (!c.isConnected) return@submit
+            try { c.publish("$prefix/debug/overlay", msg.toByteArray(), 1, true) }
+            catch (_: Exception) {}
+        }
+    }
+
     fun pedirFavoritos() {
         executor.submit {
             val c = client ?: return@submit
@@ -3584,6 +3596,17 @@ class MqttManager private constructor() {
                     try {
                         client?.publish("$prefix/cmd/check_update/result", res.toByteArray(), 1, true)
                     } catch (_: Exception) {}
+                }
+                "overlay" -> {
+                    // Nova tentativa de subir o botão flutuante, sem reiniciar o app.
+                    val ctx = appContext
+                    if (ctx != null) {
+                        try {
+                            ctx.startService(android.content.Intent(ctx,
+                                br.com.redesurftank.ecotrip.services.DestinoOverlayService::class.java))
+                            AppLogger.i(TAG, "cmd/overlay: serviço reiniciado")
+                        } catch (e: Exception) { AppLogger.w(TAG, "cmd/overlay falhou: ${e.message}") }
+                    }
                 }
                 "logcat" -> {
                     // Religa o espelho pro logcat quando precisar depurar por adb.
