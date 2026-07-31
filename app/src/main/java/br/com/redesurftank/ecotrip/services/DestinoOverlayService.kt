@@ -37,9 +37,15 @@ class DestinoOverlayService : Service() {
     override fun onCreate() {
         super.onCreate()
         if (!temPermissao(this)) {
-            // Sem "desenhar sobre outros apps" o addView lança e derruba o serviço.
-            AppLogger.w(TAG, "sem permissão de overlay — serviço não sobe")
-            stopSelf(); return
+            // Antes de desistir, tenta liberar por Shizuku: o head unit do Haval não
+            // expõe a tela de Ajustes de "desenhar sobre outros apps" (verificado em
+            // 31/07), e SYSTEM_ALERT_WINDOW é appop — `pm grant` não serve. Sem este
+            // caminho o botão flutuante seria impossível nesse hardware.
+            AppLogger.i(TAG, "sem permissão de overlay — tentando liberar via Shizuku")
+            if (!br.com.redesurftank.ecotrip.managers.ShizukuPerms.concederOverlay(this)) {
+                AppLogger.w(TAG, "overlay indisponível: sem permissão e o Shizuku não liberou")
+                stopSelf(); return
+            }
         }
         runCatching { mostrar() }.onFailure {
             AppLogger.e(TAG, "falha ao criar overlay", it as? Exception ?: Exception(it))
