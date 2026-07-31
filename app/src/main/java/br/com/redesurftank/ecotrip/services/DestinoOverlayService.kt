@@ -15,6 +15,7 @@ import android.view.WindowManager
 import android.widget.TextView
 import br.com.redesurftank.ecotrip.MainActivity
 import br.com.redesurftank.ecotrip.managers.AppLogger
+import br.com.redesurftank.ecotrip.managers.MqttManager
 import kotlin.math.abs
 
 /// Botão de destino desenhado POR CIMA de qualquer app do head unit — inclusive
@@ -107,7 +108,7 @@ class DestinoOverlayService : Service() {
                     if (arrastou) {
                         prefs.edit().putInt(K_X, lp.x).putInt(K_Y, lp.y).apply()
                     } else {
-                        abrirTelaDestino()
+                        mostrarPainel()
                     }
                     true
                 }
@@ -119,6 +120,102 @@ class DestinoOverlayService : Service() {
         wm?.addView(tv, lp)
         botao = tv
         AppLogger.i(TAG, "overlay de destino no ar (x=${lp.x} y=${lp.y})")
+    }
+
+    /// Painel de favoritos POR CIMA do app atual — o ponto todo é não sair do
+    /// Waze. Views nativas em vez de Compose porque aqui não há Activity nem
+    /// ViewTree pra hospedar composição; a lista é curta, então não perde nada.
+    ///
+    /// Só favoritos: buscar exige teclado, e pra digitar o overlay teria que
+    /// aceitar foco — o que rouba o teclado do app de baixo. Busca abre o app.
+    private var painel: View? = null
+
+    private fun mostrarPainel() {
+        if (painel != null) { fecharPainel(); return }
+        val favs = lerFavoritos()
+        val dp: (Int) -> Int = { v -> (v * resources.displayMetrics.density).toInt() }
+
+        val col = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding(dp(14), dp(14), dp(14), dp(14))
+            background = GradientDrawable().apply {
+                cornerRadius = dp(18).toFloat()
+                setColor(Color.parseColor("#F206080C"))
+                setStroke(dp(1), Color.parseColor("#00E5CC"))
+            }
+        }
+        col.addView(TextView(this).apply {
+            text = "Para onde vamos?"
+            setTextColor(Color.parseColor("#EEF4FF")); textSize = 19f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setPadding(0, 0, 0, dp(10))
+        })
+
+        if (favs.isEmpty()) {
+            col.addView(TextView(this).apply {
+                text = "Sem favoritos ainda."
+                setTextColor(Color.parseColor("#5B7394")); textSize = 15f
+            })
+        }
+        for (f in favs.take(6)) {
+            col.addView(TextView(this).apply {
+                val km = f.optDouble("distKm").let { if (it.isNaN()) "" else "   ${"%.1f".format(it)} km" }
+                text = f.optString("name") + km
+                setTextColor(Color.parseColor("#EEF4FF")); textSize = 17f
+                setTypeface(null, android.graphics.Typeface.BOLD)
+                setPadding(dp(14), dp(14), dp(14), dp(14))
+                background = GradientDrawable().apply {
+                    cornerRadius = dp(12).toFloat(); setColor(Color.parseColor("#141A24"))
+                }
+                setOnClickListener {
+                    MqttManager.getInstance().publishNavTo(
+                        f.optDouble("lat"), f.optDouble("lng"), f.optString("name"), "waze")
+                    text = "✓ " + f.optString("name")
+                    setTextColor(Color.parseColor("#39FF88"))
+                    postDelayed({ fecharPainel() }, 900)
+                }
+            }, android.widget.LinearLayout.LayoutParams(
+                dp(300), android.widget.LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                bottomMargin = dp(8)
+            })
+        }
+
+        col.addView(TextView(this).apply {
+            text = "🔍  Buscar outro lugar…"
+            setTextColor(Color.parseColor("#00E5CC")); textSize = 16f
+            setPadding(dp(14), dp(14), dp(14), dp(14))
+            setOnClickListener { fecharPainel(); abrirTelaDestino() }
+        })
+
+        val lp = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT,
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+            else @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_PHONE,
+            // NOT_FOCUSABLE aqui também: nada neste painel digita, então não há
+            // motivo pra tirar o teclado do app de baixo.
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+            android.graphics.PixelFormat.TRANSLUCENT,
+        ).apply { gravity = Gravity.CENTER }
+
+        runCatching {
+            wm?.addView(col, lp); painel = col
+            MqttManager.getInstance().pedirFavoritos()   // atualiza pra próxima abertura
+        }.onFailure { AppLogger.w(TAG, "painel falhou: ${it.message}") }
+    }
+
+    private fun fecharPainel() {
+        runCatching { painel?.let { wm?.removeView(it) } }
+        painel = null
+    }
+
+    private fun lerFavoritos(): List<org.json.JSONObject> {
+        val raw = MqttManager.getInstance().navFavoritosJson ?: return emptyList()
+        return runCatching {
+            val arr = org.json.JSONObject(raw).optJSONArray("items") ?: return emptyList()
+            (0 until arr.length()).mapNotNull { arr.optJSONObject(it) }
+                .filter { it.optString("name").isNotBlank() }
+        }.getOrDefault(emptyList())
     }
 
     /// Traz o app pra frente já pedindo a tela de destino. REORDER_TO_FRONT em vez
@@ -133,6 +230,7 @@ class DestinoOverlayService : Service() {
     }
 
     override fun onDestroy() {
+        fecharPainel()
         runCatching { botao?.let { wm?.removeView(it) } }
         botao = null
         super.onDestroy()

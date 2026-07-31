@@ -321,6 +321,12 @@ class MqttManager private constructor() {
     /// `@Volatile var` lido direto, e misturar os dois padrões só confunde.
     @Volatile var onNavResult: ((String, String) -> Unit)? = null
 
+    /// Último payload de favoritos, guardado além do callback: o overlay e a tela
+    /// Compose precisam da mesma lista, e se os dois disputassem onNavResult um
+    /// sobrescreveria o outro. Como o tópico é retido, isto chega preenchido na
+    /// conexão e o overlay abre sem esperar round-trip.
+    @Volatile var navFavoritosJson: String? = null
+
     /// Pede a busca ao bridge — a chave do Google fica lá, não no APK.
     fun buscarLugar(texto: String) {
         executor.submit {
@@ -1826,7 +1832,9 @@ class MqttManager private constructor() {
                     if (topic == "$prefix/audio/p2c") { CarAudioRelay.onIncomingFrame(message.payload); return }
                     // Busca/favoritos vão pra UI, não pro dispatcher de comandos.
                     if (topic.endsWith("/place_search/result") || topic.endsWith("/nav_favorites/result")) {
-                        onNavResult?.invoke(topic, message.toString()); return
+                        val body = message.toString()
+                        if (topic.endsWith("/nav_favorites/result")) navFavoritosJson = body
+                        onNavResult?.invoke(topic, body); return
                     }
                     handleIncomingCommand(topic, message.toString())
                 }
