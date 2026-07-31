@@ -17340,6 +17340,10 @@ let _lastEngineOnCmdMs = 0;   // último engine_on comandado por nós (app/pré-
 let _lastDoorOpenMs    = 0;   // última porta aberta (sinal de que alguém entrou)
 let _apkAcordouMs      = 0;   // quando o APK voltou de um período mudo (app reiniciado)
 let _lastEngineFlipMs  = 0;   // última transição de engine_state (detector de transiente)
+let _lockRawMs         = 0;   // último door_lock_status cru recebido do carro
+let _socCanUltimo      = 0;   // último SOC do CAN, pra medir estagnação
+let _socCanMudouMs     = 0;
+const SOC_CAN_ESTAGNADO_MS = 15 * 60_000;   // carro acordado atualiza em segundos
 const ENGINE_FLAP_MS   = 12_000;   // 0→1→0 mais rápido que isso é ruído do CAN, não partida
 
 function _motorContentState(active) {
@@ -20418,6 +20422,14 @@ function applyMqttMessage(key, value, isRetained = false) {
       break;
     }
     case 'lock_state': {
+      // Se o raw chegou há pouco, ele manda: o valor derivado pelo APK já veio
+      // invertido antes (v6.156-6.160) e sobrescrevia a leitura correta.
+      if (_lockRawMs && (Date.now() - _lockRawMs) < 5 * 60_000) {
+        if (String(value) !== (state.lock_state === 'on' ? '1' : '0')) {
+          console.log(`[lock] ignorando lock_state='${value}' do APK — raw recente manda ('${state.lock_state}')`);
+        }
+        break;
+      }
       // App publica "1" (destrancado) / "0" (trancado).
       // Formato: "valor" (legacy) ou "valor:ms_da_mudanca" (v5.11+).
       // Hysteresis 3s + voting filter Android-side (v5.11+) → defesa em camadas.
@@ -20692,6 +20704,34 @@ function applyMqttMessage(key, value, isRetained = false) {
     }
     case 'debug/lock_status_raw': {
       console.log(`[lock:raw] value='${value}' isRetained=${isRetained}`);
+      // O BRIDGE interpreta o valor cru, em vez de confiar no lock_state que o
+      // APK derivou. Motivo: a v6.156-6.160 interpretou door_lock_status=3 como
+      // destrancado (é TRANCADO), e o carro apareceu destravado por dois dias —
+      // com a LA de alerta sem sumir. Como o raw chega aqui de qualquer versão,
+      // corrigir neste ponto conserta sem depender de atualizar o carro, e
+      // blinda contra o APK errar essa leitura de novo.
+      //
+      //   0 = destrancado ('on')  ·  1 e 3 = trancado ('off')
+      //   desconhecido = mantém o estado e loga, nunca chuta
+      const _rawLk = parseInt(value, 10);
+      if (Number.isFinite(_rawLk)) {
+        _lockRawMs = Date.now();
+        const norm = _rawLk === 0 ? 'on' : (_rawLk === 1 || _rawLk === 3) ? 'off' : null;
+        if (norm === null) {
+          console.warn(`[lock:raw] valor desconhecido ${_rawLk} — mantendo '${state.lock_state}'`);
+        } else if (state.lock_state !== norm) {
+          const prev = state.lock_state;
+          state.lock_state = norm;
+          _fieldSource['lock_state'] = 'apk';
+          _notaValorFonte('lock_state', 'apk', norm === 'on' ? '1' : '0');
+          console.log(`[lock] derivado do raw ${_rawLk}: ${prev} → ${norm} (${norm === 'off' ? 'trancado' : 'destrancado'})`);
+          if (!isRetained && prev != null) {
+            if (norm === 'on') addEvent('lock_open',  'Carro destrancado');
+            else               addEvent('lock_close', 'Carro trancado');
+          }
+          broadcast('update', state);
+        }
+      }
       break;
     }
     case 'tyre_pressure_fl': { _lastTyreGwmMs = Date.now(); state.tyre_pressure_fl = num(value); checkTyrePressure('FL', num(value), isRetained, state.tyre_temp_fl); checkTyreDrop('fl', num(value)); break; }
@@ -21044,6 +21084,21 @@ function applyMqttMessage(key, value, isRetained = false) {
     case 'soc_pct_can': {
       const v = num(value);
       if (!(v > 0)) break;                       // 0 = CAN não inicializado
+      // O CAN congela quando o carro dorme, e o APK publica DUAS chaves de SOC:
+      // esta (barramento) e soc_pct. Em 31/07 o carro carregou dormindo até 90%,
+      // o CAN ficou em 69% e — como as duas contam como fonte 'apk' — o failover
+      // deu o comando ao valor velho e barrou o 90%. SOC travado por 25 min.
+      //
+      // Se o CAN não muda há SOC_CAN_ESTAGNADO_MS, ele não bloqueia mais: quem
+      // chegar depois com valor diferente passa. Carro acordado atualiza o CAN a
+      // cada poucos segundos, então isto só solta quando ele está de fato parado.
+      if (_socCanUltimo !== v) { _socCanUltimo = v; _socCanMudouMs = _now; }
+      const _canEstagnado = _socCanMudouMs && (_now - _socCanMudouMs) > SOC_CAN_ESTAGNADO_MS;
+      if (_canEstagnado && state.soc_pct && state.soc_pct !== v) {
+        console.log(`[soc] CAN estagnado em ${v}% há ${Math.round((_now - _socCanMudouMs) / 60_000)}min `
+                  + `— mantendo ${state.soc_pct}% e liberando outras fontes`);
+        break;
+      }
       _notaValorFonte('soc_pct', 'apk', String(v));
       if (_gwmAlive(_now) && !_apkAssumeChave('soc_pct', String(v), _now)) break;
       if (state.soc_pct !== v) {
