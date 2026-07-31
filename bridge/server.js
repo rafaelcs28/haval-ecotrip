@@ -2997,6 +2997,9 @@ function addEvent(type, label, ts) {
 const state = {
   car_online:        false,
   car_network:       null,   // { type, ip, downlink_kbps, ts } publicado pelo APK
+  // Roteamento do hotspot + dados móveis, lido do Impulse pelo EcoTrip. Mais
+  // preciso que car_network: distingue Starlink de 4G, que ali era tudo "wifi".
+  uplink:            null,
   bridge_online:     true,
   last_update_ms:    null,    // última msg de QUALQUER fonte (carro APK ou GWM)
   last_apk_ms:       null,    // última msg do APK (haval/ecotrip/*)
@@ -14518,6 +14521,41 @@ mqttClient.on('message', (topic, payload, packet) => {
 
   // Dispatcher: tópicos da integração GWM Brasil vão pro handler dedicado;
   // outros caem no handler legado do app.
+  // Conectividade do carro, vinda do Impulse via EcoTrip: por onde o hotspot
+  // roteia (Starlink/WiFi ou 4G) e o estado dos dados móveis. Chega pronta pra
+  // exibir — quem calcula é o Impulse, que tem o shell do HotRouter.
+  //
+  // Isto substitui a dedução por `network/info`, que só dizia "wifi" e não
+  // distinguia Starlink de qualquer outra rede.
+  if (topic === MQTT_PREFIX + '/uplink/status') {
+    try {
+      const o = JSON.parse(value);
+      const antes = state.uplink && state.uplink.displayText;
+      state.uplink = {
+        ok: !!o.ok,
+        erro: o.erro || null,
+        texto: o.displayText ?? null,       // null = o Impulse pede pra esconder
+        nivel: o.displayLevel ?? null,      // good | warn | bad | muted
+        icone: o.displayIcon ?? null,
+        modo: o.routingMode ?? null,        // OFF | WLAN | 4G | STARTING | ERROR
+        wifi: o.routingWifiName ?? null,
+        roteando: !!o.hotspotRouting,
+        controle4g: !!o.mobileControlEnabled,
+        quatroGOn: !!o.mobile4gOn,
+        motivoCorte: o.mobileBlockReason ?? null,
+        ts: Date.now(),
+      };
+      if (!o.ok) console.warn(`[uplink] EcoTrip não leu o Impulse: ${o.erro}`);
+      else if (antes !== state.uplink.texto) {
+        console.log(`[uplink] ${state.uplink.modo}: ${state.uplink.texto || '(oculto)'}`
+                  + (state.uplink.motivoCorte ? ` — corte: ${state.uplink.motivoCorte}` : ''));
+      }
+      broadcast('update', state);
+      scheduleStateSave();
+    } catch (e) { console.warn('[uplink] payload inválido:', e.message); }
+    return;
+  }
+
   // Busca de lugares pedida PELA MULTIMÍDIA, por MQTT.
   //
   // Por MQTT e não por HTTP porque o APK não manda Authorization — a conexão

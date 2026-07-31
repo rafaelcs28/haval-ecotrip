@@ -96,6 +96,10 @@ class CarTelemetryService : Service() {
         // app — então o overlay nunca subia sozinho. Aqui ele existe desde o boot,
         // que é o ponto: o atalho tem que estar lá quando o Waze está na frente.
         runCatching { DestinoOverlayService.ligar(this) }
+        // Conectividade vem do Impulse (ContentProvider), não recalculada aqui: o
+        // cálculo pesado — shell do HotRouter via Shizuku, estado do 4G — já roda no
+        // processo dele, e duplicar faria as duas telas poderem divergir.
+        runCatching { br.com.redesurftank.ecotrip.managers.ConnectivityStatusReader.start(this) }
         super.onCreate()
         current = this
         createChannel()

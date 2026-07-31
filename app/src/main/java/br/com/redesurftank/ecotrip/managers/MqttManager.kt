@@ -340,6 +340,17 @@ class MqttManager private constructor() {
     /// Diagnóstico do overlay num tópico próprio: o buffer do AppLogger é curto e
     /// o que o serviço loga no arranque rola pra fora antes de dar tempo de pedir
     /// o dumplog.
+    /// Estado de conectividade lido do Impulse. Retido: o bridge sobe já sabendo por
+    /// onde o carro roteia, sem esperar mudança.
+    fun publicarUplinkStatus(json: String) {
+        executor.submit {
+            val c = client ?: return@submit
+            if (!c.isConnected) return@submit
+            try { c.publish("$prefix/uplink/status", json.toByteArray(), 1, true) }
+            catch (_: Exception) {}
+        }
+    }
+
     fun publicarDebugOverlay(msg: String) {
         executor.submit {
             val c = client ?: return@submit
