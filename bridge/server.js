@@ -6514,10 +6514,54 @@ async function _reverseGeocodeFamily(lat, lng, accuracy) {
     return empty;
   }
 }
-async function _fetchFamilyLocations() {
+// ── Refresh forçado do iCloud (o que o app Buscar faz ao abrir) ──────────────
+// A integração `icloud` do HA atualiza TODOS os devices num lote só, a cada ~20-30min:
+// medido 22min de idade em todos os 5 ao mesmo tempo, e a Ivone ainda marcava "PFH"
+// depois de já ter saído — dado velho E errado. O serviço icloud.update força a
+// busca na Apple: 22min → 0,2min em 12s.
+// Cadência é deliberadamente contida: cada refresh ACORDA os iPhones, e hoje tem
+// gente em 10% e 18% de bateria. Então: lote de fundo espaçado + on-demand quando
+// alguém realmente olha, com cooldown. É o mesmo comportamento do app.
+const FAMILY_FORCE_GAP_MS = +(process.env.FAMILY_FORCE_GAP_S || 90) * 1000;
+const FAMILY_BG_FORCE_MS  = +(process.env.FAMILY_BG_FORCE_MIN || 15) * 60_000;
+const FAMILY_STALE_MS     = +(process.env.FAMILY_STALE_MIN || 5) * 60_000;
+let _familyForcedAt = 0;
+
+async function _forceIcloudRefresh() {
+  const tok = process.env.HA_TOKEN;
+  const url = (process.env.HA_URL || '').replace(/\/$/, '');
+  if (!tok || !url) return false;
+  const now = Date.now();
+  if (now - _familyForcedAt < FAMILY_FORCE_GAP_MS) return false;   // cooldown
+  _familyForcedAt = now;
+  try {
+    const r = await fetch(`${url}/api/services/icloud/update`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${tok}`, 'Content-Type': 'application/json' },
+      body: '{}',
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!r.ok) { console.warn('[family] icloud.update HTTP ' + r.status); return false; }
+    return true;
+  } catch (e) { console.warn('[family] icloud.update falhou:', e.message); return false; }
+}
+
+// Idade do dado mais novo que temos guardado.
+function _familyFreshestAgeMs() {
+  let newest = 0;
+  for (const m of _FAMILY_MEMBERS) {
+    const t = _familyLocations[m.key]?.ha_reported_ms || 0;
+    if (t > newest) newest = t;
+  }
+  return newest ? Date.now() - newest : Infinity;
+}
+
+async function _fetchFamilyLocations(force = false) {
   const tok = process.env.HA_TOKEN;
   const url = (process.env.HA_URL || '').replace(/\/$/, '');
   if (!tok || !url) return;
+  // Pede a atualização e dá tempo do HA receber a resposta da Apple antes de ler.
+  if (force && await _forceIcloudRefresh()) await new Promise(r => setTimeout(r, 9000));
   let arr;
   try {
     const r = await fetch(`${url}/api/states`, {
@@ -6556,6 +6600,19 @@ async function _fetchFamilyLocations() {
         } catch (_) {}
       }
     }
+    // ── Frescor HONESTO ────────────────────────────────────────────────────────
+    // `ha_reported_ms` é quando o HA GRAVOU o estado, ou seja quando a integração
+    // buscou na Apple — NÃO quando o iPhone fixou a posição. Forçar o refresh deixa
+    // a busca atual, mas se o aparelho está dormindo/parado/sem sinal a Apple
+    // devolve a mesma coordenada antiga e o "8s" viraria mentira.
+    // Nenhum atributo desta integração traz o timestamp real do fix (o icloud3, que
+    // traria `last_located`, está com "Apple Login Failed"). Então derivo o que dá:
+    //  - pos_since: desde quando a coordenada está IDÊNTICA (não distingue parado de
+    //    velho, mas para de fingir frescor que não existe)
+    //  - device_status/low_power: aparelho offline ou em baixo consumo = a posição da
+    //    Apple é suspeita por definição
+    const same = prev.lat != null && lat != null
+      && Math.abs(prev.lat - lat) < 1e-6 && Math.abs(prev.lng - lng) < 1e-6;
     const next = {
       name: m.name,
       device: m.device,
@@ -6567,6 +6624,11 @@ async function _fetchFamilyLocations() {
       zone,
       ha_reported_ms: haReportedMs,
       updated_ms: now,
+      pos_since: same ? (prev.pos_since || prev.ha_reported_ms || haReportedMs) : haReportedMs,
+      device_status: attr.device_status || null,
+      low_power: attr.low_power_mode === true,
+      battery_status: attr.battery_status || null,
+      fetch_interval_min: attr.account_fetch_interval ?? null,
     };
     // Detecta mudanca significativa (>=50m) pra fazer PUSH ao whats-assistant
     // (Marileuza). Bridge pushou = Mari pode reagir NA HORA sem esperar poll.
@@ -6591,10 +6653,17 @@ async function _pushFamilyChange(key, loc) {
     });
   } catch (_) { /* fail-open */ }
 }
-setTimeout(() => { _fetchFamilyLocations().catch(() => {}); }, 5_000);
-setInterval(() => { _fetchFamilyLocations().catch(() => {}); }, 3 * 60_000);
+setTimeout(() => { _fetchFamilyLocations(true).catch(() => {}); }, 5_000);
+setInterval(() => { _fetchFamilyLocations().catch(() => {}); }, 3 * 60_000);       // leitura barata
+setInterval(() => { _fetchFamilyLocations(true).catch(() => {}); }, FAMILY_BG_FORCE_MS); // lote forçado
 
-app.get('/api/family-locations', requireAuth, (_req, res) => {
+// `fresh=0` desliga o on-demand (pra quem só quer o cache). O default é: se o dado
+// mais novo passou de 5min, força — respeitando o cooldown de 90s, então página
+// atualizando de minuto em minuto não vira metralhadora de wake-up nos iPhones.
+app.get('/api/family-locations', requireAuth, async (req, res) => {
+  if (req.query.fresh !== '0' && _familyFreshestAgeMs() > FAMILY_STALE_MS) {
+    try { await _fetchFamilyLocations(true); } catch (_) {}
+  }
   const now = Date.now();
   const list = _FAMILY_MEMBERS.map(m => {
     const s = _familyLocations[m.key] || {};
@@ -6609,7 +6678,15 @@ app.get('/api/family-locations', requireAuth, (_req, res) => {
       address: s.address || null,
       zone: s.zone || null,
       updated_ms: s.ha_reported_ms || null,
+      // age_ms = idade da NOSSA cópia (quando a integração buscou).
       age_ms: s.ha_reported_ms ? (now - s.ha_reported_ms) : null,
+      // pos_age_ms = há quanto tempo a coordenada não muda. É o número honesto:
+      // "buscamos agora" não quer dizer "ele está aqui agora".
+      pos_age_ms: s.pos_since ? (now - s.pos_since) : null,
+      device_status: s.device_status || null,
+      low_power: !!s.low_power,
+      battery_status: s.battery_status || null,
+      fetch_interval_min: s.fetch_interval_min ?? null,
     };
   });
   res.json({ ts: now, members: list });
@@ -7049,6 +7126,11 @@ app.get('/api/health', requireAuth, (_req, res) => {
       last_apk_ms:   state.last_apk_ms  || 0,
       last_gwm_ms:   state.last_gwm_ms  || 0,
       last_awake_ms: _lastCarAwakeMs    || 0,
+      // A página precisa da MESMA verdade que o alerta usa, senão inventa limiar
+      // próprio: silêncio do APK só é anomalia com o carro ACORDADO (dormindo, o app
+      // cala e isso é o esperado) e a partir de SOURCE_STALL_MS, não de 2min.
+      awake:         _carIsAwake(),
+      stall_ms:      SOURCE_STALL_MS,
       last_ms:       Math.max(state.last_apk_ms || 0, state.last_gwm_ms || 0),
       soc:           +state.soc_pct || 0,
       power_kw:      +state.charge_power_kw || 0,
@@ -8133,14 +8215,43 @@ function _windowStateAt() {
 }
 
 // Verifica se o estado do carro reflete a ação executada.
+// Table-driven: cada tipo de ação diz qual campo de `state` observar e o que esperar.
+// `verifiable:false` = não há nada no carro pra observar (notify) ou não conheço o
+// mapeamento (request de chave desconhecida) — melhor declarar que não sei do que
+// inventar uma falha. `readable:false` = campo ainda não chegou / carro dormindo.
+const LEVEL_TOLERANCE = 5;         // teto e cortina reportam 0..100 com folga
+// Chaves de `request` com mapeamento de estado que eu confio. Fora daqui, não verifica:
+// car.ev_setting.charge_soc_limit_config, por exemplo, é enum e não bate 1:1 com
+// charge_limit_pct — chutar aqui geraria falha falsa.
+const REQUEST_STATE_MAP = {
+  'car.hvac.cycle_mode': () => state.hvac_cycle_mode,
+};
+
 function _verifyRuleAction(rule) {
   const a = rule.action || {};
+  const numCmp = (expected, actual, tol) => ({
+    verifiable: true,
+    readable: actual != null && Number.isFinite(+actual),
+    verified: actual != null && Math.abs(+actual - +expected) <= tol,
+    expected: `${expected}`,
+    actual: actual == null ? 'desconhecido' : `${actual}`,
+  });
+
   if (a.type === 'window') {
     const expected = _expectedWindowState(a.status);
     const actual = _windowStateAt();
-    return { verified: actual === expected, actual, expected };
+    return { verifiable: true, readable: actual !== 'desconhecido', verified: actual === expected, actual, expected };
   }
-  return { verified: true, actual: '?', expected: '?' };
+  if (a.type === 'skylight') return numCmp(a.level ?? 0, state.skylight_level, LEVEL_TOLERANCE);
+  if (a.type === 'shade')    return numCmp(a.level ?? 0, state.shade_level, LEVEL_TOLERANCE);
+  if (a.type === 'request') {
+    const getter = REQUEST_STATE_MAP[a.key];
+    if (!getter) return { verifiable: false, reason: `sem mapeamento de estado pra ${a.key}` };
+    const actual = getter();
+    return numCmp(a.value, actual, 0);
+  }
+  // notify: o efeito é um push, não um estado do carro.
+  return { verifiable: false, reason: `ação ${a.type || '?'} não observável no carro` };
 }
 
 // O APK executa a regra de geofence-vidro localmente (imune ao limbo WiFi/4G da
@@ -8148,28 +8259,47 @@ function _verifyRuleAction(rule) {
 // esperado e alerta se não atingir. Read-first: só confia com carro online E estado
 // legível; offline/desconhecido não vira falso alarme, só espera. Alerta no fim da
 // janela se leu e o vidro não mudou (APK não atuou), ou se o carro ficou ilegível.
+// Um monitor por regra em vôo — regra que dispara em sequência não empilha timer.
+const _monitorInFlight = new Set();
+
 function _monitorRuleAction(rule, reason) {
-  const a = rule.action || {};
-  if (a.type !== 'window') return;   // só vidro é verificável server-side; resto é 100% APK
+  const probe = _verifyRuleAction(rule);
+  // Ação sem estado observável (notify, request desconhecido): registra e sai. Não
+  // conta como falha nem como sucesso — é ausência de veredito, e o painel diz isso.
+  // Sai SEM registrar: 10 das 20 regras são `notify` e disparam várias vezes por dia.
+  // Logar "não verificável" a cada disparo entupiria o log de auditoria e empurraria
+  // pra fora o histórico que importa. Quem conta essa história é o card ("sem
+  // confirmação de efeito"), não um evento por disparo.
+  if (probe.verifiable === false) return;
   if (!_evalConditions(rule.conditions)) {
     _logAutoEvent({ rule_id: rule.id, name: rule.name, phase: 'monitor-skip', reason: 'conditions falharam' });
     return;
   }
-  _logAutoEvent({ rule_id: rule.id, name: rule.name, phase: 'monitor', trigger: reason, action: `esperando APK → ${_expectedWindowState(a.status)}` });
+  if (_monitorInFlight.has(rule.id)) return;
+  _monitorInFlight.add(rule.id);
+  _logAutoEvent({ rule_id: rule.id, name: rule.name, phase: 'monitor', trigger: reason,
+                  action: `esperando efeito → ${probe.expected}` });
   const deadline = Date.now() + RULE_WATCHDOG_MS;
-  let attempt = 0;
+  let everReadable = false;
+  const done = () => _monitorInFlight.delete(rule.id);
   const tick = () => {
     const v = _verifyRuleAction(rule);
-    attempt++;
-    const readable = state.car_online === true && v.actual !== 'desconhecido' && v.actual !== '?';
-    if (v.verified) { _logAutoEvent({ rule_id: rule.id, name: rule.name, phase: 'monitor-ok', ...v }); return; }
+    if (v.readable && state.car_online === true) everReadable = true;
+    if (v.verified) { _logAutoEvent({ rule_id: rule.id, name: rule.name, phase: 'monitor-ok', ...v }); return done(); }
     if (Date.now() >= deadline) {
-      const msg = readable
-        ? `${rule.name || 'Regra'}: o carro não abriu/fechou o vidro — esperava ${v.expected}, reporta ${v.actual} após ${Math.round(RULE_WATCHDOG_MS/1000)}s.`
-        : `${rule.name || 'Regra'}: carro ficou offline/ilegível, não deu pra confirmar em ${Math.round(RULE_WATCHDOG_MS/1000)}s.`;
-      _logAutoEvent({ rule_id: rule.id, name: rule.name, phase: 'monitor-fail', ...v, readable });
-      sendPush('⚠️ Automação não confirmou', msg, 'automation_fail');
-      return;
+      // Carro que nunca ficou legível na janela não é falha da automação — é falta de
+      // leitura. Antes isso virava push "não confirmou", que com cortina às 09h e
+      // carro dormindo seria puro ruído. Agora fica no log, sem acordar ninguém.
+      if (!everReadable) {
+        _logAutoEvent({ rule_id: rule.id, name: rule.name, phase: 'monitor-skip',
+                        reason: 'carro offline/ilegível na janela de verificação', ...v });
+        return done();
+      }
+      _logAutoEvent({ rule_id: rule.id, name: rule.name, phase: 'monitor-fail', ...v, readable: true });
+      sendPush('⚠️ Automação não confirmou',
+        `${rule.name || 'Regra'}: esperava ${v.expected}, o carro reporta ${v.actual} após ${Math.round(RULE_WATCHDOG_MS / 1000)}s.`,
+        'automation_fail');
+      return done();
     }
     setTimeout(tick, RULE_VERIFY_MS);   // ainda não atingiu → só observa, nunca comanda
   };
@@ -8238,25 +8368,48 @@ app.get('/api/automation-events', requireAuth, (req, res) => {
 // Health do executor APK/Shizuku: infere pelo verify das automações.
 // - success: phase termina com verify (v1 ok) OU verify2 ok.
 // - fail: verify2 com verified=false (comando não teve efeito).
+// Health do executor APK/Shizuku.
+// A versão antiga só olhava `main-verify`/`verify2` — o verify feito PELO BRIDGE. Esse
+// caminho morreu em 06/07/2026, quando as automações passaram a ser executadas dentro
+// do carro (phase `apk-fired`). Resultado: o painel congelou em "4 falhas seguidas ·
+// últ. ok 585h atrás" enquanto 116 automações rodavam ok — métrica lendo canal morto.
+// Agora conta os três sinais que existem hoje:
+//   verified===true  (main-verify* ok, monitor-ok)   → efeito CONFIRMADO
+//   verified===false (main-verify* fail, monitor-fail) → efeito NEGADO (expected≠actual)
+//   apk-fired                                        → o APK disparou a regra; prova
+//     que o executor está vivo, mas NÃO que o carro obedeceu
+// `signal_age_ms` diz quando foi o último sinal confirmado — sem isso um streak velho
+// se pinta de vermelho pra sempre.
 function _apkExecutorHealth() {
   const now = Date.now();
   const cut24 = now - 24 * 3600_000;
   let lastOk = 0, lastFail = 0, ok24 = 0, fail24 = 0, failStreak = 0;
-  // Percorre em ordem cronológica pra contar streak recente de falhas.
+  let firedLast = 0, fired24 = 0;
   for (const e of _autoEvents) {
-    if (!/verify$|verify2$/.test(e.phase || '')) continue;
+    const ph = e.phase || '';
+    if (ph === 'apk-fired') {
+      if (e.ok !== false) { firedLast = Math.max(firedLast, e.ts); if (e.ts >= cut24) fired24++; }
+      continue;
+    }
+    if (e.verified !== true && e.verified !== false) continue;   // fase sem veredito
     const ok = e.verified === true;
     if (e.ts >= cut24) { if (ok) ok24++; else fail24++; }
     if (ok) { lastOk = Math.max(lastOk, e.ts); failStreak = 0; }
     else    { lastFail = Math.max(lastFail, e.ts); failStreak++; }
   }
+  const lastSignal = Math.max(lastOk, lastFail);
   return {
     last_ok_ms:   lastOk || null,
     last_fail_ms: lastFail || null,
     ok_24h:       ok24,
     fail_24h:     fail24,
     fail_streak:  failStreak,
-    healthy:      failStreak < 2,   // ≥2 falhas seguidas = suspeito (Shizuku off?)
+    fired_last_ms: firedLast || null,
+    fired_24h:    fired24,
+    signal_age_ms: lastSignal ? (now - lastSignal) : null,
+    // Suspeito só se a streak for RECENTE (1h). Streak velha é cicatriz, não falha:
+    // com o carro parado ninguém manda comando e o número fica pendurado.
+    healthy: !(failStreak >= 2 && lastFail > 0 && (now - lastFail) < 3600_000),
   };
 }
 
@@ -14300,6 +14453,14 @@ mqttClient.on('message', (topic, payload, packet) => {
       try {
         const ev = JSON.parse(value);
         _logAutoEvent({ rule_id: ev.id, name: ev.name, phase: 'apk-fired', ok: ev.ok !== false, source: 'apk' });
+        // `apk-fired` prova que o APK atuou, não que o carro obedeceu. Então dispara
+        // a verificação de efeito pras ações observáveis (vidro, teto, cortina, hvac).
+        // É isto que devolve veredito às regras de time/state, que rodam no carro e
+        // até aqui não tinham NINGUÉM conferindo o resultado.
+        if (ev.ok !== false) {
+          const fired = (automationRules || []).find(r => r.id === ev.id);
+          if (fired) { try { _monitorRuleAction(fired, 'apk-fired'); } catch (e) { console.warn('[auto] monitor pós-apk falhou:', e.message); } }
+        }
         // Ação "notify" é rodada aqui: APK não tem ntfy/WhatsApp, só publica o
         // rules/fired. Bridge acha a regra pelo id e executa o template.
         const rule = (automationRules || []).find(r => r.id === ev.id);
@@ -17036,6 +17197,8 @@ const PRECLIMAT_BUSY_PHASES = ['starting', 'engine_on', 'cooling', 'restoring'];
 let _lastEngineOnCmdMs = 0;   // último engine_on comandado por nós (app/pré-clima)
 let _lastDoorOpenMs    = 0;   // última porta aberta (sinal de que alguém entrou)
 let _apkAcordouMs      = 0;   // quando o APK voltou de um período mudo (app reiniciado)
+let _lastEngineFlipMs  = 0;   // última transição de engine_state (detector de transiente)
+const ENGINE_FLAP_MS   = 12_000;   // 0→1→0 mais rápido que isso é ruído do CAN, não partida
 
 function _motorContentState(active) {
   return {
@@ -19647,7 +19810,11 @@ function applyMqttMessage(key, value, isRetained = false) {
     // Carro dormindo encerra o app: quando ele volta, perdemos tudo que aconteceu
     // antes — inclusive a porta que o motorista abriu pra entrar. Marca o retorno
     // pra o check de auto-start não interpretar essa cegueira como "ligou sozinho".
-    if (!isRetained && state.last_apk_live_ms && (_now - state.last_apk_live_ms > 2 * 60_000)) {
+    // `!last_apk_live_ms` também conta: o bridge acabou de subir e não temos
+    // histórico nenhum de porta — é a mesma cegueira do app tendo reiniciado, e
+    // sem isso um restart do bridge recriava o falso auto-start na primeira
+    // partida (a condição exigia um histórico que ainda não existia).
+    if (!isRetained && (!state.last_apk_live_ms || (_now - state.last_apk_live_ms > 2 * 60_000))) {
       _apkAcordouMs = _now;
     }
     state.last_apk_ms  = _now;
@@ -19745,7 +19912,21 @@ function applyMqttMessage(key, value, isRetained = false) {
       const prevEng = prevEngineState;
       state.engine_state = value;
       prevEngineState    = value;
-      if (!isRetained && prevEng !== null && prevEng !== value) {
+      // Transiente do CAN: enquanto o head unit acorda, driving_ready oscila. Em
+      // 31/07 veio 0 (07:23:24) → 1 (07:23:29) → 0 (07:23:34), e o pulso de 5s
+      // disparou "motor ligado" + auto-start com o carro parado na garagem. Uma
+      // transição a menos de ENGINE_FLAP_MS da anterior é ruído: o state segue
+      // atualizado (a UI reflete), mas evento/push/LA não disparam. Partida real
+      // não tem transição 12s antes, então o departure ask não é afetado.
+      const _deltaFlip = _lastEngineFlipMs ? Date.now() - _lastEngineFlipMs : Infinity;
+      const _flapEng = !isRetained && prevEng !== null && prevEng !== value
+                       && _deltaFlip < ENGINE_FLAP_MS;
+      if (!isRetained && prevEng !== null && prevEng !== value) _lastEngineFlipMs = Date.now();
+      if (_flapEng) {
+        console.log(`[engine] transiente ignorado: ${prevEng}→${value} `
+                  + `${Math.round(_deltaFlip / 1000)}s após a transição anterior (CAN instável)`);
+      }
+      if (!isRetained && !_flapEng && prevEng !== null && prevEng !== value) {
         if (value === '1') {
           addEvent('engine_on',  'Motor ligado');
           sendPush('🔑 Motor ligado',  'O veículo foi ligado.', 'engine_on');
@@ -19766,7 +19947,12 @@ function applyMqttMessage(key, value, isRetained = false) {
           // Auto-start de verdade acontece com o app JÁ publicando (o carro está
           // em ACC/ligado), então exigir o APK acordado há um tempo não esconde o
           // caso real.
-          const _apkAcabouDeAcordar = _apkAcordouMs && (_nowEng - _apkAcordouMs < 90_000);
+          // 4 min, não 90s: em 31/07 o APK acordou 07:21:48 e o falso auto-start veio
+          // 07:23:29 — 101s depois, escapando por 11 segundos. O head unit leva minutos
+          // pra estabilizar o CAN depois de acordar, e nesse intervalo não temos como
+          // saber se alguém entrou (a porta que o motorista abriu não foi publicada
+          // por ninguém, o app estava encerrado).
+          const _apkAcabouDeAcordar = _apkAcordouMs && (_nowEng - _apkAcordouMs < 240_000);
           if (!_commandedByUs && !_someoneEntered && !_apkAcabouDeAcordar) {
             addEvent('engine_self_start', 'Motor ligou sozinho (sem comando e sem ninguém entrar) — provável auto-start do carro');
             sendPush('⚠️ Motor ligou sozinho', 'O motor ligou sem comando do app e sem ninguém entrar — provável auto-start do PHEV ou remote start externo.', 'engine_self_start');
