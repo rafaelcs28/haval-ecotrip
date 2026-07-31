@@ -4644,6 +4644,13 @@ app.use((req, _res, next) => {
     // inflavam o número que decide se ainda tem CLIENTE real lá — chegaram a ser
     // ~59 acessos/h de puro auto-monitoramento.
     const _ua = req.headers['user-agent'] || '';
+    // Diagnóstico do MacroDroid: o host-hits não guarda path pra host não-legacy,
+    // então uma macro que erra a rota ou o token fica invisível — só aparece que
+    // "bateu no bridge". Loga método, rota e status, pra fechar o diagnóstico do
+    // lado do servidor sem depender de ler o Toast no celular.
+    if (/macrodroid/i.test(_ua)) {
+      _res.on('finish', () => console.log(`[macrodroid] ${req.method} ${req.originalUrl} → HTTP ${_res.statusCode}`));
+    }
     if (_ua.startsWith('ecotrip-funnel-probe') || _ua.startsWith('funnel-watchdog')) return next();
     const h = String(req.headers.host || '?').toLowerCase().split(':')[0];
     const now = Date.now();
