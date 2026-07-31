@@ -18348,11 +18348,63 @@ function _geocodeLongeDemais(lat, lng) {
 
 async function _geocode(q) {
   const nearLat = +state.gps_lat, nearLng = +state.gps_lng;
+
+  // Google primeiro: o caso real é POI — nome de estabelecimento vindo do
+  // compartilhamento do Waze —, e o Mapbox é fraco nisso no Brasil. Em 31/07
+  // ele não achou 'Moove Home Brasal' nem 'Espaço Zune', e devolveu 'Rua Praça
+  // Civica' a 157 km pra 'Praça Cívica Goiânia'. O teto de distância só pega
+  // erro grosseiro (721 km); 12 km e 157 km passam, então o remédio é acertar
+  // na busca, não filtrar depois.
+  //
+  // Text Search com location+radius resolve nome de lugar; Geocoding cobre
+  // endereço com número. Sem GOOGLE_MAPS_API_KEY, cai direto no Mapbox.
+  const gkey = process.env.GOOGLE_MAPS_API_KEY;
+  if (gkey) {
+    const _tenta = async (url, extrai) => {
+      try {
+        const r = await fetch(url, { signal: AbortSignal.timeout(8000) });
+        const j = await r.json();
+        if (j.status && j.status !== 'OK' && j.status !== 'ZERO_RESULTS') {
+          console.warn(`[geocode] Google status=${j.status} ${j.error_message || ''}`);
+          return null;
+        }
+        return extrai(j);
+      } catch (e) { console.warn('[geocode] Google falhou:', e.message); return null; }
+    };
+    const loc = (nearLat && nearLng) ? `&location=${nearLat},${nearLng}&radius=60000` : '';
+    let hit = await _tenta(
+      `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${encodeURIComponent(q)}`
+      + `${loc}&language=pt-BR&region=br&key=${gkey}`,
+      j => { const r = j.results && j.results[0];
+             return r && r.geometry && r.geometry.location
+               ? { lat: r.geometry.location.lat, lng: r.geometry.location.lng, name: r.name || q } : null; });
+    if (!hit) {
+      const bnd = (nearLat && nearLng)
+        ? `&bounds=${(nearLat - 2).toFixed(3)},${(nearLng - 2).toFixed(3)}|${(nearLat + 2).toFixed(3)},${(nearLng + 2).toFixed(3)}` : '';
+      hit = await _tenta(
+        `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(q)}`
+        + `${bnd}&language=pt-BR&region=br&key=${gkey}`,
+        j => { const r = j.results && j.results[0];
+               return r && r.geometry && r.geometry.location
+                 ? { lat: r.geometry.location.lat, lng: r.geometry.location.lng,
+                     name: _shortPlaceName(r.address_components?.[0]?.long_name, r.formatted_address) } : null; });
+    }
+    if (hit && _validLatLng(hit.lat, hit.lng)) {
+      const far = _geocodeLongeDemais(hit.lat, hit.lng);
+      if (far) console.warn(`[geocode] Google devolveu '${hit.name}' a ${Math.round(far)}km de '${q}' — recusado`);
+      else { console.log(`[geocode] Google: '${q}' → ${hit.name} (${hit.lat},${hit.lng})`); return hit; }
+    }
+  }
+
   const tok = process.env.MAPBOX_TOKEN;
   if (tok) {
     try {
       let u = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(q)}.json`
         + `?access_token=${tok}&language=pt&limit=1&country=br`;
+      // Só proximity, SEM bbox: testado em 31/07, o bbox piorou tudo — o Mapbox
+      // passa a preferir ruas dentro da caixa a POIs, e 'Alpha Mall' virou 'Rua
+      // Mallorca', 'Praça Cívica Goiânia' virou 'Rua Praça Civica' a 150 km.
+      // Quem barra resultado distante é o teto de GEOCODE_MAX_KM, depois.
       if (nearLat && nearLng) u += `&proximity=${nearLng},${nearLat}`;
       const r = await fetch(u, { signal: AbortSignal.timeout(8000) });
       const j = await r.json();
