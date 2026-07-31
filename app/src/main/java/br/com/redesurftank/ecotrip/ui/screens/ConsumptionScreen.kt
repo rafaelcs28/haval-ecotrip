@@ -633,47 +633,6 @@ fun ConsumptionScreen() {
         // WebView fica acima do ComposeView → esconde o home Tesla quando há
         // overlay Compose aberto (Settings/Recargas/Viagens/Log), senão ficaria atrás.
         val anyOverlay = showSettings || showChargeHistory || showAutoTrips || showLog
-        // Sem "desenhar sobre outros apps" o botão flutuante não existe, e antes
-        // isso falhava calado (o serviço logava e desistia). Aqui o app PEDE: um
-        // toque abre a tela do sistema já no app certo.
-        var semOverlay by remember {
-            mutableStateOf(!br.com.redesurftank.ecotrip.services.DestinoOverlayService.temPermissao(ctxAct))
-        }
-        if (semOverlay && !controlesOpen && !anyOverlay && !showDestino) {
-            Row(
-                Modifier.align(Alignment.BottomStart).padding(20.dp)
-                    .background(MoltenOrange.copy(alpha = 0.16f), RoundedCornerShape(14.dp))
-                    .clickable {
-                        br.com.redesurftank.ecotrip.services.DestinoOverlayService.pedirPermissao(ctxAct)
-                    }
-                    .padding(horizontal = 14.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("⚠  Ativar botão de destino sobre o Waze",
-                    color = MoltenOrange, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-            }
-        }
-        // Volta do Ajustes com a permissão concedida → sobe o overlay na hora, sem
-        // precisar reabrir o app.
-        LaunchedEffect(showDestino, anyOverlay) {
-            val ok = br.com.redesurftank.ecotrip.services.DestinoOverlayService.temPermissao(ctxAct)
-            if (ok && semOverlay) {
-                semOverlay = false
-                br.com.redesurftank.ecotrip.services.DestinoOverlayService.ligar(ctxAct)
-            }
-        }
-        // Alvo grande (64dp) no canto de baixo à direita: é pra acertar de primeira
-        // saindo de casa ou parado no trânsito, não pra caber discretamente.
-        if (!controlesOpen && !anyOverlay && !showDestino && !showSocArrival) {
-            Button(
-                onClick = { showDestino = true },
-                modifier = Modifier.align(Alignment.BottomEnd).padding(20.dp).height(64.dp),
-                shape = RoundedCornerShape(18.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = AuroraTeal),
-            ) {
-                Text("🧭  DESTINO", fontWeight = FontWeight.Bold, color = VoidBlack, fontSize = 19.sp)
-            }
-        }
         if (homeLayout == 0 && !controlesOpen && !anyOverlay) {
             HomeTeslaWebLayout(
                 hd,
@@ -810,6 +769,50 @@ fun ConsumptionScreen() {
                         colors = ButtonDefaults.buttonColors(containerColor = accent),
                     ) { Text("Pular parada", fontSize = 12.sp, fontWeight = FontWeight.Bold) }
                 }
+            }
+        }
+        // Alvo grande (64dp) no canto de baixo à direita: é pra acertar de primeira
+        // saindo de casa ou parado no trânsito, não pra caber discretamente.
+        if (!controlesOpen && !anyOverlay && !showDestino && !showSocArrival) {
+            Button(
+                onClick = { showDestino = true },
+                modifier = Modifier.align(Alignment.BottomEnd).padding(20.dp).height(64.dp),
+                shape = RoundedCornerShape(18.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = AuroraTeal),
+            ) {
+                Text("🧭  DESTINO", fontWeight = FontWeight.Bold, color = VoidBlack, fontSize = 19.sp)
+            }
+        }
+        // DESENHADO POR ÚLTIMO de propósito: no Box do Compose a ordem define
+        // profundidade, e o HomeTeslaWebLayout (WebView) cobria o aviso e o botão
+        // quando eles vinham antes. Eles existiam — só ficavam atrás da tela.
+        // Sem "desenhar sobre outros apps" o botão flutuante não existe, e antes
+        // isso falhava calado (o serviço logava e desistia). Aqui o app PEDE: um
+        // toque abre a tela do sistema já no app certo.
+        var semOverlay by remember {
+            mutableStateOf(!br.com.redesurftank.ecotrip.services.DestinoOverlayService.temPermissao(ctxAct))
+        }
+        if (semOverlay && !controlesOpen && !anyOverlay && !showDestino) {
+            Row(
+                Modifier.align(Alignment.BottomStart).padding(20.dp)
+                    .background(MoltenOrange.copy(alpha = 0.16f), RoundedCornerShape(14.dp))
+                    .clickable {
+                        br.com.redesurftank.ecotrip.services.DestinoOverlayService.pedirPermissao(ctxAct)
+                    }
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("⚠  Ativar botão de destino sobre o Waze",
+                    color = MoltenOrange, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+            }
+        }
+        // Volta do Ajustes com a permissão concedida → sobe o overlay na hora, sem
+        // precisar reabrir o app.
+        LaunchedEffect(showDestino, anyOverlay) {
+            val ok = br.com.redesurftank.ecotrip.services.DestinoOverlayService.temPermissao(ctxAct)
+            if (ok && semOverlay) {
+                semOverlay = false
+                br.com.redesurftank.ecotrip.services.DestinoOverlayService.ligar(ctxAct)
             }
         }
     }
