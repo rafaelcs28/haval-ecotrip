@@ -18657,6 +18657,17 @@ async function _handleSharedDest(value) {
 }
 // POST /api/share-dest — Share Extension do iOS (compartilhar do Waze/Maps).
 // Body { text }. Resolve, publica nav_dest pro carro e devolve o nome resolvido.
+// Sonda: recebe o conteúdo de uma notificação e só LOGA. Serve pra descobrir o
+// que o Waze publica ao iniciar navegação — se o destino estiver ali, o
+// compartilhamento vira automático e ninguém precisa tocar em nada. Não resolve
+// nem seta destino de propósito: é instrumentação, não caminho de produção.
+app.post('/api/nav-probe', (req, res) => {
+  const b = req.body || {};
+  console.log(`[nav-probe] app=${JSON.stringify(b.app || '')} titulo=${JSON.stringify(b.titulo || '')}`);
+  console.log(`[nav-probe] texto=${JSON.stringify(String(b.texto || '').slice(0, 400))}`);
+  res.json({ ok: true });
+});
+
 app.post('/api/share-dest', async (req, res) => {
   const text = (req.body && (req.body.text || req.body.url)) || '';
   // Loga o texto CRU: quando a macro do MacroDroid manda a variável sem expandir,

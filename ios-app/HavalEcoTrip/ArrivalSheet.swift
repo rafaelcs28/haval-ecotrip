@@ -429,6 +429,9 @@ struct ArrivalSheet: View {
     @StateObject private var store = ArrivalStore()
     @StateObject private var completer = AddressCompleter()
     @ObservedObject private var places = PlacesStore.shared
+    /// Destino ATIVO no painel do carro vem do CarStore (o `store` daqui é o
+    /// ArrivalStore, que só conhece o plano sendo montado nesta tela).
+    @ObservedObject private var carro = CarStore.shared
     @State private var dest = ""
     @State private var origin = ""                        // vazio = local atual do carro
     @State private var destCoord: (Double, Double)? = nil
@@ -473,6 +476,43 @@ struct ArrivalSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 14) {
+                    // Destino ATIVO no painel do carro, com o botão de retirar sempre à
+                    // mão. O outro botão de retirar vive dentro de placesSection, então
+                    // só aparecia quando você tinha acabado de escolher um lugar — quem
+                    // recebeu destino de fora (compartilhamento do Waze, LA de saída)
+                    // não tinha como tirar pelo app.
+                    if let ativo = carro.arrivalRaw,
+                       let nomeAtivo = ativo["name"] as? String, !nomeAtivo.isEmpty {
+                        DSCard {
+                            VStack(alignment: .leading, spacing: 10) {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "mappin.circle.fill")
+                                        .font(.system(size: 15, weight: .bold)).foregroundStyle(DS.teal)
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        Text("NO PAINEL DO CARRO")
+                                            .font(.system(size: 8.5, weight: .bold)).foregroundStyle(DS.muted).tracking(0.8)
+                                        Text(nomeAtivo).font(.system(size: 15, weight: .bold))
+                                            .foregroundStyle(DS.text).lineLimit(1).minimumScaleFactor(0.7)
+                                    }
+                                    Spacer()
+                                    if let km = ativo["distKm"] as? Double, km > 0 {
+                                        Text(Fmt.dec1(km) + " km")
+                                            .font(.system(size: 12, weight: .semibold)).foregroundStyle(DS.muted)
+                                    }
+                                }
+                                Button { Task { await store.clearFromCar() } } label: {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: "xmark.circle.fill").font(.system(size: 14, weight: .bold))
+                                        Text("Retirar destino do carro").font(.system(size: 14, weight: .bold))
+                                    }
+                                    .frame(maxWidth: .infinity).frame(height: 40)
+                                    .foregroundStyle(DS.red).background(DS.red.opacity(0.14))
+                                    .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
                     DSCard {
                         VStack(spacing: 8) {
                             addrField("Saída — local do carro", text: $origin, field: .origin, icon: "location.circle")
