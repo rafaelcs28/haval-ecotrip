@@ -316,6 +316,43 @@ class MqttManager private constructor() {
     @Volatile var latestLeftTurnLamp: Int = 0
     @Volatile var latestRightTurnLamp: Int = 0
     /** Envia um destino pro celular (app companheiro) navegar via Maps/Waze no Android Auto. */
+    /// Resultado de busca/favoritos chegando do bridge. A UI registra aqui em vez
+    /// de eu inventar um StateFlow: o resto do manager expõe estado por
+    /// `@Volatile var` lido direto, e misturar os dois padrões só confunde.
+    @Volatile var onNavResult: ((String, String) -> Unit)? = null
+
+    /// Pede a busca ao bridge — a chave do Google fica lá, não no APK.
+    fun buscarLugar(texto: String) {
+        executor.submit {
+            val c = client ?: return@submit
+            if (!c.isConnected) return@submit
+            try { c.publish("$prefix/nav_search", texto.toByteArray(), 1, false) }
+            catch (e: Exception) { AppLogger.w(TAG, "buscarLugar falhou: ${e.message}") }
+        }
+    }
+
+    fun pedirFavoritos() {
+        executor.submit {
+            val c = client ?: return@submit
+            if (!c.isConnected) return@submit
+            try { c.publish("$prefix/nav_favorites_req", "1".toByteArray(), 1, false) }
+            catch (e: Exception) { AppLogger.w(TAG, "pedirFavoritos falhou: ${e.message}") }
+        }
+    }
+
+    /// Favorito vai pro bridge, não pra memória local: é o que faz aparecer
+    /// também nos favoritos do iPhone.
+    fun salvarFavorito(nome: String, lat: Double, lng: Double) {
+        executor.submit {
+            val c = client ?: return@submit
+            if (!c.isConnected) return@submit
+            val payload = org.json.JSONObject()
+                .put("name", nome).put("lat", lat).put("lng", lng).toString()
+            try { c.publish("$prefix/nav_fav_add", payload.toByteArray(), 1, false) }
+            catch (e: Exception) { AppLogger.w(TAG, "salvarFavorito falhou: ${e.message}") }
+        }
+    }
+
     fun publishNavTo(lat: Double, lng: Double, name: String, app: String) {
         executor.submit {
             val c = client ?: return@submit
@@ -1787,6 +1824,10 @@ class MqttManager private constructor() {
                 override fun messageArrived(topic: String, message: MqttMessage) {
                     // Áudio (fone→carro) é binário PCM — não passa por toString().
                     if (topic == "$prefix/audio/p2c") { CarAudioRelay.onIncomingFrame(message.payload); return }
+                    // Busca/favoritos vão pra UI, não pro dispatcher de comandos.
+                    if (topic.endsWith("/place_search/result") || topic.endsWith("/nav_favorites/result")) {
+                        onNavResult?.invoke(topic, message.toString()); return
+                    }
                     handleIncomingCommand(topic, message.toString())
                 }
                 override fun deliveryComplete(token: IMqttDeliveryToken) {}
@@ -1815,6 +1856,10 @@ class MqttManager private constructor() {
             lastConnectMs = System.currentTimeMillis()   // inicia a janela anti-replay (burst de fila chega após o subscribe)
             c.publish("$prefix/status", MqttMessage("online".toByteArray()).apply { qos = 1; isRetained = true })
             c.subscribe("$prefix/cmd/#", 1)
+            // Resultados de busca/favoritos ficam FORA de cmd/ (cmd/ é
+            // bridge→carro; pedido do carro em cmd/ voltaria como eco).
+            c.subscribe("$prefix/place_search/result", 1)
+            c.subscribe("$prefix/nav_favorites/result", 1)
             c.subscribe("$prefix/audio/p2c", 0)   // áudio do fone (escuta ao vivo) — QoS0, sem fila
             client = c
             consecutiveFailures = 0

@@ -203,6 +203,7 @@ fun ConsumptionScreen() {
     var showAutoTrips     by remember { mutableStateOf(false) }
     var showSettings      by remember { mutableStateOf(false) }
     var showSocArrival    by remember { mutableStateOf(false) }
+    var showDestino       by remember { mutableStateOf(false) }
     var navDest           by remember { mutableStateOf<MqttManager.NavDest?>(null) }
     var navPlan           by remember { mutableStateOf<RoutePlan?>(null) }
     val undoScope         = rememberCoroutineScope()
@@ -411,6 +412,7 @@ fun ConsumptionScreen() {
         )
     }
 
+    if (showDestino) { DestinoRapidoDialog(onClose = { showDestino = false }) }
     if (showSocArrival) {
         SocArrivalScreen(tripManager = tripManager, onBack = { showSocArrival = false })
         return
@@ -590,6 +592,12 @@ fun ConsumptionScreen() {
             }
         }
         IconButton(onClick = { showSocArrival = true }) { Icon(Icons.Default.Place, "SOC na chegada", tint = NeonLime) }
+        // Destino em BOTÃO, não em ícone de 24dp: o acesso antigo era impossível
+        // de acertar saindo de casa ou parado no trânsito.
+        Button(onClick = { showDestino = true }, modifier = Modifier.height(44.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = AuroraTeal)) {
+            Text("🧭 DESTINO", fontWeight = FontWeight.Bold, color = VoidBlack, fontSize = 15.sp)
+        }
         IconButton(onClick = { showLog = true }) { Icon(Icons.Default.BugReport, "Log", tint = TextSecondary) }
         IconButton(onClick = { showChargeHistory = true }) { Icon(Icons.Default.BatteryChargingFull, "Recargas", tint = AuroraTeal) }
         IconButton(onClick = { showAutoTrips = true }) { Icon(Icons.Default.DirectionsCar, "Viagens Auto", tint = AccentBlue) }
