@@ -231,10 +231,17 @@ setInterval(() => {
   const up = _funnelStatus.up;
   if (up === null) return;
   if (_lastFunnelUp === null) { _lastFunnelUp = up; return; }
+  // 8 dos 9 episódios em 8 dias duraram 15s: uma porta piscando em 2 polls vira
+  // par down/up no log. Não empurra push (funnel_down é AGENT_OWNED), mas polui o
+  // forense e acorda o agente à toa. Só registra o que sobreviver a 2min.
   if (up !== _lastFunnelUp) {
+    if (!_sustained('funnel_transition', true, true, 2 * 60_000)) return;
+    _sustain.delete('funnel_transition');
     _recordHealthEvent('funnel_' + (up ? 'up' : 'down'),
       `Funnel ${up ? 'voltou' : 'caiu'} · failed=${(_funnelStatus.failed||[]).join(',')} · fail_count=${_funnelStatus.fail_count}`);
     _lastFunnelUp = up;
+  } else {
+    _sustain.delete('funnel_transition');   // voltou sozinho antes de confirmar
   }
 }, 15_000);
 
@@ -436,16 +443,29 @@ function _saveAlertState() {
   }, 500);
 }
 
+// Header HTTP só aceita Latin-1. Emoji e travessão no Title faziam o Node lançar
+// ERR_INVALID_CHAR ANTES de mandar a requisição — e como todo chamador de _alert
+// está sob .catch, o push sumia calado. 29 dos 60 títulos de alerta caíam nisso
+// (todo o solar, o Bluetti, o pré-clima). RFC 2047 é o que o ntfy documenta pra
+// título não-ASCII.
+function _hdrSafe(v) {
+  const s = String(v);
+  return /^[\x20-\x7E]*$/.test(s) ? s
+    : '=?UTF-8?B?' + Buffer.from(s, 'utf8').toString('base64') + '?=';
+}
 function _ntfy(title, body, priority = 'default', tags = [], urlOverride = null) {
   const bodyBuf = Buffer.from(body, 'utf8');
   const headers = {
-    'Title':          title,
+    'Title':          _hdrSafe(title),
     'Priority':       priority,
     'Content-Type':   'text/plain; charset=utf-8',
     'Content-Length': bodyBuf.length,
   };
-  if (tags.length) headers['Tags'] = tags.join(',');
-  const req = https.request(urlOverride || NTFY_URL, { method: 'POST', headers }, res => res.resume());
+  if (tags.length) headers['Tags'] = _hdrSafe(tags.join(','));
+  let req;
+  try {
+    req = https.request(urlOverride || NTFY_URL, { method: 'POST', headers }, res => res.resume());
+  } catch (e) { console.warn('[ntfy] request inválida:', e.message); return; }
   req.on('error', () => {});
   req.write(bodyBuf);
   req.end();
@@ -797,6 +817,11 @@ async function _handleNotifyAction(rule) {
         console.log('[notify] arrived_home: sem share ativa pra Grasi — pula LA');
       } else for (const [tok, st] of active) {
         try {
+          // `tk` precisa ser resolvido AQUI: o do filter acima é escopo do callback,
+          // e usá-lo aqui lançava ReferenceError ("tk is not defined", visto em 18/08).
+          // Com a exceção no meio, a LA compartilhada nunca encerrava e ficava pinada
+          // na tela da destinatária — mesmo sintoma de LA congelada, causa diferente.
+          const tk = _shareTokens[tok];
           const cs = _sharedTripContentState(st.recipientName, st.tokenDestName, tk);
           cs.from = st.from; cs.destName = 'Casa'; cs.active = false;
           await apnsLive.pushUpdate(SHARED_TRIP_LA_TYPE, {}, cs,
@@ -828,6 +853,78 @@ const AGENT_OWNED = new Set([
   'apk_executor_dead', 'car_apk_stall', 'car_gwm_stall', 'car_total_silence', // claude verifica ao vivo antes
 ]);
 
+const DNS_MISMATCH_SUSTAIN_MS = +(process.env.DNS_MISMATCH_SUSTAIN_MIN || 10) * 60_000;
+const DELEGA_SUSTAIN_MS    = +(process.env.DELEGA_SUSTAIN_MIN || 3) * 60_000;
+const ICLOUD_SUSTAIN_MS    = +(process.env.ICLOUD_SUSTAIN_H || 4) * 3600_000;
+const COLLECTOR_SUSTAIN_MS = +(process.env.COLLECTOR_SUSTAIN_MIN || 15) * 60_000;
+const BLUETTI_SUSTAIN_MS   = +(process.env.BLUETTI_SUSTAIN_MIN   || 10) * 60_000;
+const STR_IMB_RATIO      = +(process.env.STRING_IMBALANCE_RATIO || 0.5);
+const STR_IMB_MIN_W       = +(process.env.STRING_IMBALANCE_MIN_W || 1500);
+const STR_IMB_SUSTAIN_MS  = +(process.env.STRING_IMBALANCE_SUSTAIN_MIN || 30) * 60_000;
+
+// ── Condição SUSTENTADA ──────────────────────────────────────────────────────
+// Quarta vez que este padrão aparece (ventilador, geração baixa, offline da
+// página, agora strings), então vira função. A diferença que importa não é
+// "verdadeiro/falso", são TRÊS estados:
+//
+//   bad        → acumula tempo
+//   good       → zera o relógio
+//   não sei    → CONGELA (nem acumula, nem zera)
+//
+// O terceiro é o que faltava. O alerta de string chamava _alert(false) sempre que
+// uma string caía abaixo do piso — ou seja, nuvem passando era lida como "está
+// tudo bem", zerava o relógio e rearmava o alerta. Era esse o motor do flapping.
+//
+// O relógio é PERSISTIDO. Ele vivia só em memória enquanto o `_alertState` ia pro
+// disco, e a assimetria produzia mentira: no restart o alerta lembrava que estava
+// disparado, o relógio começava do zero, e o `_alert()` recebia `false` → mandava
+// "Recuperado" sem nada ter recuperado. Aconteceu de verdade em 02/09 com o
+// `local_perm_lost`. Além disso a detecção real atrasava uma janela inteira a cada
+// restart, e eu reinicio o bridge toda hora.
+//
+// `seen` é o antídoto pro outro extremo: se o bridge ficou fora por horas, o
+// `since` guardado não prova continuidade nenhuma — ninguém estava observando.
+// Entrada velha demais é descartada em vez de virar veredito instantâneo.
+const _sustain = new Map();     // key → { since, seen }
+const SUSTAIN_FILE = path.join(DATA_DIR, 'sustain-state.json');
+const SUSTAIN_MAX_GAP_MS = +(process.env.SUSTAIN_MAX_GAP_MIN || 30) * 60_000;
+let _sustainSaveTimer = null;
+function _saveSustain() {
+  if (_sustainSaveTimer) return;                       // debounce, igual ao _alertState
+  _sustainSaveTimer = setTimeout(() => {
+    _sustainSaveTimer = null;
+    try { atomicWriteFileSync(SUSTAIN_FILE, JSON.stringify(Object.fromEntries(_sustain))); }
+    catch (_) { /* falha de disco não paralisa o bridge */ }
+  }, 500);
+}
+(function _loadSustain() {
+  try {
+    const j = JSON.parse(fs.readFileSync(SUSTAIN_FILE, 'utf8'));
+    const now = Date.now();
+    let vivos = 0, velhos = 0;
+    for (const [k, v] of Object.entries(j || {})) {
+      if (!v || !v.since) continue;
+      if (now - (v.seen || v.since) > SUSTAIN_MAX_GAP_MS) { velhos++; continue; }
+      _sustain.set(k, v); vivos++;
+    }
+    if (vivos || velhos) console.log(`[sustain] ${vivos} relógio(s) restaurado(s), ${velhos} descartado(s) por gap`);
+  } catch (_) {}
+})();
+function _sustained(key, evaluable, bad, minMs) {
+  const now = Date.now();
+  const st = _sustain.get(key);
+  if (!evaluable) return !!(st && st.since && (now - st.since) >= minMs);  // congela
+  if (!bad) { if (st) { _sustain.delete(key); _saveSustain(); } return false; }
+  if (!st || !st.since) { _sustain.set(key, { since: now, seen: now }); _saveSustain(); return false; }
+  st.seen = now; _saveSustain();
+  return (now - st.since) >= minMs;
+}
+/// Há quanto tempo a condição está ruim, pra escrever no corpo do alerta.
+function _sustainedFor(key) {
+  const st = _sustain.get(key);
+  return st && st.since ? Math.round((Date.now() - st.since) / 60_000) : 0;
+}
+
 function _alert(id, firing, title, body, priority = 'default', tags = [], opts = {}) {
   if (AGENT_OWNED.has(id)) opts = { ...opts, silent: true };
   const prev = _alertState.get(id) || { firing: false, firedAt: 0, lastNotifiedAt: 0, notified: false };
@@ -839,11 +936,11 @@ function _alert(id, firing, title, body, priority = 'default', tags = [], opts =
     // nova queda. Com fireDelay=0 notifica na hora (o próprio timeout já é debounce);
     // senão só registra e aguarda fireDelay antes de notificar.
     if (fireDelay <= 0) {
-      _alertState.set(id, { firing: true, firedAt: now, lastNotifiedAt: now, notified: true });
+      _alertState.set(id, { firing: true, firedAt: now, lastNotifiedAt: now, notified: true, title, priority });
       if (!opts.silent) _ntfy(title, body, priority, tags);
       _recordHealthEvent(id, title + ': ' + body);
     } else {
-      _alertState.set(id, { firing: true, firedAt: now, lastNotifiedAt: 0, notified: false });
+      _alertState.set(id, { firing: true, firedAt: now, lastNotifiedAt: 0, notified: false, title, priority });
     }
   } else if (firing && prev.firing && !prev.notified && (now - prev.firedAt) >= fireDelay) {
     // falha persistiu o tempo mínimo → primeira notificação
@@ -942,6 +1039,65 @@ function _selfHealPm2() {
   child.unref();
 }
 
+// ── Perda da permissão "Rede Local" do daemon pm2 ────────────────────────────
+// Recorrente: o Mac reinicia, o daemon sobe sem a permissão e TODO TCP pra LAN
+// passa a dar EHOSTUNREACH. O bridge fica cego pro HA — solar, ventilador,
+// família, tudo — enquanto `curl` do terminal alcança o mesmo IP em 3ms.
+//
+// O guard genérico de cegueira local (3 de 4 sinais) NÃO pega este caso: só o HA
+// cai. Mosquitto é 127.0.0.1 e loopback não passa por TCC; o SSD é disco; e o
+// gateway é sondado com `ping`, que é ICMP e também escapa. Sobra 1 de 4.
+//
+// Discriminador: se o processo NUNCA alcançou o HA desde que subiu, é permissão
+// nascida quebrada. HA que cai depois de ter funcionado nesta encarnação é outage
+// de verdade, e aí reciclar o pm2 não conserta nada — por isso a distinção.
+//
+// Trava dura: no máximo UMA reciclagem por boot da máquina, persistida. Se a
+// reciclagem não resolver, não insiste — a falha é outra coisa e um loop de
+// `pm2 kill` seria muito pior que o problema.
+let _haEverUp = false;
+const LOCALPERM_FILE = path.join(DATA_DIR, 'localperm-heal.json');
+const LOCALPERM_SUSTAIN_MS = +(process.env.LOCALPERM_SUSTAIN_MIN || 4) * 60_000;
+function _bootMs() { return Math.round(Date.now() - require('os').uptime() * 1000); }
+function _healedThisBoot() {
+  try {
+    const j = JSON.parse(fs.readFileSync(LOCALPERM_FILE, 'utf8'));
+    return Math.abs((j.boot_ms || 0) - _bootMs()) < 120_000;   // mesmo boot (±2min)
+  } catch (_) { return false; }
+}
+function _markHealedThisBoot() {
+  try { atomicWriteFileSync(LOCALPERM_FILE, JSON.stringify({ boot_ms: _bootMs(), at: Date.now() })); }
+  catch (_) {}
+}
+function _checkLocalPermission() {
+  if (_haStatus.up === true) {
+    _haEverUp = true;
+    // Carimba mesmo no caminho bom: `checked_at: 0` faria o vigia não saber
+    // diferenciar "verificado e está tudo bem" de "nunca verificado".
+    _localPerm = { lost: false, since_ms: null, ha_error: null, checked_at: Date.now() };
+    return;
+  }
+  const err = String(_haStatus.error || '');
+  // EHOSTUNREACH especificamente: ECONNREFUSED seria HA no ar sem escutar.
+  const assinatura = _haStatus.up === false && /EHOSTUNREACH/.test(err) && !_haEverUp;
+  const firing = _sustained('localperm', true, assinatura, LOCALPERM_SUSTAIN_MS);
+  _alert('local_perm_lost', firing,
+    'Bridge sem permissão de Rede Local',
+    `TCP pra LAN dando EHOSTUNREACH desde que o processo subiu, e o HA nunca respondeu `
+    + `nesta encarnação. É a permissão do daemon pm2, que some no reboot do Mac.`
+    + (_healedThisBoot() ? ' Já reciclei uma vez neste boot — não vou insistir.'
+                         : ' Reciclando o pm2 (kill+resurrect).'),
+    'urgent', ['satellite', 'warning'], { fireDelay: 0, repeatEvery: 6 * 3600_000 });
+  // O bridge NÃO conserta isso. Ele tentou em 02/09 e falhou: o `pm2 kill+resurrect`
+  // sai daqui como filho do próprio daemon, e o macOS atribui o daemon novo ao
+  // MESMO responsible process — nasce sem a permissão de novo. Quem consegue é um
+  // processo de fora do pm2: o `servicos-vigia.sh`, que roda por launchd e já
+  // alcança o HA. Aqui fica só o diagnóstico, exposto pra ele ler.
+  _localPerm = { lost: firing, since_ms: firing ? (_sustain.get('localperm') || {}).since || null : null,
+                 ha_error: firing ? err.slice(0, 180) : null, checked_at: Date.now() };
+}
+let _localPerm = { lost: false, since_ms: null, ha_error: null, checked_at: 0 };
+
 function _checkAlerts() {
   const now = Date.now();
 
@@ -1025,11 +1181,27 @@ function _checkAlerts() {
 
   // 5. Tailscale não Running
   const tsDown = _tsStatus.backend !== null && _tsStatus.backend !== 'Running';
+  _checkLocalPermission();
   _alert('ts_down', tsDown, 'Tailscale fora', `Backend: ${_tsStatus.backend || _tsStatus.error}`, 'high', ['satellite']);
 
   // 6. DuckDNS divergente
-  _alert('dns_mismatch', _netStatus.match === false, 'DuckDNS desatualizado',
-    `DNS resolve ${_netStatus.duckdns_ip}, IP público é ${_netStatus.public_ip}`, 'default', ['globe_with_meridians'], { silent: true });
+  // Saiu do `silent`. Ele sabia que o carro estava inalcançável e não falava:
+  // em 02/09 o IP mudou às 17:37 e eu só descobri abrindo a página, horas depois.
+  // Alerta que detecta e cala é pior que alerta que não existe.
+  //
+  // Sustentação de 10min porque o net-failover alterna Ethernet↔WiFi e o DuckDNS
+  // tem TTL: divergência de um ciclo é propagação, não problema. E o corpo diz a
+  // CONSEQUÊNCIA — quem lê no celular precisa saber o que quebrou, não só que dois
+  // IPs diferem.
+  _alert('dns_mismatch',
+    _sustained('dns_mismatch', _netStatus.match !== null, _netStatus.match === false, DNS_MISMATCH_SUSTAIN_MS),
+    'Carro sem caminho de volta',
+    `mqttrafael.duckdns.org aponta pra ${_netStatus.duckdns_ip} e o IP público agora é `
+    + `${_netStatus.public_ip} (há ${_sustainedFor('dns_mismatch')}min). O APK do carro chega por `
+    + `esse hostname, então enquanto divergir ele não publica. Atualize o DuckDNS — `
+    + `nada faz isso sozinho. Se você está em link CGNAT (Starlink/4G), entrada não `
+    + `atravessa e atualizar o DNS não resolve.`,
+    'default', ['globe_with_meridians'], { repeatEvery: 12 * 3600_000 });
 
   // 7. Memória alta (RSS > 450MB)
   const rss = Math.round(process.memoryUsage().rss / 1048576);
@@ -1106,9 +1278,16 @@ function _checkAlerts() {
   // 17. iCloud: backup local não subiu (offsite em risco)
   if (_icloudSync.checked_at > 0 && !_icloudSync.error) {
     const pend = _icloudSync.pending > 0;
-    _alert('icloud_pending', pend, 'Backup iCloud não sincronizou',
-      `${_icloudSync.pending}/${_icloudSync.total} arquivos recentes ainda não subiram`, 'high', ['cloud'],
-      { repeatEvery: 6 * 3600_000 });
+    // Em 30 dias disparou 6 vezes, SEMPRE entre 00:05 e 00:17 (quando o backup
+    // roda), e SEMPRE se resolveu sozinho — pior caso 2,0h, mediana 0,8h. Ou
+    // seja: 6 pushes de madrugada pra avisar de fila que ia esvaziar sozinha.
+    // Só interessa o backup que NÃO terminou; a sustentação passa do pior
+    // autocorrigido com folga.
+    _alert('icloud_pending', _sustained('icloud_pending', true, pend, ICLOUD_SUSTAIN_MS),
+      'Backup iCloud travado',
+      `${_icloudSync.pending}/${_icloudSync.total} arquivos ainda não subiram depois de `
+      + `${Math.round(_sustainedFor('icloud_pending') / 60)}h. Não se resolveu sozinho.`,
+      'high', ['cloud'], { repeatEvery: 12 * 3600_000 });
   }
 
   // 18. APNs: tokens de Live Activity morrendo (atrito → LA para de entregar)
@@ -2560,6 +2739,13 @@ const _hystTimers  = {
 
 let prevChargingState    = null;
 let _lastChargeEndMs     = 0;    // quando a última recarga finalizou (anti-flap de fim de sessão)
+// Auto-start só é afirmado se o motor CONTINUAR ligado. O filtro de transiente
+// existente só suprime a transição que vem DEPOIS de outra — a primeira borda de
+// subida passava e disparava o push na hora, e o CAN deste carro oscila 0→1→0
+// (14/08: alerta 06:46:40, e às 06:47:51/06:47:56 o log registrou 0→1 e 1→0 como
+// transientes). Espera de confirmação: motor de verdade fica ligado; ruído volta a 0.
+let _selfStartTimer = null;
+const SELF_START_CONFIRMA_MS = 60_000;
 const CHARGE_BOUNCE_MS   = 60_000; // Carregando↔fim dentro dessa janela = oscilação de fim de recarga, não sessão nova
 // Após finalizar, a LA NÃO encerra: vira card-resumo fixo (doneBody verde) e fica
 // pinada. A próxima recarga dentro dessa janela reaproveita a MESMA LA (volta a
@@ -2936,7 +3122,12 @@ try {
           _estimatedFields: d._estimatedFields || [],
           _estimatedReason: d._estimatedReason || '',
         } : {};
-        autoTripsArr.push({ tripId: d.tripId, ...d.autoTrip, ...hybrid, ...meta });
+        // merged_from é gravado pelo merge mas não sobrevivia à carga: depois de um
+        // restart a viagem unificada aparecia como se sempre tivesse sido uma só, e
+        // o PWA perdia a lista de ids absorvidos que usa pra limpar o cache local.
+        const fusao = Array.isArray(d.merged_from) && d.merged_from.length
+          ? { merged_from: d.merged_from } : {};
+        autoTripsArr.push({ tripId: d.tripId, ...d.autoTrip, ...hybrid, ...meta, ...fusao });
       }
     } catch (_) {}
   }
@@ -3035,6 +3226,7 @@ const state = {
   charge_power_kw:     0,
   charge_max_power_kw: 0,    // pico de potência da sessão atual (reset ao iniciar)
   charge_avg_power_kw: 0,    // potência média da sessão atual (kWh / tempo decorrido)
+  overlay_destino: true,     // botão flutuante de destino visível no carro (toggle do app)
   charge_start_soc_pct: 0,   // % SOC quando a sessão atual começou (reset ao iniciar)
   charge_session_start_ms: 0,// timestamp do início da sessão — persistido pra sobreviver a restart
   charge_session_kwh_at_init: 0, // kWh já acumulado no momento do lazy init (0 quando sessão começa nova)
@@ -3417,9 +3609,25 @@ function recomputeTankAvgPrice() {
   return avgPrice;
 }
 
-// Snapshot do tanque ao desligar o motor — usado pra detectar abastecimento ao religar
+// Snapshot do tanque ao desligar o motor — usado pra detectar abastecimento ao religar.
+// PERSISTIDO em disco: ficava só em memória e todo restart do bridge zerava. Como o
+// detector exige `_fuelLAtPark > 0`, qualquer restart entre estacionar e religar fazia
+// o abastecimento passar em branco, sem log. Foi o que aconteceu em 09/08 (restart
+// 14:24 durante deploy) e comeu um tanque de 44,36 L.
+const FUELPARK_FILE = path.join(DATA_DIR, 'fuel-park.json');
 let _fuelLAtPark = 0;
 let _fuelParkTs  = 0;
+try {
+  if (fs.existsSync(FUELPARK_FILE)) {
+    const d = JSON.parse(fs.readFileSync(FUELPARK_FILE, 'utf8')) || {};
+    _fuelLAtPark = +d.fuel_l || 0;
+    _fuelParkTs  = +d.ts     || 0;
+    if (_fuelLAtPark > 0) console.log(`✓ Snapshot do tanque: ${_fuelLAtPark}L`);
+  }
+} catch (e) { console.error('Aviso fuel-park.json:', e.message); }
+function _saveFuelPark() {
+  try { atomicWriteFileSync(FUELPARK_FILE, JSON.stringify({ fuel_l: _fuelLAtPark, ts: _fuelParkTs })); } catch (_) {}
+}
 
 // ── AC esquecido ligado com carro parado (velocidade = 0 por X min) ──────────
 let _acParkedTimer   = null;   // setTimeout handle
@@ -3682,8 +3890,16 @@ const REFUEL_MIN_OFF_MS = 3 * 60_000; // motor precisa ter ficado desligado ≥3
                                       // rápido do APK bug não conta como parada)
 
 function checkRefuelOnEngineOn() {
+  // `state.fuel_l` é sempre a leitura do APK (garantido no handler de fuel_l, 04/08):
+  // as duas fontes medem o tanque com diferença de ~1 L e o litro do carro é o que
+  // vale. Importa aqui porque o abastecimento é a DIFERENÇA entre duas leituras —
+  // misturar fontes entre o "antes" e o "depois" inventaria ou apagaria litros
+  // sozinho, e com REFUEL_MIN_LITERS=5 uma divergência de 1 L não protege de nada.
   const fuelNow = +state.fuel_l || 0;
-  if (_fuelLAtPark <= 0 || fuelNow <= 0) return;
+  if (_fuelLAtPark <= 0 || fuelNow <= 0) {
+    console.log(`[refuel] sem baseline pra comparar (park=${_fuelLAtPark}L, agora=${fuelNow}L) — detecção pulada`);
+    return;
+  }
   const added = fuelNow - _fuelLAtPark;
   if (added < REFUEL_MIN_LITERS) return;
   // Guarda contra rajada de motor on/off (APK travado, ANR, etc): se ficou
@@ -3696,34 +3912,25 @@ function checkRefuelOnEngineOn() {
     return;
   }
 
-  // Criar registro PENDENTE (sem preço — usuário preenche depois)
-  const rec = {
-    id: 'r-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
-    timestamp_ms: Date.now(),
-    fuel_l_before: +_fuelLAtPark.toFixed(2),
-    fuel_l_after:  +fuelNow.toFixed(2),
-    liters_added:  +added.toFixed(2),
-    price_per_liter: 0,           // pendente — usuário registra
-    total_cost: 0,
-    odometer_km: +state.odometer_km || 0,
-    location_name: '',
-    notes: '',
-    pending: true,
-  };
-  refuels.push(rec);
-  saveRefuels();
+  // NÃO cria mais registro (11/08, decisão do dono). A detecção compara duas leituras
+  // do sensor do tanque e sempre errava os litros em relação à bomba, e ainda depende do
+  // evento de motor ligado — que o bridge suprime como ruído de inicialização, então
+  // metade dos abastecimentos passava batido. Agora só AVISA; quem registra é o botão
+  // "Registrar abastecimento" no app, com o que a bomba mostrou.
   addEvent('refuel_detected', `⛽ Abastecimento de ~${added.toFixed(1)}L detectado`);
   sendPush(
     `⛽ Abastecimento detectado`,
-    `~${added.toFixed(1)}L. Toque pra registrar o preço.`,
+    `~${added.toFixed(1)}L. Abra o app e registre os litros e o valor da bomba.`,
     'refuel_detected'
   );
-  console.log(`[refuel] detectado +${added.toFixed(1)}L (${_fuelLAtPark.toFixed(1)} → ${fuelNow.toFixed(1)})`);
-  broadcast('new_refuel', rec);
+  console.log(`[refuel] detectado +${added.toFixed(1)}L (${_fuelLAtPark.toFixed(1)} → ${fuelNow.toFixed(1)}) — só aviso, sem registro`);
+  // Zera o baseline: sem isso o mesmo delta seria reavisado a cada religada.
+  _fuelLAtPark = fuelNow; _fuelParkTs = Date.now(); _saveFuelPark();
 }
 
 // Idem pra bateria — itera por charges com preço e mixa com kWh estimado restante.
 // kWh restante na bateria = SOC% × BATTERY_CAPACITY_KWH / 100.
+let _chargesMudou = false;
 function recomputeBatteryAvgPrice() {
   // chargesArr é o storage de recargas (carregado no boot via CHARGES_FILE).
   // Preço por sessão: cost_override.perKwh > 0 ou cost_override.total / energy.
@@ -3749,12 +3956,60 @@ function recomputeBatteryAvgPrice() {
       console.warn(`[charge] pricePerKwh anormal ts=${c.timestamp_ms}: R$ ${pricePerKwh.toFixed(2)}/kWh — usando SEED ${SEED_KWH_PRICE}`);
       pricePerKwh = SEED_KWH_PRICE;
     }
+    // SOC coerente com a energia? `soc_start` é o PESO do histórico nesta conta —
+    // com 0 a fórmula conclui "bateria vazia" e a sessão reescreve a média inteira.
+    // Foi o que aconteceu em 31/07: uma recarga de 3,6 kWh marcada 0→97% levou a
+    // média de 0,69 pra 1,54, e ela levou dias descendo. 0→97% exigiria ~33 kWh —
+    // aquele zero era leitura falha, não bateria vazia.
+    //
+    // Critério: o ΔSOC declarado tem que explicar a energia, com folga de 2×. Fora
+    // disso o SOC não é confiável e a sessão entra com peso pela ENERGIA (não zera
+    // o histórico) — perde precisão, mas não destrói a série.
     const socStart = +c.soc_start || 0;
-    const kWhBefore = socStart * BATTERY_CAPACITY_KWH / 100;
+    const socEnd   = +c.soc_end   || 0;
+    const dSoc = socEnd - socStart;
+    const kwhEsperado = dSoc > 0 ? dSoc * BATTERY_CAPACITY_KWH / 100 : 0;
+    const socConfiavel = socStart > 0 && kwhEsperado > 0
+                         && energy <= kwhEsperado * 2 && energy >= kwhEsperado / 2;
+    // ── Energia coerente com o ΔSOC? ────────────────────────────────────────
+    // `energy / ΔSOC` é a capacidade que a sessão IMPLICA. Nas 72 sessões a mediana
+    // é 35,2 e o corpo dos dados vive entre 31 e 42; fora de 28–42 o `energy_kwh`
+    // não fecha com o SOC e um dos dois está errado. Marca o registro pra aparecer
+    // na tela em vez de aceitar calado — foi o que deixou 11/08 sair com 16,3 kWh
+    // para 64 pontos de SOC (capacidade implícita 25,4).
+    const capImpl = dSoc > 0 ? +(energy / (dSoc / 100)).toFixed(1) : 0;
+    const suspeita = dSoc >= 15 && capImpl > 0 && (capImpl < 28 || capImpl > 42);
+    if (suspeita && !c._energia_suspeita) {
+      c._energia_suspeita = true;
+      c._cap_implicita = capImpl;
+      _chargesMudou = true;
+      console.warn(`[charge] energia suspeita ts=${c.timestamp_ms}: ${energy.toFixed(1)}kWh `
+        + `para ΔSOC ${dSoc}% → capacidade implícita ${capImpl}kWh (esperado 28–42)`);
+    } else if (!suspeita && c._energia_suspeita) {
+      delete c._energia_suspeita; delete c._cap_implicita; _chargesMudou = true;
+    }
+
+    let kWhBefore;
+    if (socConfiavel) {
+      kWhBefore = socStart * BATTERY_CAPACITY_KWH / 100;
+    } else {
+      // Peso neutro: metade da capacidade. Mantém o histórico com influência
+      // comparável à da sessão nova, em vez de zerá-lo ou de ignorar a sessão.
+      kWhBefore = BATTERY_CAPACITY_KWH / 2;
+      // Log UMA vez por registro: este recompute roda a cada poucos minutos e o
+      // aviso enchia o log com a mesma recarga de 31/07 pra sempre.
+      if (!c._soc_incoerente) {
+        c._soc_incoerente = true; _chargesMudou = true;
+        console.warn(`[charge] SOC incoerente ts=${c.timestamp_ms} (${socStart}→${socEnd}% para `
+          + `${energy.toFixed(1)}kWh, esperado ~${kwhEsperado.toFixed(1)}) — peso neutro na média`);
+      }
+    }
+    if (socConfiavel && c._soc_incoerente) { delete c._soc_incoerente; _chargesMudou = true; }
     const kWhAfter  = kWhBefore + energy;
     avgPrice = (kWhBefore * avgPrice + energy * pricePerKwh) / kWhAfter;
     c.battery_avg_after = +avgPrice.toFixed(4);   // snapshot pós-recarga
   }
+  if (_chargesMudou) { _chargesMudou = false; scheduleChargesFlush(); }
   state.battery_avg_price_per_kwh = +avgPrice.toFixed(4);
   state.price_kwh = +avgPrice.toFixed(4);
   publishPricesToCar();
@@ -3906,10 +4161,29 @@ setInterval(() => {
     }
     if (_offlineTransitions.length >= 5 && now - _lastZumbiAlertMs > 30 * 60_000) {
       _lastZumbiAlertMs = now;
-      sendPush('⚠️ APK do carro em loop',
-        `Ecotrip Impulse caiu ${_offlineTransitions.length}× em 5min (padrão zumbi). Force-parada no carro pra restaurar.`,
-        'apk_zumbi_loop', { tag: 'apk_zumbi_loop' });
-      console.warn(`[mqtt] ping-pong detectado: ${_offlineTransitions.length} offline/5min — alerta disparado`);
+      // Reconexão NÃO é queda. O client-id do APK carrega o PID
+      // (haval_ecotrip_<id>_p<PID>_b<n>): se ele não mudou, é o MESMO processo
+      // reconectando — troca de rede, não crash. Em 09/08 o alerta acusou "caiu 5×"
+      // com três IPs diferentes em 10min, PID idêntico e ZERO apk-death: o carro
+      // trocou de rede, e o app estava vivo o tempo todo.
+      //
+      // A distinção importa porque o texto antigo mandava FORCE-PARAR o app — e
+      // force-stop põe o Android em stopped state, bloqueando broadcasts e alarmes.
+      // O "conserto" deixaria o app inerte até ser aberto na mão.
+      const mortesRecentes = _apkDeaths.filter(d => now - new Date(d.at).getTime() < 5 * 60_000).length;
+      if (mortesRecentes >= 2) {
+        sendPush('⚠️ APK do carro em loop',
+          `Ecotrip caiu ${mortesRecentes}× em 5min. Se persistir, abra o app no carro.`,
+          'apk_zumbi_loop', { tag: 'apk_zumbi_loop' });
+        console.warn(`[mqtt] crash loop real: ${mortesRecentes} mortes/5min`);
+      } else {
+        // Sem mortes: é instabilidade de REDE. Avisa com o diagnóstico certo, sem
+        // mandar force-parar nada.
+        sendPush('📶 Conexão do carro instável',
+          `${_offlineTransitions.length} reconexões em 5min — provável troca de rede. O app segue rodando.`,
+          'apk_rede_instavel', { tag: 'apk_rede_instavel' });
+        console.warn(`[mqtt] ${_offlineTransitions.length} reconexões/5min sem morte de processo — instabilidade de rede`);
+      }
     }
     // Carro caiu silencioso no meio da viagem (APK morre ao desligar sem publicar
     // engine_state='0'). Sem isso a LA de viagem ficava presa indefinidamente.
@@ -4342,7 +4616,24 @@ function matchKnownPlace(lat, lng, tol = 0) {
 // Destinos compartilhados do Waze/Maps (in-memory, últimos ~30). Usados pra nomear
 // a viagem que terminar perto deles com o NOME digitado (ex.: "Shopping Flamboyant")
 // em vez do bairro+cidade do reverse-geocode.
+/// Destinos recentes. Persistidos porque um restart do bridge no meio da viagem
+/// apagava o nome do destino e a viagem terminava batizada pelo bairro — mesma
+/// falha da chegada zerar o ts, por outro caminho. 30 itens, arquivo minúsculo.
+const NAV_DESTS_FILE = path.join(DATA_DIR, 'nav_dests.json');
 const recentNavDests = [];
+try {
+  const _nd = JSON.parse(fs.readFileSync(NAV_DESTS_FILE, 'utf8'));
+  if (Array.isArray(_nd)) recentNavDests.push(..._nd.filter(x => x && x.name && _validLatLng(x.lat, x.lng)));
+} catch (_) {}
+let _navDestsSaveTimer = null;
+function _saveNavDestsSoon() {
+  if (_navDestsSaveTimer) return;
+  _navDestsSaveTimer = setTimeout(() => {
+    _navDestsSaveTimer = null;
+    try { fs.writeFileSync(NAV_DESTS_FILE, JSON.stringify(recentNavDests.slice(-30))); }
+    catch (e) { console.warn('[nav_dest] falha ao salvar:', e.message); }
+  }, 5_000);
+}
 // Dispositivos NavRelay online: alimentado por mensagens retidas em nav_devices/<id>.
 // LWT esvazia retain ao desconectar — entry é apagada no handler do mqtt.
 const _navDevices = {};
@@ -4374,6 +4665,27 @@ function _espelhaDestinoNoWaze(lat, lng, name) {
 }
 
 let _navDestRetained = false;   // há um nav_dest retido no broker? (pra limpar ao expirar)
+/// Nome de onde a viagem ANTERIOR terminou, se esta começa no mesmo ponto.
+///
+/// Sem isto, sair de um lugar que só tinha nome por destino digitado (não é Local
+/// Conhecido) produzia o bairro do reverse-geocode na partida: chegou em "New
+/// Vikings Barbearia Moderna" e saiu de "Setor Bueno" (01/08). Se o carro não se
+/// moveu entre as duas viagens, é o mesmo lugar e merece o mesmo nome.
+///
+/// Compara com a viagem imediatamente anterior e só herda se ela terminou PERTO —
+/// herdar de uma mais antiga ignoraria o trecho que houve no meio.
+function _nomeDaChegadaAnterior(lat, lng, startMs, tolM = 150) {
+  if (!lat || !lng || !startMs) return null;
+  let ant = null;
+  for (const t of autoTripsArr) {
+    if (!t.endMs || t.endMs > startMs || !t.endLat || !t.endLng) continue;
+    if (!ant || t.endMs > ant.endMs) ant = t;
+  }
+  if (!ant) return null;
+  if (haversineM(lat, lng, ant.endLat, ant.endLng) > tolM) return null;   // houve movimentação
+  return ant.endKp || null;
+}
+
 function _navDestNameFor(lat, lng) {
   if (!lat || !lng) return null;
   const maxAgeMs = 12 * 3600 * 1000;   // só destinos das últimas 12h
@@ -5088,6 +5400,101 @@ app.get('/api/departure-configs', (_req, res) => {
   res.json(out);
 });
 
+// ── Sugestão de destino a partir do próximo compromisso ────────────────────
+// A agenda não vive aqui: a Mari cria planos de pré-clima com `eventStartMs` +
+// `destName`/`destLat` a partir do calendário, e é por esses planos que o compromisso
+// chega ao bridge. Uso a mesma fonte em vez de inventar um segundo canal de agenda.
+const SUGESTAO_JANELA_MS = 3 * 3600_000;   // compromisso nas próximas 3h
+
+/** Próximo compromisso COM destino dentro da janela, ou null. */
+function _proximoCompromisso() {
+  const agora = Date.now();
+  const cands = (preclimat.schedules || []).filter(x =>
+    x && x.enabled !== false
+    && +x.eventStartMs > agora
+    && +x.eventStartMs - agora < SUGESTAO_JANELA_MS
+    && ((x.destName && String(x.destName).trim()) || +x.destLat || +x.destLng));
+  if (!cands.length) return null;
+  cands.sort((a, b) => (+a.eventStartMs) - (+b.eventStartMs));
+  const c = cands[0];
+  return {
+    id: c.id, nome: String(c.destName || '').trim(),
+    lat: +c.destLat || 0, lng: +c.destLng || 0,
+    eventStartMs: +c.eventStartMs,
+    label: String(c.label || '').trim(),
+  };
+}
+
+/** Publica a sugestão pro carro. `retain:false`: é convite pontual, não estado —
+ *  retido reapareceria a cada reconexão do APK e viraria popup fantasma. */
+function _sugereDestinoNoCarro(motivo) {
+  const c = _proximoCompromisso();
+  if (!c) { console.log(`[sugestao] ${motivo}: nenhum compromisso com destino na janela`); return false; }
+  // Já tem rota? Não atropela decisão do dono.
+  if (state.route && Array.isArray(state.route.wps) && state.route.wps.length) {
+    console.log(`[sugestao] ${motivo}: rota já definida (${state.route.wps[0].name}) — não sugere`);
+    return false;
+  }
+  const jaSugerido = _sugestaoFeita[c.id];
+  if (jaSugerido && Date.now() - jaSugerido < 2 * 3600_000) {
+    console.log(`[sugestao] ${motivo}: já sugerido há ${Math.round((Date.now() - jaSugerido) / 60000)}min — pula`);
+    return false;
+  }
+  _sugestaoFeita[c.id] = Date.now();
+  const hhmm = new Date(c.eventStartMs).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  mqttClient.publish(`${MQTT_PREFIX}/cmd/sugestao_destino`, JSON.stringify({
+    id: c.id, nome: c.nome, lat: c.lat, lng: c.lng, hhmm,
+    label: c.label, eventStartMs: c.eventStartMs, ts: Date.now(),
+  }), { qos: 1, retain: false });
+  console.log(`[sugestao] ${motivo}: sugerido "${c.nome}" às ${hhmm} (id=${c.id})`);
+  return true;
+}
+let _sugestaoFeita = {};
+
+// POST /api/destino-sugerido/accept  { id }
+// O dono tocou "Sim" no popup do carro. Mesma orquestração do departure/accept:
+// grava a rota, publica o nav_dest retido e ESPELHA NO WAZE — que é o "o Waze puxa
+// automaticamente" que o dono pediu.
+app.post('/api/destino-sugerido/accept', (req, res) => {
+  const id = String((req.body || {}).id || '');
+  const c = _proximoCompromisso();
+  if (!c || (id && c.id !== id)) return res.status(404).json({ error: 'sugestão não encontrada ou expirada' });
+  if (!(c.lat && c.lng)) return res.status(422).json({ error: 'compromisso sem coordenada' });
+  try {
+    const nome = c.nome || 'Compromisso';
+    mqttClient.publish(`${MQTT_PREFIX}/cmd/nav_dest`,
+      JSON.stringify({ lat: c.lat, lng: c.lng, name: nome }), { qos: 1, retain: true });
+    // state.route JUNTO do tópico: sem isso o `_maybeComputeArrival` vê retained sem
+    // rota em memória, conclui "rota órfã" e apaga o destino em segundos — foi o que
+    // aconteceu no caminho da Live Activity em 04/08.
+    state.route = { wps: [{ lat: c.lat, lng: c.lng, name: nome, isFinal: true }],
+                    completedIdx: -1, undo: null, ts: Date.now() };
+    _navDestRetained = true;
+    scheduleStateSave();
+    _espelhaDestinoNoWaze(c.lat, c.lng, nome);
+    recentNavDests.push({ name: nome, lat: c.lat, lng: c.lng, ts: Date.now() });
+    _registraRecente(nome, c.lat, c.lng);
+    if (recentNavDests.length > 30) recentNavDests.shift();
+    _saveNavDestsSoon();
+    console.log(`[sugestao] ACEITA: "${nome}" (${c.lat},${c.lng}) — rota gravada e espelhada no Waze`);
+    res.json({ ok: true, nome, lat: c.lat, lng: c.lng });
+  } catch (e) {
+    console.warn('[sugestao] accept falhou:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/destino-sugerido/enviar — força a sugestão agora (teste e botão do app).
+app.post('/api/destino-sugerido/enviar', (req, res) => {
+  // `forcar` ignora o anti-repetição de 2h, pra testar sem esperar.
+  if ((req.body || {}).forcar) _sugestaoFeita = {};
+  const ok = _sugereDestinoNoCarro('manual');
+  res.json({ ok, proximo: _proximoCompromisso() });
+});
+
+// GET /api/destino-sugerido — o que seria sugerido agora (diagnóstico e uso do app).
+app.get('/api/destino-sugerido', (_req, res) => res.json({ proximo: _proximoCompromisso() }));
+
 // POST /api/departure/accept  { config_id }
 // O usuário tocou "Sim" na LA "Indo pra <dest>?" — orquestra: seta nav_dest no
 // carro (MQTT retido) + cria share role=grasi + inicia SharedTripLA no iPhone
@@ -5104,10 +5511,21 @@ app.post('/api/departure/accept', async (req, res) => {
   try {
     const payload = JSON.stringify({ lat: to.lat, lng: to.lng, name: destName });
     mqttClient.publish(`${MQTT_PREFIX}/cmd/nav_dest`, payload, { qos: 1, retain: true });
+    // state.route JUNTO, não só o tópico. `_maybeComputeArrival` roda em tick e, se
+    // encontra retained no broker sem rota em memória, conclui "rota órfã" e limpa —
+    // apagando o destino que o dono acabou de aceitar. Em 04/08 durou 13s: publicado
+    // 17:18:19, limpo 17:18:32, e só funcionou quando ele repetiu pelo botão
+    // flutuante (aquele caminho já setava a rota). O comentário no handler de nav_to
+    // avisa exatamente disso; este caminho, o da Live Activity, ficou de fora.
+    state.route = { wps: [{ lat: to.lat, lng: to.lng, name: destName, isFinal: true }],
+                    completedIdx: -1, undo: null, ts: Date.now() };
+    _navDestRetained = true;
+    scheduleStateSave();
     _espelhaDestinoNoWaze(to.lat, to.lng, destName);
     recentNavDests.push({ name: destName, lat: to.lat, lng: to.lng, ts: Date.now() });
     _registraRecente(destName, to.lat, to.lng);
     if (recentNavDests.length > 30) recentNavDests.shift();
+    _saveNavDestsSoon();
   } catch (e) { console.warn('[departure/accept] nav_dest falhou:', e.message); }
   // 2. share pra Grasi
   let share = null;
@@ -5375,8 +5793,12 @@ function _evalBluettiAlerts() {
     const emoji = key === 'casa' ? '🏠 Casa' : '🌱 Sítio';
     const feeds = s.feeds || (key === 'casa' ? 'Mac Mini + Roteador' : 'Starlink');
     const unreachable = !s.reachable;
+    // A nuvem Bluetti fala por WebSocket STOMP; quedinha de socket é comum e
+    // reconecta sozinha. Sustentação evita o push por reconexão de 1 ciclo.
+    const unreachKey = `bluetti_${key}_unreachable`;
+    const unreachSustained = _sustained(unreachKey, true, unreachable, BLUETTI_SUSTAIN_MS);
     // 1. Unreachable — Bluetti/HA sem comunicação. Silencia demais alertas.
-    _alert(`bluetti_${key}_unreachable`, unreachable,
+    _alert(unreachKey, unreachSustained,
       `Bluetti ${emoji} sem comunicação`,
       `Sem dados do EL100V2 (HA/BLE offline). Ver conexão da estação.`,
       'high', ['battery.0', 'signal_strength']);
@@ -5509,9 +5931,34 @@ app.get(['/api/bluetti/oauth/callback', '/auth/external/callback'], async (req, 
     _bluettiReauth = null; _bluettiReauthToken();      // queima o link usado
     const st = bluettiCloud.status();
     _bluettiTick().catch(() => {});
-    res.send(`<h2>Bluetti autorizada ✅</h2><p>Devices: ${st.devices.join(', ') || '—'}</p>` +
-             `<p>Token expira em ${st.token_expires_in_days} dias (refresh automático).</p>` +
-             `<pre>${JSON.stringify(bluettiCloud.snapshot().devices, null, 2)}</pre>`);
+    // Esta página é o fim do popup aberto pelo health. Ela se fecha sozinha; o
+    // health detecta pelo /api/bluetti-status que o token chegou, não pelo
+    // fechamento da janela. Se alguém abriu o link direto (fora do popup),
+    // window.close() não faz nada e a mensagem fica na tela — por isso o texto
+    // precisa se sustentar sozinho, sem o JSON de diagnóstico que estava aqui.
+    res.set('Content-Type', 'text/html; charset=utf-8').send(`<!doctype html>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Bluetti autorizada</title>
+<style>:root{color-scheme:dark light}body{margin:0;min-height:100vh;display:grid;
+place-items:center;background:#0d0d0d;color:#ececea;
+font:14px/1.6 -apple-system,system-ui,sans-serif;text-align:center;padding:24px}
+@media(prefers-color-scheme:light){body{background:#e6e5e4;color:#201e1d}}
+h1{font-size:17px;font-weight:800;margin:0 0 6px}
+p{margin:0;color:#a3a39d}@media(prefers-color-scheme:light){p{color:#565452}}
+b{color:#9ad34a}@media(prefers-color-scheme:light){b{color:#356210}}</style>
+<div>
+  <h1>Bluetti autorizada</h1>
+  <p><b>${st.devices.length}</b> ${st.devices.length === 1 ? 'estação' : 'estações'} conectada${st.devices.length === 1 ? '' : 's'}.
+     Login vale ${st.token_expires_in_days} dias, com renovação automática.</p>
+  <p id="f" style="margin-top:14px">Fechando…</p>
+</div>
+<script>
+setTimeout(() => {
+  window.close();
+  // Não fechou = não é popup. Diz o que fazer em vez de deixar a pessoa parada.
+  document.getElementById('f').textContent = 'Pode fechar esta aba — o monitor já atualizou.';
+}, 1200);
+</script>`);
   } catch (e) {
     console.warn('[bluetti] callback falhou:', e.message);
     res.status(502).send(`<h2>Falhou</h2><pre>${e.message}</pre>`);
@@ -5913,19 +6360,29 @@ async function _evalSolarAlerts() {
   }
   // 7) Anomalias comuns: queda súbita + dia com geração baixa vs histórico
   await _evalSolarAnomalies('catalao', 'catalao', p.pv_power, p.energy_today, daytime);
-  // 8) String desbalanceada dentro do mesmo inversor (>40% diferença + ambas em geração)
+  // 8) String desbalanceada dentro do mesmo inversor.
+  //
+  // Em 7 dias isso disparou 18 vezes e TODOS os episódios duraram ~2min — a
+  // assinatura de nuvem atravessando uma string, não de defeito. Defeito de
+  // verdade (sujeira, painel quebrado, MC4 frouxo) desbalanceia o meio-dia
+  // inteiro, não dois minutos. Três mudanças, todas pela mesma razão:
+  //   · exige SUSTENTAÇÃO contínua (o que sozinho já teria calado as 18)
+  //   · piso de potência maior: 40% entre 900W e 1500W é ruído de irradiância
+  //   · string abaixo do piso agora CONGELA o relógio em vez de zerá-lo — era o
+  //     que rearmava o alerta a cada nuvem
   for (const inv of _solarState.invs) {
     if (!middayNow || p.online === false) continue;
+    const key = `solar_${inv.short}_string_imbalance`;
     const s1 = inv.strings[0]?.watts ?? 0, s2 = inv.strings[1]?.watts ?? 0;
-    if (s1 > 800 && s2 > 800) {
-      const diff = Math.abs(s1 - s2) / Math.max(s1, s2);
-      _alert(`solar_${inv.short}_string_imbalance`, diff > 0.4,
-        `☀️ ${inv.label} — strings desbalanceadas`,
-        `String 1 ${s1}W vs String 2 ${s2}W (${Math.round(diff*100)}% dif). Sombreamento, painel sujo/quebrado.`,
-        'default', ['square.split.2x1']);
-    } else {
-      _alert(`solar_${inv.short}_string_imbalance`, false, '', '', 'default', []);
-    }
+    const evaluable = s1 > STR_IMB_MIN_W && s2 > STR_IMB_MIN_W;
+    const diff = evaluable ? Math.abs(s1 - s2) / Math.max(s1, s2) : 0;
+    const firing = _sustained(key, evaluable, diff > STR_IMB_RATIO, STR_IMB_SUSTAIN_MS);
+    _alert(key, firing,
+      `☀️ ${inv.label} — strings desbalanceadas`,
+      `String 1 ${s1}W vs String 2 ${s2}W (${Math.round(diff*100)}% dif) há `
+      + `${_sustainedFor(key)}min seguidos. Sombreamento fixo, painel sujo ou MC4 frouxo.`,
+      'default', ['square.split.2x1'],
+      { repeatEvery: 12 * 3600_000 });   // é problema físico: repetir de hora em hora não ajuda
   }
 }
 app.get('/api/solar-status', async (_req, res) => {
@@ -6127,10 +6584,18 @@ async function _fetchSolisStatus() {
       const s = arr.find(x => x.entity_id === id);
       return s && s.state !== 'unknown' && s.state !== 'unavailable' ? s.state : null;
     };
+    // Quando a leitura chegou. Sem isso não dá pra afirmar nada sobre a
+    // temperatura fora do horário: o cloud Solis para de atualizar com o
+    // inversor dormindo e o último valor passaria por atual.
+    const tsOf = (id) => {
+      const s = arr.find(x => x.entity_id === id);
+      return s ? (Date.parse(s.last_updated || s.last_changed || '') || null) : null;
+    };
     const readInv = (inv) => {
       const p = `sensor.${inv.slug}`;
       return {
         label: inv.label,
+        temp_ms:           tsOf(`${p}_inverter_temperature`),
         ac_power_w:        num(`${p}_inverter_ac_power`),
         dc_power_w:        num(`${p}_inverter_dc_power`),
         gen_today_kwh:     num(`${p}_inverter_generation_today`),
@@ -6216,6 +6681,194 @@ async function _solisTick() {
 setInterval(() => { _solisTick().catch(() => {}); }, 60_000);
 setTimeout(() => { _solisTick().catch(() => {}); }, 9_000);
 
+// ── Ventilador dos inversores do Ivonei ──────────────────────────────────────
+// Tomada Tuya no HA. O entity_id carrega o slug `bluetti` porque o device foi
+// reaproveitado e renomeado — NÃO deduzir a entidade pelo nome, vem do .env.
+// Confere o friendly_name no boot só pra avisar se a tomada trocou de dono.
+const FAN_IV_SWITCH = process.env.FAN_IVONEI_ENTITY       || 'switch.bluetti_1';
+const FAN_IV_POWER  = process.env.FAN_IVONEI_POWER_ENTITY || 'sensor.bluetti_potencia';
+const FAN_IV_NO_LOAD_W  = +(process.env.FAN_IVONEI_NO_LOAD_W || 5);      // abaixo disso não está girando
+const FAN_IV_NO_LOAD_MS = +(process.env.FAN_IVONEI_NO_LOAD_MIN || 5) * 60_000;
+// Supervisão da automação do HA: acima de 55°C em qualquer inversor o ventilador
+// tem que estar ligado; abaixo, desligado. Quem executa é o HA — o bridge só
+// confere o EFEITO, igual ao _monitorRuleAction do carro.
+// Gatilhos da automação do HA, lidos de lá (liga_ventilador_ivonei /
+// desliga_ventilador_ivonei): liga acima de 55, desliga abaixo de 50. A
+// histerese de verdade é essa — entre 50 e 55 o ventilador pode legitimamente
+// estar nos dois estados, depende de por onde a temperatura entrou na faixa.
+const FAN_IV_TEMP_ON_C   = +(process.env.FAN_IVONEI_TEMP_ON_C  || 55);
+const FAN_IV_TEMP_OFF_C  = +(process.env.FAN_IVONEI_TEMP_OFF_C || 50);
+// Carência = o `for:` da própria automação + folga. Ela espera 5min acima de 55
+// pra ligar e 15min abaixo de 50 pra desligar; cobrar antes disso seria alertar
+// de algo que ainda nem estava previsto acontecer. A folga cobre o poll do
+// cloud Solis (~5min), que é o relógio real dessas temperaturas.
+const FAN_IV_GRACE_ON_MS  = +(process.env.FAN_IVONEI_GRACE_ON_MIN  || 10) * 60_000;
+const FAN_IV_GRACE_OFF_MS = +(process.env.FAN_IVONEI_GRACE_OFF_MIN || 25) * 60_000;
+// A planta inteira parou de reportar (inversor dormindo) — aí nenhum veredito se
+// sustenta. NÃO é filtro por inversor: o cloud Solis atualiza cada um no seu
+// ritmo (o Inv 1 fica 20-30min no mesmo valor) e descartar o atrasado
+// transformava "o mais quente dos dois" em "o único que sobrou".
+const FAN_IV_TEMP_AGE_MS = +(process.env.FAN_IVONEI_TEMP_MAX_AGE_MIN || 45) * 60_000;
+// A janela vale só pro "devia estar LIGADO" — fora dela ninguém cobra o
+// ventilador de ligar. "Devia estar DESLIGADO" não tem hora: abaixo de 55 ele
+// tem que estar parado, inclusive de madrugada.
+const FAN_IV_WIN_FROM_H  = +(process.env.FAN_IVONEI_WINDOW_FROM_H || 10);
+const FAN_IV_WIN_TO_H    = +(process.env.FAN_IVONEI_WINDOW_TO_H   || 17);
+let _fanIvonei = null;
+
+function _localHourBR(d = new Date()) {
+  const p = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'America/Sao_Paulo', hour: '2-digit', hour12: false,
+  }).formatToParts(d).find(x => x.type === 'hour');
+  return (+(p?.value ?? 0)) % 24;
+}
+
+async function _haState(entity) {
+  const tok = process.env.HA_TOKEN;
+  const url = (process.env.HA_URL || '').replace(/\/$/, '');
+  if (!tok || !url) return null;
+  try {
+    const r = await fetch(`${url}/api/states/${encodeURIComponent(entity)}`, {
+      headers: { Authorization: `Bearer ${tok}` },
+      signal: AbortSignal.timeout(6000),
+    });
+    if (!r.ok) return null;
+    return await r.json();
+  } catch (_) { return null; }
+}
+
+async function _fanIvoneiTick() {
+  const sw = await _haState(FAN_IV_SWITCH);
+  const now = Date.now();
+  if (!sw) {                                   // HA mudo: mantém o último conhecido
+    _fanIvoneiForget();
+    if (_fanIvonei) _fanIvonei = { ..._fanIvonei, available: false, mismatch: false, ts: now };
+    return;
+  }
+  const raw = String(sw.state || '').toLowerCase();
+  const known = raw === 'on' || raw === 'off';
+  if (!known) {                                // unavailable/unknown não é transição
+    _fanIvoneiForget();
+    if (_fanIvonei) _fanIvonei = { ..._fanIvonei, available: false, mismatch: false, ts: now };
+    else _fanIvonei = { on: null, since_ms: null, available: false, ts: now };
+    return;
+  }
+  const on = raw === 'on';
+  const haSince = Date.parse(sw.last_changed || '') || now;
+  // `last_changed` zera quando o HA reinicia. Se o estado NÃO mudou, o "desde"
+  // mais antigo é o verdadeiro — é o que faz a contagem sobreviver ao restart
+  // do HA (mesmo motivo do _alertState persistido do probe).
+  const prev = state._fan_ivonei;
+  let since = haSince;
+  if (prev && prev.on === on && prev.since_ms) since = Math.min(prev.since_ms, haSince);
+  if (!prev || prev.on !== on || prev.since_ms !== since) {
+    state._fan_ivonei = { on, since_ms: since };
+    scheduleStateSave();
+  }
+  const pw = await _haState(FAN_IV_POWER);
+  const powerW = pw && Number.isFinite(+pw.state) ? +pw.state : null;
+  // Chave ligada e tomada sem consumo = ventilador não está girando (desplugado,
+  // motor travado). Só depois de FAN_IV_NO_LOAD_MS ligado, senão o próprio
+  // arranque do motor viraria alarme.
+  const noLoad = !!(on && powerW != null && powerW < FAN_IV_NO_LOAD_W
+                    && (now - since) > FAN_IV_NO_LOAD_MS);
+  _fanIvonei = {
+    on, since_ms: since, since_age_ms: now - since,
+    power_w: powerW, no_load: noLoad,
+    entity: FAN_IV_SWITCH, name: sw.attributes?.friendly_name || null,
+    available: true, ts: now,
+    ..._fanIvoneiCheck(on, now),
+  };
+}
+
+// Confere se a automação do HA fez o que devia. Devolve um veredito ou, quando
+// não dá pra afirmar nada (sem temperatura fresca, banda morta, HA mudo), o
+// motivo — silêncio explicado vale mais que alerta chutado.
+// Sem estado do ventilador não há divergência que se sustente: esquece o relógio
+// em vez de deixá-lo correndo por baixo.
+function _fanIvoneiForget() {
+  if (state._fan_iv_mismatch) { state._fan_iv_mismatch = null; scheduleStateSave(); }
+}
+function _fanIvoneiCheck(on, now) {
+  const hour = _localHourBR();
+  const inWindow = hour >= FAN_IV_WIN_FROM_H && hour < FAN_IV_WIN_TO_H;
+  const base = { max_temp_c: null, expected: null, check_skip: null, in_window: inWindow,
+                 mismatch: false, mismatch_kind: null, mismatch_since_ms: null, mismatch_age_ms: null };
+  // Todo caminho SEM veredito zera o relógio. A carência mede divergência
+  // CONTÍNUA; sem isto o relógio latchava e o primeiro instante de divergência
+  // depois de qualquer pausa já nascia vencido.
+  const quiet = (why, extra = {}) => {
+    if (state._fan_iv_mismatch) { state._fan_iv_mismatch = null; scheduleStateSave(); }
+    return { ...base, ...extra, check_skip: why };
+  };
+
+  // Sem _solisState ainda (boot, ou o fetch do Solis falhou) é "não sei", não
+  // "inversor sem leitura" — e não zera o relógio, porque nada foi observado.
+  const invs = _solisState?.ivonei?.invs;
+  if (!invs) return { ...base, check_skip: 'aguardando leitura do Solis' };
+  const temps = invs.map(i => i.temperature_c).filter(t => Number.isFinite(t));
+  // Mesma visão da automação: ela lê states(), que devolve o último valor
+  // conhecido sem olhar idade, e só falha em unavailable. Se um inversor não tem
+  // leitura, a condição do HA não fecha e o bridge também não pode cobrar.
+  if (!invs.length || temps.length !== invs.length) return quiet('inversor sem leitura');   // aqui SIM é observação
+  const freshest = Math.min(...invs.map(i => i.temp_ms ? now - i.temp_ms : Infinity));
+  if (!(freshest < FAN_IV_TEMP_AGE_MS)) return quiet('planta sem reportar');
+  const maxT = Math.max(...temps);
+  // Comparação estrita nos dois lados, igual ao numeric_state do HA (`above: 55`
+  // e `below: 50` não disparam no valor exato).
+  const hot  = maxT > FAN_IV_TEMP_ON_C;
+  const cold = maxT < FAN_IV_TEMP_OFF_C;
+
+  let expected = null;
+  if (hot)  expected = 'on';
+  else if (cold) expected = 'off';
+  if (!expected) return quiet(`histerese ${FAN_IV_TEMP_OFF_C}-${FAN_IV_TEMP_ON_C}°C`, { max_temp_c: maxT });
+  // Cobrar que LIGUE só na janela; que DESLIGUE, a qualquer hora.
+  if (expected === 'on' && !inWindow) return quiet('fora da janela', { max_temp_c: maxT, expected });
+
+  const bad  = (expected === 'on') !== on;
+  const kind = bad ? (expected === 'on' ? 'deveria_ligar' : 'deveria_desligar') : null;
+  const prev = state._fan_iv_mismatch;
+  let since = null;
+  if (bad) {
+    since = (prev && prev.kind === kind && prev.since_ms) ? prev.since_ms : now;
+    if (!prev || prev.kind !== kind || prev.since_ms !== since) {
+      state._fan_iv_mismatch = { kind, since_ms: since }; scheduleStateSave();
+    }
+  } else if (prev) {
+    state._fan_iv_mismatch = null; scheduleStateSave();
+  }
+  // `mismatch` só vira true depois da carência: é o MESMO campo que alimenta o
+  // alerta e a página, pra não existirem dois limiares pro mesmo fato.
+  const age   = since ? now - since : null;
+  const grace = expected === 'on' ? FAN_IV_GRACE_ON_MS : FAN_IV_GRACE_OFF_MS;
+  return { ...base, max_temp_c: maxT, expected, grace_ms: grace,
+           mismatch: !!(bad && age >= grace),
+           mismatch_kind: kind, mismatch_since_ms: since, mismatch_age_ms: age };
+}
+
+function _evalFanIvoneiAlerts() {
+  const f = _fanIvonei;
+  const on = f?.mismatch === true;
+  const t  = f?.max_temp_c != null ? `${f.max_temp_c.toFixed(1)}°C` : '?';
+  const min = f?.mismatch_age_ms ? Math.round(f.mismatch_age_ms / 60_000) : 0;
+  _alert('fan_ivonei_off_when_hot', on && f.mismatch_kind === 'deveria_ligar',
+    '🌀 Ventilador do Ivonei desligado com inversor quente',
+    `Inversor a ${t} (liga acima de ${FAN_IV_TEMP_ON_C}°C) e o ventilador está desligado há ${min}min, `
+    + `dentro da janela ${FAN_IV_WIN_FROM_H}h-${FAN_IV_WIN_TO_H}h. A automação do HA não ligou.`,
+    'high', ['fan', 'thermometer.sun'], { fireDelay: 0 });
+  _alert('fan_ivonei_on_when_cold', on && f.mismatch_kind === 'deveria_desligar',
+    '🌀 Ventilador do Ivonei ligado com inversor frio',
+    `Inversor a ${t} (desliga abaixo de ${FAN_IV_TEMP_OFF_C}°C) e o ventilador segue ligado há ${min}min. `
+    + `A automação do HA não desligou.`,
+    'default', ['fan', 'snowflake'], { fireDelay: 0 });
+}
+// Engolir a exceção aqui escondeu por horas um alerta que não conseguia limpar.
+const _fanIvoneiCycle = () => _fanIvoneiTick().then(_evalFanIvoneiAlerts)
+  .catch(e => console.warn('[fan-ivonei]', e && e.stack || e));
+setInterval(_fanIvoneiCycle, 30_000);
+setTimeout(_fanIvoneiCycle, 11_000);
+
 async function _evalSolisAlerts() {
   if (!_solisState) return;
   const daytimeGYN = await _isDaytimeAt('goiania');
@@ -6230,11 +6883,23 @@ async function _evalSolisAlerts() {
     // Collector offline em qualquer inv = cloud Solis não recebe. Só alerta na
     // janela ATIVA do inversor (sunrise+45min → sunset-30min); daytime é
     // permissivo demais (dispara 06:29 antes do inversor acordar).
-    const collOff = sys.invs.some(i => i.collector && i.collector !== 'online');
-    _alert(`solis_${key}_collector_offline`, collOff && invHours,
-      `☀️ ${sys.label} — coletor offline`,
-      `Datalogger Solis sem comunicação com cloud. Inversores podem estar operando OK mas monitoramento cego.`,
-      'high', ['warning', 'sun.max']);
+    // ANY → ALL. Cada inversor tem seu próprio datalogger; um mudo com o outro
+    // online é telemetria parcial, não planta cega — e o inversor segue gerando.
+    // Com `some()` isso virava alerta 'high' de "monitoramento cego" enquanto a
+    // planta produzia normal. É o mesmo erro de ANY-em-vez-de-ALL que já apareceu
+    // no desligamento do ventilador.
+    const collsOff = sys.invs.filter(i => i.collector && i.collector !== 'online').length;
+    const collOff  = collsOff > 0;                       // ainda usado pra suprimir o alarme
+    const plantBlind = collsOff === sys.invs.length;
+    // Mediana de 1min nos últimos 14 dias: stick reconecta sozinho. Só é problema
+    // se ficar mudo de verdade.
+    const blindKey = `solis_${key}_collector_offline`;
+    _alert(blindKey,
+      _sustained(blindKey, invHours, plantBlind && invHours, COLLECTOR_SUSTAIN_MS),
+      `☀️ ${sys.label} — planta cega`,
+      `Todos os dataloggers sem comunicação com a cloud há ${_sustainedFor(blindKey)}min. `
+      + `Os inversores podem estar gerando normal, mas não há como saber.`,
+      'high', ['warning', 'sun.max'], { repeatEvery: 6 * 3600_000 });
     // Inverter status != generating (durante o dia)
     const badStatus = sys.invs.find(i => i.status && !['generating','正常'].includes(String(i.status).toLowerCase()) && i.status !== 'online');
     _alert(`solis_${key}_alarm`, !!badStatus && daytime && !collOff,
@@ -6376,6 +7041,126 @@ app.get('/api/cloudflare-status', async (_req, res) => {
   res.json(data);
 });
 
+// ── GET /api/monitor-glance — o resumo que cabe num widget ───────────────────
+// /api/health tem 117 KB e a página o busca a cada 5s: serve pra tela, não pra
+// widget no celular (bateria, 4G, e o iOS orça tempo de execução do timeline).
+// Aqui saem só os números do relance, < 1 KB.
+//
+// A severidade NÃO é recalculada: vem dos alertas que o bridge já mantém. A
+// triagem da página é rollup de cor no cliente; duplicar aquele critério aqui
+// criaria a terceira régua pro mesmo fato, que é o erro que essa base já cometeu
+// várias vezes.
+app.get('/api/monitor-glance', requireAuth, (_req, res) => {
+  const now = Date.now();
+  const firing = [];
+  for (const [id, v] of _alertState) {
+    if (!v || !v.firing) continue;
+    const agentOwned = AGENT_OWNED.has(id);
+    // urgent/high = vermelho. AGENT_OWNED cai pra amarelo mesmo em high: o agente
+    // ainda vai verificar ao vivo antes de afirmar, e é assim que o push já trata.
+    const sev = (!agentOwned && (v.priority === 'urgent' || v.priority === 'high')) ? 'crit' : 'warn';
+    firing.push({ id, title: v.title || id, sev, agent_owned: agentOwned, since_ms: v.firedAt || null });
+  }
+  firing.sort((a, b) => (a.sev === b.sev ? (a.since_ms || 0) - (b.since_ms || 0) : a.sev === 'crit' ? -1 : 1));
+  const crit = firing.filter(f => f.sev === 'crit').length;
+  const warn = firing.length - crit;
+
+  const plants = [_solarState, _solisState?.ivonei, _solisState?.palmeiras].filter(Boolean);
+  const kw   = plants.reduce((a, p) => a + ((p.pv_power ?? p.ac_power_w ?? 0) / 1000), 0);
+  const kwh  = plants.reduce((a, p) => a + (p.gen_today_kwh ?? p.energy_today ?? 0), 0);
+
+  res.json({
+    ts: now,
+    state: crit ? 'crit' : warn ? 'warn' : 'ok',
+    crit, warn,
+    worst: firing[0] ? { title: firing[0].title, sev: firing[0].sev, since_ms: firing[0].since_ms } : null,
+    alerts: firing.slice(0, 5),
+    solar: { kw: +kw.toFixed(1), kwh_today: +kwh.toFixed(1), plants: plants.length },
+    car: { awake: _carIsAwake(), apk_age_ms: state.last_apk_ms ? now - state.last_apk_ms : null },
+    bridge: { uptime_sec: Math.round(process.uptime()) },
+  });
+});
+
+// ── GET /api/series — histórico do recorder do HA, reamostrado ───────────────
+// A página não fala com o HA (CORS + token), então o bridge faz de intermediário.
+// Reamostra em baldes fixos: 30 dias de um sensor que atualiza a cada 5min são
+// ~8600 pontos, e desenhar isso num SVG de 900px é jogar 90% fora no cliente.
+// Cada balde leva média/mín/máx — o máx é o que importa em temperatura, e some
+// se você só guardar a média.
+const SERIES_RANGES = {
+  day:   { ms: 24 * 3600_000,      buckets: 480, ttl:   60_000 },
+  week:  { ms: 7 * 24 * 3600_000,  buckets: 672, ttl:  300_000 },
+  month: { ms: 30 * 24 * 3600_000, buckets: 720, ttl: 1800_000 },
+};
+const SERIES_ALLOW = /^sensor\.(energia_solar_[a-z0-9_]+|inverter_[a-z0-9_]+)$/;
+const _seriesCache = new Map();
+
+app.get('/api/series', requireAuth, async (req, res) => {
+  const rk = String(req.query.range || 'day');
+  const R = SERIES_RANGES[rk];
+  if (!R) return res.status(400).json({ error: 'range inválido' });
+  const ents = String(req.query.entities || '').split(',').map(x => x.trim()).filter(Boolean).slice(0, 6);
+  // Allowlist: este endpoint expõe o recorder do HA por HTTP. Sem ela, qualquer
+  // entity_id (device_tracker de pessoa, câmera, sensor de porta) sairia por aqui.
+  if (!ents.length || !ents.every(e => SERIES_ALLOW.test(e)))
+    return res.status(400).json({ error: 'entidade não permitida' });
+
+  const ck = rk + '|' + ents.join(',');
+  const hit = _seriesCache.get(ck);
+  if (hit && (Date.now() - hit.ts) < R.ttl) return res.json(hit.data);
+
+  const tok = process.env.HA_TOKEN;
+  const url = (process.env.HA_URL || '').replace(/\/$/, '');
+  if (!tok || !url) return res.status(503).json({ error: 'HA não configurado' });
+  const to = Date.now(), from = to - R.ms;
+  // O + do offset vira espaço se não for encodado, e o HA responde "Invalid end_time".
+  const iso = ms => encodeURIComponent(new Date(ms).toISOString());
+  let raw;
+  try {
+    const r = await fetch(`${url}/api/history/period/${iso(from)}`
+      + `?end_time=${iso(to)}&filter_entity_id=${encodeURIComponent(ents.join(','))}`
+      + `&minimal_response&no_attributes`,
+      { headers: { Authorization: `Bearer ${tok}` }, signal: AbortSignal.timeout(45_000) });
+    if (!r.ok) return res.status(502).json({ error: 'HA history HTTP ' + r.status });
+    raw = await r.json();
+  } catch (e) { return res.status(502).json({ error: 'HA history: ' + e.message }); }
+
+  const step = R.ms / R.buckets;
+  const series = ents.map(eid => {
+    const arr = (raw || []).find(a => a[0]?.entity_id === eid) || [];
+    const buckets = new Array(R.buckets).fill(null);
+    let last = null;
+    for (const s of arr) {
+      const t = Date.parse(s.last_changed || s.last_updated || '');
+      const v = parseFloat(s.state);
+      if (!Number.isFinite(t) || !Number.isFinite(v)) continue;
+      const i = Math.floor((t - from) / step);
+      if (i < 0 || i >= R.buckets) continue;
+      const b = buckets[i] || (buckets[i] = { s: 0, n: 0, lo: v, hi: v });
+      b.s += v; b.n++; b.lo = Math.min(b.lo, v); b.hi = Math.max(b.hi, v);
+      last = v;
+    }
+    // [t, media, min, max] — null onde não houve leitura. NÃO preencho o vazio
+    // com o último valor: reta plana onde não há dado é o mesmo erro do gráfico
+    // de ontem, medição inventada.
+    const points = buckets.map((b, i) => b
+      ? [Math.round(from + i * step + step / 2), +(b.s / b.n).toFixed(2), +b.lo.toFixed(2), +b.hi.toFixed(2)]
+      : null);
+    const vals = buckets.filter(Boolean);
+    return {
+      entity: eid, points,
+      peak: vals.length ? +Math.max(...vals.map(b => b.hi)).toFixed(1) : null,
+      min:  vals.length ? +Math.min(...vals.map(b => b.lo)).toFixed(1) : null,
+      avg:  vals.length ? +(vals.reduce((a, b) => a + b.s, 0) / vals.reduce((a, b) => a + b.n, 0)).toFixed(1) : null,
+      last: last,
+    };
+  });
+  const data = { range: rk, from, to, step_ms: Math.round(step), series };
+  _seriesCache.set(ck, { ts: Date.now(), data });
+  if (_seriesCache.size > 40) _seriesCache.delete(_seriesCache.keys().next().value);
+  res.json(data);
+});
+
 app.get('/api/ivonei-status', async (_req, res) => {
   const now = Date.now();
   if (!_solisCache.data || (now - _solisCache.ts) > 60_000) {
@@ -6385,7 +7170,7 @@ app.get('/api/ivonei-status', async (_req, res) => {
   const d = _solisCache.data;
   if (!d || !d.ivonei) return res.status(502).json({ error: 'ivonei indisponível' });
   const sun = await _fetchSunTimes('goiania');
-  res.json({ ...d.ivonei, sunrise_ms: sun.sunrise_ms || null, sunset_ms: sun.sunset_ms || null, expected: _expectedNow('ivonei'), ts: d.ts });
+  res.json({ ...d.ivonei, sunrise_ms: sun.sunrise_ms || null, sunset_ms: sun.sunset_ms || null, expected: _expectedNow('ivonei'), fan: _fanIvonei, ts: d.ts });
 });
 app.get('/api/palmeiras-status', async (_req, res) => {
   const now = Date.now();
@@ -7055,6 +7840,158 @@ async function _pollAppHealth() {
 _pollAppHealth();
 setInterval(_pollAppHealth, 5_000);
 
+// ── Delega (app de tarefas): 2 instâncias, uma por pessoa ────────────────────
+// /api/health devolve { ok, seq, apns, open_tasks }. `seq` NÃO serve de sinal de
+// vida: só anda quando alguém escreve, então dia quieto o deixa parado — quem
+// prova que está de pé é o próprio HTTP responder.
+//
+// O que importa alertar num app de tarefas não é só "caiu": é `apns:false`. Sem
+// APNs a tarefa continua lá e o lembrete simplesmente não chega — falha silenciosa,
+// que é a pior categoria. Por isso ela tem alerta próprio.
+const DELEGA_URLS = (process.env.DELEGA_HEALTH_URLS || '').split(',')
+  .map(s => s.trim()).filter(Boolean);
+let _delega = [];   // [{ label, url, up, ok, seq, apns, open_tasks, latency_ms, error }]
+
+async function _pollDelega() {
+  if (!DELEGA_URLS.length) return;
+  _delega = await Promise.all(DELEGA_URLS.map(async spec => {
+    // formato: "rótulo=url" (o rótulo entra no id do alerta e no card)
+    const [label, url] = spec.includes('=') ? spec.split('=') : [new URL(spec).port, spec];
+    const t0 = Date.now();
+    try {
+      const ctrl = new AbortController();
+      const tm = setTimeout(() => ctrl.abort(), 4000);
+      const r = await fetch(url, { signal: ctrl.signal });
+      clearTimeout(tm);
+      const j = await r.json().catch(() => ({}));
+      return { label, url, up: r.ok, ok: j.ok ?? null, seq: j.seq ?? null,
+               apns: j.apns ?? null, open_tasks: j.open_tasks ?? null,
+               latency_ms: Date.now() - t0, ts: Date.now() };
+    } catch (e) {
+      return { label, url, up: false, ts: Date.now(),
+               error: e.name === 'AbortError' ? 'timeout' : e.message };
+    }
+  }));
+  _evalDelegaAlerts();
+}
+
+function _evalDelegaAlerts() {
+  for (const d of _delega) {
+    // Sustentação porque deploy reinicia o processo: o `delega` já acumulou 25
+    // restarts, e cada um seria um push de "caiu" que se resolve em segundos.
+    const kDown = `delega_${d.label}_down`;
+    _alert(kDown, _sustained(kDown, true, !d.up, DELEGA_SUSTAIN_MS),
+      `📋 Delega ${d.label} fora do ar`,
+      `Sem resposta em ${d.url} há ${_sustainedFor(kDown)}min`
+      + (d.error ? ` (${d.error})` : '') + '. Tarefas e lembretes param.',
+      'high', ['checklist', 'exclamationmark.triangle'],
+      { repeatEvery: 6 * 3600_000 });
+    // APNs off: só afirmo quando a instância respondeu — se está fora do ar não
+    // dá pra dizer nada sobre o push dela, e o alerta de cima já cobre.
+    const kApns = `delega_${d.label}_apns_off`;
+    _alert(kApns, _sustained(kApns, !!d.up, d.up && d.apns === false, DELEGA_SUSTAIN_MS),
+      `📋 Delega ${d.label} sem APNs`,
+      `A instância responde mas o APNs está desligado há ${_sustainedFor(kApns)}min: `
+      + `as tarefas seguem lá e os lembretes não chegam no iPhone.`,
+      'high', ['bell.slash'], { repeatEvery: 12 * 3600_000 });
+  }
+}
+_pollDelega();
+setInterval(() => { _pollDelega().catch(e => console.warn('[delega]', e.message)); }, 20_000);
+
+// ── Pixbot (assistente financeiro) e Driver Cred ─────────────────────────────
+// Pixbot: 3 instâncias que dividem UMA conexão de WhatsApp. Quem segura o Baileys
+// tem `wa:true`; as outras recebem por relay e ficam `wa:false` — que é o estado
+// NORMAL delas, não falha. E `relay` no /health é só `!!WA_RELAY_URL`, presença de
+// variável: não diz se o relay funciona. Então o alerta não pode ser por instância.
+// O que importa é: existe ALGUMA porta de entrada pro WhatsApp? Se nenhuma
+// instância tem `wa:true`, ninguém recebe mensagem e o bot fica mudo sem cair.
+//
+// Atenção ao caminho: no pixbot, `/api/health` devolve o HTML da SPA (catch-all) e
+// responde 200. Sondar ali daria "no ar" pra sempre, inclusive com o app quebrado.
+// O endpoint de verdade é `/health`.
+const PIXBOT_URLS  = (process.env.PIXBOT_HEALTH_URLS  || '').split(',').map(x => x.trim()).filter(Boolean);
+const CREDITO_URL  = process.env.CREDITO_HEALTH_URL   || '';
+const MINIAPP_SUSTAIN_MS = +(process.env.MINIAPP_SUSTAIN_MIN || 3) * 60_000;
+let _pixbot = [];
+let _credito = null;
+
+async function _getJson(url, ms = 5000) {
+  const ctrl = new AbortController();
+  const tm = setTimeout(() => ctrl.abort(), ms);
+  try {
+    const r = await fetch(url, { signal: ctrl.signal });
+    const ct = (r.headers.get('content-type') || '');
+    if (!r.ok) return { _err: 'HTTP ' + r.status };
+    // Guarda contra o catch-all de SPA: HTML com 200 não é health.
+    if (!/json/i.test(ct)) return { _err: 'resposta não-JSON (catch-all de SPA?)' };
+    return await r.json();
+  } catch (e) {
+    return { _err: e.name === 'AbortError' ? 'timeout' : e.message };
+  } finally { clearTimeout(tm); }
+}
+
+async function _pollMiniApps() {
+  if (PIXBOT_URLS.length) {
+    _pixbot = await Promise.all(PIXBOT_URLS.map(async spec => {
+      const [label, url] = spec.includes('=') ? spec.split('=') : [new URL(spec).port, spec];
+      const t0 = Date.now();
+      const j = await _getJson(url);
+      if (j._err) return { label, url, up: false, error: j._err, ts: Date.now() };
+      return { label, url, up: true, tenant: j.tenant ?? null, wa: j.wa ?? null,
+               relay_configured: j.relay ?? null, pending: j.pending ?? null,
+               bills_open: j.bills_open ?? null, latency_ms: Date.now() - t0, ts: Date.now() };
+    }));
+  }
+  if (CREDITO_URL) {
+    const t0 = Date.now();
+    const j = await _getJson(CREDITO_URL);
+    _credito = j._err
+      ? { up: false, error: j._err, ts: Date.now() }
+      : { up: true, ok: j.ok ?? null, chave_pix: j.chave_pix ?? null, pin: j.pin ?? null,
+          latency_ms: Date.now() - t0, ts: Date.now() };
+  }
+  _evalMiniAppAlerts();
+}
+
+function _evalMiniAppAlerts() {
+  // Pixbot, por instância: só "fora do ar". Nada de julgar `wa` aqui — ver acima.
+  for (const p of _pixbot) {
+    const k = `pixbot_${p.label}_down`;
+    _alert(k, _sustained(k, true, !p.up, MINIAPP_SUSTAIN_MS),
+      `💸 Gastos ${p.label} fora do ar`,
+      `Sem resposta em ${p.url} há ${_sustainedFor(k)}min`
+      + (p.error ? ` (${p.error})` : '') + '.',
+      'high', ['dollarsign.circle'], { repeatEvery: 6 * 3600_000 });
+  }
+  // WhatsApp do grupo: só afirma se ALGUMA instância respondeu — se todas estão
+  // fora, o alerta de cima já cobre e este não tem base pra opinar.
+  const vivas = _pixbot.filter(p => p.up);
+  const semWa = vivas.length > 0 && !vivas.some(p => p.wa === true);
+  _alert('pixbot_wa_down', _sustained('pixbot_wa', vivas.length > 0, semWa, MINIAPP_SUSTAIN_MS),
+    '💸 Gastos sem WhatsApp',
+    `Nenhuma das ${vivas.length} instâncias tem conexão de WhatsApp há ${_sustainedFor('pixbot_wa')}min. `
+    + `As instâncias respondem, mas mensagem nova não entra — pode ser sessão Baileys caída (QR).`,
+    'high', ['exclamationmark.bubble'], { repeatEvery: 6 * 3600_000 });
+
+  if (_credito) {
+    const c = _credito;
+    _alert('credito_down', _sustained('credito_down', true, !c.up, MINIAPP_SUSTAIN_MS),
+      '🚗 Driver Cred fora do ar',
+      `Sem resposta há ${_sustainedFor('credito_down')}min` + (c.error ? ` (${c.error})` : '') + '.',
+      'high', ['car'], { repeatEvery: 6 * 3600_000 });
+    // Chave PIX ausente é falha silenciosa: o app abre, o kit aparece e o cliente
+    // não tem como pagar. Só afirmo com o app no ar.
+    _alert('credito_sem_pix', _sustained('credito_pix', !!c.up, c.up && c.chave_pix === false, MINIAPP_SUSTAIN_MS),
+      '🚗 Driver Cred sem chave PIX',
+      `O app responde mas está sem chave PIX configurada há ${_sustainedFor('credito_pix')}min: `
+      + `o cliente vê o kit e não consegue pagar.`,
+      'high', ['creditcard.trianglebadge.exclamationmark'], { repeatEvery: 12 * 3600_000 });
+  }
+}
+_pollMiniApps();
+setInterval(() => { _pollMiniApps().catch(e => console.warn('[miniapps]', e.message)); }, 20_000);
+
 // ── Lari (whats-assistant): 2 tenants (deivid/rafael), web server próprio ────
 const LARI_HEALTH_TOKEN = process.env.LARI_HEALTH_TOKEN || '';
 const LARI_HEALTH_URLS  = (process.env.LARI_HEALTH_URLS || '').split(',').map(s => s.trim()).filter(Boolean);
@@ -7156,6 +8093,10 @@ app.get('/api/health', requireAuth, (_req, res) => {
     processes:     _processes,
     clockin:       _appHealth.clockin,
     lari:          _lari,
+    local_perm:    _localPerm,
+    delega:        _delega,
+    pixbot:        _pixbot,
+    credito:       _credito,
     backups:       _backups,
     trend:         _trend,
     icloud_sync:   _icloudSync,
@@ -7755,7 +8696,46 @@ app.get('/api/auth/passkey/available', (_req, res) => {
   res.json({ count: passkeys.length, available: passkeys.length > 0 });
 });
 
-app.get('/api/state',  (_req, res) => res.json({ ...state, _field_source: _fieldSource }));
+app.get('/api/state',  (_req, res) => res.json({
+  ...state, _field_source: _fieldSource,
+  // Idade REAL da medição, pro app não escrever "agora" sobre dado de horas atrás.
+  medicao_ms: _ultimaMedicaoMs(),
+  // Navegação do AA. Reavaliada NA LEITURA: o probe manda a cada ~7s, então um _nav
+  // sem refresh há 45s significa que o carro parou de publicar (app fechado, MQTT
+  // caído) — e aí não há ETA, em vez de um ETA congelado.
+  // Inativo preserva `reason`/`apk`/`ms`: substituir por `{active:false}` seco jogava
+  // fora justamente o diagnóstico que o probe manda ("sem rota ativa (updatedAtMs=0)",
+  // "provider não respondeu"), e eu ficava sem saber de fora se era ausência de rota ou
+  // probe morto — a mesma cegueira que o APK tinha até a 6.224.
+  nav: (_nav.active && (Date.now() - (_nav.ms || 0)) < 45_000)
+    ? _nav
+    : { active: false, reason: _nav.reason || '', apk: _nav.apk || '',
+        ms: _nav.ms || 0, idade_s: _nav.ms ? Math.round((Date.now() - _nav.ms) / 1000) : null },
+  // O probe publica a cada troca de faixa e bate a cada 30s. 90s sem nada = o carro
+  // parou de publicar (app fechado, MQTT caído), não "a música continua".
+  // Exige PLAY ATIVO, não só ter faixa: pausado não é escutado. O probe bate a cada
+  // 30s, então 90s sem amostra = o carro parou de publicar.
+  media: (_media.playing && _media.title && (Date.now() - (_media.ms || 0)) < 90_000)
+    ? _media : { playing: false },
+  // ── Recarga ao vivo quando o APK está fora ────────────────────────────────
+  // `charge_power_kw` e `charge_session_kwh` existem SÓ no APK. Com ele caído (19/08:
+  // 17 mortes em 18/08 pela regressão do pool) o card mostrava "0,0 kW · +0,0 kWh"
+  // carregando — zero medido e zero por ausência ficam indistinguíveis, e o zero
+  // mentia. O SOC vem fresco da GWM, então a energia da sessão é derivável sem o APK.
+  charge_power_confiavel: _campoConfiavel('charge_power_kw'),
+  charge_session_kwh_est: (() => {
+    if (state.charging_state !== 'Carregando') return null;
+    const ini = +state.charge_start_soc_pct || 0;
+    const agora = +state.soc_pct || 0;
+    if (!(ini > 0) || !(agora > ini)) return null;
+    return +(((agora - ini) / 100) * BATTERY_CAPACITY_KWH).toFixed(2);
+  })(),
+  // Idade POR CAMPO: quando cada chave foi confirmada ao vivo. A idade global não
+  // servia pra decidir se "Motor ligado" pode ser afirmado — o carro publica dezenas
+  // de campos, e um deles fresco fazia todos parecerem frescos.
+  _field_seen: Object.fromEntries(
+    Object.keys(_srcChange).map(k => [k, _fieldSeenMs(k)]).filter(([, v]) => v)),
+}));
 app.get('/api/counts', (_req, res) => res.json({
   trips:     0,                  // Trip A/B descontinuados
   autotrips: autoTripsArr.length,
@@ -7912,7 +8892,33 @@ app.post('/api/charge-reconstruct', requireAuth, (req, res) => {
       else { rec.location_name = b.location.name || ''; rec.location_lat = +b.location.lat || 0; rec.location_lng = +b.location.lng || 0; }
     }
     // Dedupe por startMs (5min de tolerância)
-    const existingIdx = chargesArr.findIndex(c => Math.abs((c.timestamp_ms||0) - startMs) < 5*60_000);
+    let existingIdx = chargesArr.findIndex(c => Math.abs((c.timestamp_ms||0) - startMs) < 5*60_000);
+    // Dedupe adicional contra registro PROMOVIDO do snapshot (`_recovered`). Quando o
+    // bridge reinicia no meio de uma recarga, ele promove o snapshot a registro; ao
+    // terminar, o APK manda o registro real e ficavam DOIS — foi o que duplicou em
+    // 06/08 (14:37 promovido, 16:07 real, ambos soc_start 56%).
+    //
+    // O startMs não serve pra casar os dois: o promovido usa o início da sessão e o
+    // real o momento do registro, e ali deu 90min de diferença. A identidade que
+    // resiste é o SOC INICIAL no mesmo dia — uma sessão não recomeça do mesmo SOC.
+    if (existingIdx < 0 && Number.isFinite(socStart)) {
+      existingIdx = chargesArr.findIndex(c =>
+        c._recovered === true
+        && Math.abs((+c.soc_start || -99) - socStart) <= 2
+        && Math.abs((c.timestamp_ms || 0) - startMs) < 12 * 3600_000);
+      if (existingIdx >= 0) {
+        const velho = chargesArr[existingIdx];
+        console.log(`↩ recarga promovida do snapshot (ts=${velho.timestamp_ms}, SOC ${velho.soc_start}%) `
+          + `substituída pelo registro real do carro (ts=${startMs})`);
+        // A posição do promovido costuma ser a única que existe: ele nasceu com o
+        // carro plugado e o GPS fresco. Não jogar fora.
+        if (velho.location_lat != null && rec.location_lat == null) {
+          rec.location_lat = velho.location_lat;
+          rec.location_lng = velho.location_lng;
+        }
+        delete rec._recovered; delete rec._recovered_note;
+      }
+    }
     if (existingIdx >= 0) chargesArr[existingIdx] = { ...chargesArr[existingIdx], ...rec };
     else chargesArr.push(rec);
     chargesArr.sort((a,b) => (b.timestamp_ms||0) - (a.timestamp_ms||0));
@@ -8019,7 +9025,9 @@ function _mergeChargePair(cA, cB) {
       // campos somados quando o APK reenvia o estado original da early.
       merged_from:  [...(early.merged_from || []), late.timestamp_ms],
     };
-    if (locName != null)           merged.location_name  = locName;
+    // Nome só viaja junto da coordenada: propagar o nome sozinho fazia a recarga
+    // nova nascer com o local da anterior e bloquear a detecção pelo GPS.
+    if (locName != null && locLat != null)  merged.location_name  = locName;
     if (locLat  != null)           merged.location_lat   = locLat;
     if (locLng  != null)           merged.location_lng   = locLng;
     if (mergedChargerKwh != null)  merged.charger_kwh    = mergedChargerKwh;
@@ -9127,6 +10135,74 @@ app.patch('/api/charges/:ts/charger_kwh', (req, res) => {
 });
 
 // PATCH /api/charges/:ts/cost — override de custo de recarga
+/// O R$/kWh desta sessão é atípico? Devolve o motivo ou null.
+///
+/// Dois critérios, pedidos pelo dono em 05/08:
+///  1. Acima de R$ 2,00/kWh — atípico em qualquer lugar, sempre pergunta.
+///  2. Mais de 10% distante da MEDIANA daquele local.
+///
+/// Mediana e não média: um único erro de digitação (como o 2,56/kWh que apareceu na
+/// série) desloca a média e passa a legitimar o próximo erro. A mediana ignora o
+/// outlier em vez de incorporá-lo.
+///
+/// Existe porque um custo errado não fica contido: ele entra na média ponderada da
+/// bateria e contamina o custo de TODAS as viagens seguintes — em 31/07 uma sessão
+/// levou a média de 0,69 pra 1,54 e ela demorou dias pra voltar.
+function _precoAtipico(charge, perKwh) {
+  if (!(perKwh > 0)) return null;
+  if (perKwh > 2.0) {
+    return { motivo: 'acima_de_2', texto: `R$ ${perKwh.toFixed(2)}/kWh é atípico (acima de R$ 2,00)` };
+  }
+  const local = String(charge.location_name || '').trim();
+  if (!local) return null;   // sem local não há mediana pra comparar
+  const precos = chargesArr
+    .filter(c => c.timestamp_ms !== charge.timestamp_ms
+              && String(c.location_name || '').trim() === local)
+    .map(c => {
+      const e = +c.energy_kwh || 0, o = c.cost_override;
+      if (!o || e < 0.05) return 0;
+      if (o.free === true) return 0;
+      return +o.total > 0 ? (+o.total / e) : (+o.perKwh || 0);
+    })
+    .filter(p => p > 0 && p < 5)
+    .sort((a, b) => a - b);
+  if (precos.length < 3) return null;   // amostra pequena: mediana não significa nada
+  const meio = Math.floor(precos.length / 2);
+  const mediana = precos.length % 2 ? precos[meio] : (precos[meio - 1] + precos[meio]) / 2;
+  if (mediana <= 0) return null;
+  const desvio = (perKwh - mediana) / mediana;
+  if (Math.abs(desvio) > 0.10) {
+    return {
+      motivo: 'fora_da_mediana', mediana: +mediana.toFixed(3),
+      desvioPct: +(desvio * 100).toFixed(1), local, amostras: precos.length,
+      texto: `R$ ${perKwh.toFixed(2)}/kWh está ${desvio > 0 ? 'acima' : 'abaixo'} `
+           + `${Math.abs(desvio * 100).toFixed(0)}% da mediana de ${local} `
+           + `(R$ ${mediana.toFixed(2)}/kWh em ${precos.length} recargas)`,
+    };
+  }
+  return null;
+}
+
+/// Confirma um custo marcado como atípico — o dono diz "é isso mesmo".
+app.post('/api/charges/:ts/confirm-cost', requireAuth, (req, res) => {
+  const ts = parseInt(req.params.ts, 10);
+  const c = chargesArr.find(x => x.timestamp_ms === ts);
+  if (!c) return res.status(404).json({ error: 'recarga não encontrada' });
+  delete c._precoAtipico;
+  c._precoConfirmado = true;
+  // Bump OBRIGATÓRIO: o app sincroniza incremental (`?since=`) e o GET filtra por
+  // `_updated_ms`. Sem mexer nele o registro não conta como alterado, não é reenviado,
+  // e o app segue com a cópia em cache — o aviso continuava na tela mesmo com o
+  // servidor já tendo apagado a flag (19/08, "mesmo clicando em É isso mesmo").
+  c._updated_ms = Date.now();
+  // `saveCharges()` não existe — o nome certo é `scheduleChargesFlush()`. Este handler
+  // lançava ReferenceError e devolvia 500 desde que eu o escrevi (06/08): confirmar
+  // custo atípico nunca persistiu.
+  scheduleChargesFlush();
+  console.log(`[charge] custo atípico CONFIRMADO pelo dono ts=${ts}`);
+  res.json({ ok: true });
+});
+
 app.patch('/api/charges/:ts/cost', (req, res) => {
   const ts     = parseInt(req.params.ts, 10);
   const { total, per_kwh, free } = req.body || {};
@@ -9135,6 +10211,22 @@ app.patch('/api/charges/:ts/cost', (req, res) => {
   const t = parseFloat(total) || 0;
   if (free === true)  charge.cost_override = { total: 0, perKwh: 0, free: true };
   else if (t > 0)     charge.cost_override = { total: t, perKwh: parseFloat(per_kwh) || 0 };
+  // Avalia DEPOIS de gravar: precisa do valor final pra comparar com a mediana.
+  if (free !== true) {
+    const e = +charge.energy_kwh || 0;
+    const efetivo = e > 0.05 && t > 0 ? (t / e) : (parseFloat(per_kwh) || 0);
+    const aviso = _precoAtipico(charge, efetivo);
+    if (aviso) {
+      charge._precoAtipico = { ...aviso, perKwh: +efetivo.toFixed(3), ts: Date.now() };
+      delete charge._precoConfirmado;
+      console.warn(`[charge] custo atípico ts=${charge.timestamp_ms}: ${aviso.texto}`);
+      // Push pra não depender de o dono abrir a tela e notar sozinho.
+      sendPush('⚡ Custo de recarga fora do padrão', aviso.texto + ' — confira no app.',
+               'charge_cost_odd').catch(() => {});
+    } else {
+      delete charge._precoAtipico;
+    }
+  }
   else                delete charge.cost_override;
   charge._updated_ms = Date.now();
   scheduleChargesFlush();
@@ -10066,6 +11158,110 @@ function computeDriveScore(samples, t) {
 // handler MQTT autotrips/history (sync resiliente que não depende do Funnel).
 // Retorna { status, body }. `opts.suppressPush` evita o push "Viagem concluída"
 // (usado no backlog republicado por MQTT pra não spammar).
+/// Preenche o começo de uma viagem que o APK não gravou, usando o histórico de
+/// localização do celular do dono.
+///
+/// Existe porque em 01/08 o APK ficou fora do ar das 19:35 às 23:06 e só abriu a
+/// viagem 9 min depois do carro ligar: o trajeto de volta apareceu com 1,7 km em vez
+/// de ~7 km, e "zerou" na cara do dono quando o app voltou. O celular estava junto e
+/// tinha o caminho inteiro — a informação existia, só não era usada.
+///
+/// Conservador de propósito: só age quando há prova de que o carro ANDOU antes da
+/// viagem começar, e sempre marca o resultado como estimado. Devolve true se mexeu.
+function _completaInicioComCelular(autoTrip, samples, tripId) {
+  try {
+    const ligouMs = +state._engine_on_ms || 0;
+    if (!ligouMs || !autoTrip || !autoTrip.startMs) return false;
+    const atraso = autoTrip.startMs - ligouMs;
+    // < 3 min é a partida normal (APK leva alguns segundos pra abrir a trip).
+    // > 3 h não é "o mesmo trajeto": provavelmente o motor ficou marcado ligado.
+    if (atraso < 3 * 60_000 || atraso > 3 * 3600_000) return false;
+    const dev = _havalOwnerDeviceId;
+    if (!dev) return false;
+
+    const pts = _phoneHistRead(dev, ligouMs - 60_000, autoTrip.startMs)
+      .filter(p => _validLatLng(p.lat, p.lng))
+      .sort((a, b) => a.ts - b.ts);
+    if (pts.length < 2) return false;
+
+    // O celular precisa provar deslocamento: se ele ficou parado onde a viagem
+    // começou, não havia trecho perdido — o carro é que demorou a ligar.
+    const desloc = haversineM(pts[0].lat, pts[0].lng, autoTrip.startLat, autoTrip.startLng);
+    // ...E precisa ser PLAUSÍVEL. Só o piso de 300 m deixava passar telefone a
+    // centenas de km: esta função pressupõe o celular DENTRO do carro, e quando o dono
+    // viaja separado (ou outra pessoa dirige) a premissa cai. Em 02/09 o celular estava
+    // em Barra do Garças e o carro rodou só dentro de Goiânia — as 5 amostras do
+    // telefone viraram uma reta de 366 km numa viagem local, com velocidade máxima
+    // registrada de 67 km/h denunciando a impossibilidade.
+    //
+    // Teto = o que o carro conseguiria cobrir no atraso a 120 km/h, limitado a 50 km.
+    // Acima disso não é trecho perdido, é celular em outro lugar.
+    const tetoM = Math.min(120 * (atraso / 3600_000) * 1000, 50_000);
+    if (!(desloc > 300 && desloc <= tetoM)) {
+      if (desloc > tetoM) {
+        console.warn(`[trip-inicio] celular a ${(desloc / 1000).toFixed(1)}km do início da `
+          + `viagem (teto ${(tetoM / 1000).toFixed(1)}km em ${Math.round(atraso / 60000)}min) `
+          + `— não estava no carro, início NÃO completado`);
+      }
+      return false;
+    }
+
+    const novoStart = pts[0].ts;
+    const off = Math.round((autoTrip.startMs - novoStart) / 1000);
+    // Só posição e tempo. spd/rpm/potência ficam zerados: inventar telemetria que
+    // ninguém mediu contaminaria consumo, nota de condução e split EV/HEV.
+    const pref = pts.map(p => ({
+      t: Math.round((p.ts - novoStart) / 1000),
+      lat: p.lat, lng: p.lng, spd: 0, rpm: 0, evKw: 0, pwr: 0,
+      soc: autoTrip.startSocPct || 0, src: 'phone',
+    }));
+    for (const sm of samples) sm.t = (sm.t || 0) + off;
+    samples.unshift(...pref);
+
+    let extraM = 0;
+    for (let i = 1; i < pts.length; i++) {
+      extraM += haversineM(pts[i-1].lat, pts[i-1].lng, pts[i].lat, pts[i].lng);
+    }
+    extraM += haversineM(pts[pts.length-1].lat, pts[pts.length-1].lng, autoTrip.startLat, autoTrip.startLng);
+
+    autoTrip.startMs  = novoStart;
+    autoTrip.startLat = pts[0].lat;
+    autoTrip.startLng = pts[0].lng;
+    autoTrip.timeSec  = Math.round((autoTrip.endMs - novoStart) / 1000);
+    // Piso, não valor exato: com ~1 ponto/min a linha reta corta as curvas.
+    autoTrip.distKm   = parseFloat(((autoTrip.distKm || 0) + extraM / 1000).toFixed(3));
+    // Energia: o APK só mediu o pedaço que gravou, então o consumo sairia ridículo
+    // (0,3 kWh pra 6,8 km). O ΔSOC cobre a viagem inteira — usa a viagem anterior
+    // como âncora do SOC inicial, já que o carro ficou parado entre as duas.
+    const camposEstimados = ['startMs', 'startLat', 'startLng', 'distKm', 'timeSec'];
+    const ant = autoTripsArr
+      .filter(t => t.endMs && t.endMs <= novoStart && t.endSocPct > 0)
+      .sort((a, b) => b.endMs - a.endMs)[0];
+    if (ant && ant.endSocPct > (autoTrip.endSocPct || 0)) {
+      const cap = _capacityKwh();
+      const net = +(cap * (ant.endSocPct - autoTrip.endSocPct) / 100).toFixed(4);
+      if (net > 0 && net < 40) {
+        autoTrip.startSocPct = ant.endSocPct;
+        autoTrip.netKwh    = net;
+        // Piso: a regeneração do trecho perdido também não foi medida.
+        autoTrip.energyKwh = +(net + (autoTrip.regenKwh || 0)).toFixed(4);
+        camposEstimados.push('startSocPct', 'netKwh', 'energyKwh');
+      }
+    }
+    autoTrip._estimated = true;
+    autoTrip._estimatedFields = camposEstimados;
+    autoTrip._estimatedReason =
+      `APK não gravou os primeiros ${Math.round(atraso/60_000)}min; trecho reconstituído `
+      + `de ${pts.length} pontos do celular (~1/min) — distância é piso`;
+    console.log(`[autotrip] ${tripId}: início reconstituído do celular `
+      + `(+${(extraM/1000).toFixed(2)}km, ${pts.length} pontos, APK atrasou ${Math.round(atraso/60_000)}min)`);
+    return true;
+  } catch (e) {
+    console.warn('[autotrip] reconstituição do início falhou:', e.message);
+    return false;
+  }
+}
+
 function ingestAutoTrip({ tripId, autoTrip, samples }, opts = {}) {
   const suppressPush = !!opts.suppressPush;
   // Motivo de estimativa quando a viagem é FINALIZADA pelo bridge (APK morreu no
@@ -10392,6 +11588,11 @@ function ingestAutoTrip({ tripId, autoTrip, samples }, opts = {}) {
       if (ot) autoTrip.outsideTemp = Math.round(ot * 10) / 10;
     }
 
+    // Trip que começou DEPOIS do motor ligar: o APK esteve fora no início e o
+    // trecho não foi gravado por ninguém. Roda ANTES do naming, pra a partida
+    // reconstituída também ganhar nome.
+    _completaInicioComCelular(autoTrip, finalSamples, safeId);
+
     // Auto-naming por Locais Conhecidos (KP) — grava em autoTrip.startKp/endKp pra
     // SOBREVIVER restart do bridge (o disco persiste só `autoTrip`, não o `record`).
     {
@@ -10415,6 +11616,13 @@ function ingestAutoTrip({ tripId, autoTrip, samples }, opts = {}) {
       if (!_ep) {
         const navName = _navDestNameFor(autoTrip.endLat, autoTrip.endLng);
         if (navName) autoTrip.endKp = navName;
+      }
+      // Partida sem KP: se o carro não saiu do lugar desde a viagem anterior, herda o
+      // nome de onde ela terminou. Vem antes do prev* porque é mais específico —
+      // prevStartKp pode ser justamente o bairro que queremos evitar.
+      if (!autoTrip.startKp) {
+        const herdado = _nomeDaChegadaAnterior(autoTrip.startLat, autoTrip.startLng, autoTrip.startMs);
+        if (herdado) autoTrip.startKp = herdado;
       }
       // Preserva o nome reprocessado quando não há KP/nav pra essa ponta.
       if (!autoTrip.startKp && prevStartKp) autoTrip.startKp = prevStartKp;
@@ -10470,8 +11678,14 @@ function ingestAutoTrip({ tripId, autoTrip, samples }, opts = {}) {
       const navName = _navDestNameFor(autoTrip.endLat, autoTrip.endLng);
       if (navName) { record.endKp = navName; record.knownEnd = navName; _endName = navName; }
     }
-    if (_sp && _endName) {
-      record.name = `${_sp.name} → ${_endName}`;
+    // Mesma herança do lado da partida (ver _nomeDaChegadaAnterior).
+    let _startName = _sp ? _sp.name : null;
+    if (!_startName) {
+      const herdado = _nomeDaChegadaAnterior(autoTrip.startLat, autoTrip.startLng, autoTrip.startMs);
+      if (herdado) { record.startKp = herdado; record.knownStart = herdado; _startName = herdado; }
+    }
+    if (_startName && _endName) {
+      record.name = `${_startName} → ${_endName}`;
       pendingRenames.push({ id: `kp-${safeId}`, type: 'auto', tripId: safeId, name: record.name, createdAt: Date.now() });
       try { fs.writeFileSync(RENAMES_FILE, JSON.stringify(pendingRenames, null, 2)); } catch (_) {}
     }
@@ -10566,6 +11780,9 @@ app.post('/api/autotrips', (req, res) => {
 // morreu (OTA planejado, crash, force-stop, OOM). Guarda um NDJSON pra medir a
 // frequência e o motivo dominante das mortes mid-trip. Fire-and-forget do APK.
 const APK_DEATHS_FILE = path.join(DATA_DIR, 'apk_deaths.ndjson');
+/// Mortes recentes em memória — usadas pra distinguir crash real de reconexão de
+/// rede no detector de "loop". Ler o ndjson a cada tick do watchdog seria caro.
+const _apkDeaths = [];
 app.post('/api/apk-death', (req, res) => {
   try {
     const b = req.body || {};
@@ -10578,6 +11795,8 @@ app.post('/api/apk-death', (req, res) => {
       deviceTs: Number(b.ts) || null,
     };
     fs.appendFileSync(APK_DEATHS_FILE, JSON.stringify(rec) + '\n');
+    _apkDeaths.push(rec);
+    while (_apkDeaths.length > 50) _apkDeaths.shift();
     console.log(`[apk-death] trip=${rec.tripId} reason="${rec.reason}" clean=${rec.sessionEndedCleanly} v${rec.version}`);
     // Fallback ATIVO: se APK morreu com viagem NÃO finalizada limpa, tenta
     // criar autotrip a partir do snapshot em memória ANTES de perder dados.
@@ -10691,7 +11910,15 @@ app.get('/api/autotrips', (req, res) => {
     res.setHeader('X-Tombstones', deletedIds.autotrips.join(','));
     res.setHeader('Access-Control-Expose-Headers', 'X-Tombstones');
   }
-  res.json(arr.slice(0, 300));
+  // Teto de 300 truncava o histórico EM SILÊNCIO: em 15/08 o app mostrava 1 viagem em
+  // maio quando havia 80 no disco (12→31/05), porque maio caía fora do corte. Sync
+  // completo (`since=0`) tem que devolver tudo — é ele que popula o histórico do app.
+  // Cap alto só como rede de segurança, e com log quando morder.
+  const CAP = 5000;
+  if (arr.length > CAP) {
+    console.warn(`[autotrips] TRUNCADO: ${arr.length} → ${CAP} (histórico maior que o teto)`);
+  }
+  res.json(arr.slice(0, CAP));
 });
 
 // ── Rotina: horário típico da 1ª saída do dia, por dia da semana ──────────────
@@ -11358,7 +12585,39 @@ app.post('/api/autotrips/merge', (req, res) => {
       startLat: earlyAT.startLat || 0,  startLng: earlyAT.startLng || 0,
       endLat:   lateAT.endLat   || 0,  endLng:   lateAT.endLng   || 0,
     };
-    if (earlyAT.name || lateAT.name) merged.name = earlyAT.name || lateAT.name;
+    // Campos que NÃO são soma. Sem isto o merge apagava os rótulos e os picos: a
+    // viagem virava "? → ?" sem velocidade máxima nem nota, porque `merged` só
+    // continha os campos somáveis e o resto sumia junto com os arquivos absorvidos.
+    const kpIni = earlyAT.startKp, kpFim = lateAT.endKp;
+    if (kpIni) merged.startKp = kpIni;
+    if (kpFim) merged.endKp   = kpFim;
+    // O nome descreve o percurso inteiro, então recompõe das duas pontas em vez de
+    // herdar o do primeiro trecho (que terminava no meio do caminho).
+    merged.name = (kpIni && kpFim) ? `${kpIni} → ${kpFim}` : (earlyAT.name || lateAT.name);
+    if (!merged.name) delete merged.name;
+
+    const somaN = (a, b) => (a || 0) + (b || 0);
+    const maxN  = (a, b) => Math.max(a || 0, b || 0);
+    merged.maxSpeedKmh  = maxN(earlyAT.maxSpeedKmh, lateAT.maxSpeedKmh);
+    merged.maxPowerPct  = maxN(earlyAT.maxPowerPct, lateAT.maxPowerPct);
+    merged.harshAcc     = somaN(earlyAT.harshAcc,   lateAT.harshAcc);
+    merged.harshBrake   = somaN(earlyAT.harshBrake, lateAT.harshBrake);
+    merged.elevGainM    = somaN(earlyAT.elevGainM,  lateAT.elevGainM);
+    merged.elevLossM    = somaN(earlyAT.elevLossM,  lateAT.elevLossM);
+    merged.engineOffSec = somaN(earlyAT.engineOffSec, lateAT.engineOffSec);
+    merged.parkedInPSec = somaN(earlyAT.parkedInPSec, lateAT.parkedInPSec);
+    // Nota do trecho: pondera por distância, senão um trecho de 300 m com nota ruim
+    // pesaria igual aos 9 km seguintes. Sem distância nos dois, cai na média simples.
+    const dE = earlyAT.distKm || 0, dL = lateAT.distKm || 0;
+    const nE = earlyAT.driveScore, nL = lateAT.driveScore;
+    if (nE != null && nL != null) {
+      merged.driveScore = (dE + dL) > 0
+        ? Math.round((nE * dE + nL * dL) / (dE + dL))
+        : Math.round((nE + nL) / 2);
+    } else if (nE != null || nL != null) merged.driveScore = nE != null ? nE : nL;
+    // Temperatura externa é do começo do percurso, não somável.
+    if (earlyAT.outsideTempC != null) merged.outsideTempC = earlyAT.outsideTempC;
+    if (earlyAT.outsideTemp  != null) merged.outsideTemp  = earlyAT.outsideTemp;
 
     // Samples unificados — já estão em ordem cronológica
     const mergedSamples = [...earlySamples, ...lateSamples];
@@ -11982,6 +13241,171 @@ app.post('/api/pair/redeem', (req, res) => {
 // ── Reativar Live Activities em andamento ─────────────────────────────────
 // Se o usuário dispensou (swipe) uma LA sem querer, re-lança via push-to-start
 // com o ESTADO ATUAL (continua dali, como se nunca tivesse saído).
+/// Encerra à força a LA de viagem. Existe porque o encerramento normal depende de
+/// um update token vivo: quando a LA nasce por push-to-start com o app morto, o
+/// bridge nunca recebe token e não consegue empurrar o fim — a LA fica presa "em
+/// curso" (aconteceu em 01/08: viagem terminou 13:53 e o card seguia em andamento).
+/// Manda o fim por TODOS os tokens conhecidos do tipo, com dispensa imediata.
+/// Comanda a conectividade do carro (4G, prioridade de WiFi, trocar de rede).
+/// O celular NÃO fala com o Impulse: quem tem acesso ao provider é o EcoTrip dentro
+/// do carro, então isto só encaminha por MQTT. retain:false — é evento, não estado;
+/// retido faria o comando ser reexecutado a cada reconexão do APK.
+// ── Medidor de CPU/RAM do APK (sob demanda, pelo app iOS) ──────────────────
+// Existe pra decidir com DADO se vale mover a leitura do CAN pro Impulse. Sem
+// medição isso é palpite, e trocar um sistema que funciona por acoplamento novo
+// sem evidência sai caro.
+let _perf = { ativo: false, inicioMs: 0, fimMs: 0, amostras: [], procs: {},
+              nCores: 8, memKind: 'rss', cpuScale: 'system_total', totalProcs: null };
+const PERF_MAX_AMOSTRAS = 2000;   // ~66min a 2s; além disso descarta as antigas
+
+// POST /api/overlay — mostra/esconde o botão flutuante de destino no carro.
+// body: { mostrar: bool }. Estado guardado aqui pro app refletir sem perguntar ao
+// carro; o APK persiste do lado dele e lê no arranque, então sobrevive a reinício.
+app.post('/api/overlay', requireAuth, (req, res) => {
+  const mostrar = req.body?.mostrar !== false;
+  try {
+    // retain:true de propósito: se o carro estiver offline agora, ele recebe o
+    // estado ao reconectar. Sem retain, o toggle se perderia com o carro dormindo.
+    mqttClient.publish(`${MQTT_PREFIX}/cmd/overlay`, mostrar ? '1' : '0', { qos: 1, retain: true });
+  } catch (e) { return res.status(502).json({ error: e.message }); }
+  state.overlay_destino = mostrar;
+  scheduleStateSave();
+  console.log(`[overlay] botão flutuante ${mostrar ? 'MOSTRADO' : 'escondido'}`);
+  res.json({ ok: true, mostrar });
+});
+
+app.post('/api/perf', requireAuth, (req, res) => {
+  const ligar = !!req.body?.ativo;
+  try {
+    mqttClient.publish(`${MQTT_PREFIX}/cmd/perf`, ligar ? '1' : '0', { qos: 1, retain: false });
+  } catch (e) { return res.status(502).json({ error: e.message }); }
+  if (ligar) _perf = { ativo: true, inicioMs: Date.now(), fimMs: 0, amostras: [], procs: {},
+                      nCores: 8, memKind: 'rss', cpuScale: 'system_total', totalProcs: null };
+  else { _perf.ativo = false; _perf.fimMs = Date.now(); }
+  console.log(`[perf] medição ${ligar ? 'LIGADA' : 'desligada'}`);
+  res.json({ ok: true, ativo: ligar });
+});
+
+/// Resumo da sessão. Média E pico: média sozinha esconde picos que travam a UI, e
+/// pico sozinho não diz se é constante ou pontual.
+app.get('/api/perf', requireAuth, (_req, res) => {
+  const a = _perf.amostras;
+  const nums = (k) => a.map(x => x[k]).filter(v => Number.isFinite(v));
+  const med = (v) => v.length ? +(v.reduce((x, y) => x + y, 0) / v.length).toFixed(2) : null;
+  const max = (v) => v.length ? +Math.max(...v).toFixed(2) : null;
+  const cpu = nums('cpuPct'), pss = nums('pssMb'), heap = nums('heapMb');
+  res.json({
+    ativo: _perf.ativo,
+    inicioMs: _perf.inicioMs || null,
+    duracaoS: _perf.inicioMs ? Math.round(((_perf.fimMs || Date.now()) - _perf.inicioMs) / 1000) : 0,
+    amostras: a.length,
+    cpuPctMedia: med(cpu), cpuPctPico: max(cpu),
+    pssMbMedia: med(pss), pssMbPico: max(pss),
+    heapMbMedia: med(heap), heapMbPico: max(heap),
+    threadsPico: max(nums('threads')),
+    // Android inteiro — dá régua pro número do processo e mostra se o gargalo é o
+    // aparelho, não o app.
+    sysCpuPctMedia: med(nums('sysCpuPct')), sysCpuPctPico: max(nums('sysCpuPct')),
+    ramUsadaMbMedia: med(nums('ramUsadaMb')), ramUsadaMbPico: max(nums('ramUsadaMb')),
+    ramTotalMb: a.length ? a[a.length - 1].ramTotalMb ?? null : null,
+    ramLivreMbMin: nums('ramLivreMb').length ? +Math.min(...nums('ramLivreMb')).toFixed(2) : null,
+    load1Pico: max(nums('load1')),
+    // Quantas amostras o sistema reportou pressão de memória: é o gatilho de morte
+    // de processo que derrubou viagem e recarga.
+    lowMemoryAmostras: a.filter(x => x.lowMemory === true).length,
+    // Impulse (via resourceUsage, vc7284+). `impulseRamMb` é o número que fecha a
+    // comparação: EcoTrip vs Impulse lado a lado, o que nenhum dos dois consegue
+    // medir sozinho.
+    impulseRamMbMedia: med(nums('impulseRamMb')), impulseRamMbPico: max(nums('impulseRamMb')),
+    // CPU/RAM do sistema pela régua DELE — serve de conferência cruzada da minha
+    // leitura de /proc/stat. Divergência grande entre as duas é sinal de que uma das
+    // contas está errada, e vale saber qual.
+    impCpuPctMedia: med(nums('impCpuPct')), impRamPctMedia: med(nums('impRamPct')),
+    // ── Tabela por processo ──────────────────────────────────────────────────
+    // memKind/cpuScale vão junto de propósito: é RSS (não PSS) e o cpuPct está em
+    // % do SISTEMA, escala diferente do cpuPct do EcoTrip (% de um núcleo). Quem
+    // desenha precisa rotular certo, senão 10% e 1,2% parecem comparáveis.
+    memKind: _perf.memKind, cpuScale: _perf.cpuScale, nCores: _perf.nCores,
+    totalProcs: _perf.totalProcs,
+    procs: Object.values(_perf.procs).map(a => ({
+      pkg: a.pkg, state: a.state, amostras: a.amostras,
+      rssMbMedia: a.rssN ? +(a.rssSoma / a.rssN).toFixed(0) : null, rssMbPico: a.rssPico || null,
+      cpuPctMedia: a.cpuN ? +(a.cpuSoma / a.cpuN).toFixed(1) : null, cpuPctPico: a.cpuPico || null,
+    })).sort((x, y) => (y.rssMbMedia || 0) - (x.rssMbMedia || 0)),
+    versaoApk: a.length ? a[a.length - 1].versao : null,
+    // Série reduzida pro app desenhar tendência sem baixar 2000 pontos.
+    serie: a.filter((_, i) => i % Math.max(1, Math.ceil(a.length / 60)) === 0)
+             .map(x => ({ ts: x.ts, cpu: x.cpuPct ?? null, pss: x.pssMb ?? null })),
+  });
+});
+
+app.post('/api/uplink/cmd', requireAuth, (req, res) => {
+  const metodo = String(req.body?.metodo || '');
+  // API completa do Impulse (vc7261). setWifiEnabled fica FORA de propósito: desligar
+  // o WiFi pode cortar o próprio canal remoto quando o carro só tem internet por WiFi
+  // — comando que se auto-sabota não entra por HTTP. addWifi também fica fora: o
+  // próprio handoff diz que não persiste neste head unit (WifiManager.addNetwork
+  // devolve netId e a rede não aparece nas salvas).
+  const OK = ['setMobileControl', 'setMobileBlock', 'setBlockOnWifi', 'setBlockOnProjection',
+              'setAutoblock', 'setDataLimit', 'setCycleDay',
+              'scanWifi', 'connectWifi', 'listSavedWifi', 'setWifiPriority',
+              // setWifiEnabled(false) pode cortar o próprio canal remoto se o carro
+              // só tem internet por WiFi. Vai atrás de confirmação dupla no app; aqui
+              // o guard é logar alto, porque depois dele talvez não haja mais log.
+              // addWifi ficou FORA: testado em 04/08 e não persiste neste head unit
+              // (addNetwork devolve netId e a rede não entra nas salvas). Expor um
+              // comando que sempre falha só gera dúvida sobre o que funciona.
+              'setWifiEnabled'];
+  if (!OK.includes(metodo)) return res.status(400).json({ error: 'metodo inválido', aceitos: OK });
+  const msg = { metodo };
+  if (req.body?.valor !== undefined) msg.valor = !!req.body.valor;
+  if (req.body?.ssid) msg.ssid = String(req.body.ssid).slice(0, 64);
+  if (metodo === 'connectWifi' && !msg.ssid) return res.status(400).json({ error: 'connectWifi exige ssid' });
+
+  const PRECISA_BOOL = ['setMobileControl', 'setMobileBlock', 'setBlockOnWifi',
+                        'setBlockOnProjection', 'setAutoblock', 'setWifiPriority',
+                        'setWifiEnabled'];
+  if (PRECISA_BOOL.includes(metodo) && msg.valor === undefined) {
+    return res.status(400).json({ error: metodo + ' exige valor (bool)' });
+  }
+  for (const k of ['mb', 'gb', 'day']) {
+    if (req.body?.[k] !== undefined) msg[k] = parseInt(req.body[k], 10) || 0;
+  }
+  if (metodo === 'setDataLimit' && msg.mb === undefined && msg.gb === undefined) {
+    return res.status(400).json({ error: 'setDataLimit exige mb ou gb' });
+  }
+  if (metodo === 'setCycleDay' && !(msg.day >= 1 && msg.day <= 31)) {
+    return res.status(400).json({ error: 'setCycleDay exige day entre 1 e 31' });
+  }
+  try {
+    mqttClient.publish(`${MQTT_PREFIX}/cmd/uplink`, JSON.stringify(msg), { qos: 1, retain: false });
+  } catch (e) { return res.status(502).json({ error: e.message }); }
+  if (metodo === 'setWifiEnabled' && msg.valor === false) {
+    console.warn('[uplink] ⚠️ DESLIGANDO o WiFi do carro — se ele não tiver 4G, o acesso remoto cai aqui');
+  }
+  console.log(`[uplink] comando ${metodo}${msg.ssid ? ' ssid=' + msg.ssid : ''}${msg.valor !== undefined ? ' valor=' + msg.valor : ''}`);
+  // Só o encaminhamento é confirmado aqui. O resultado real chega em
+  // uplink/result e no uplink/status seguinte — o app lê de lá.
+  res.json({ ok: true, enviado: msg, aviso: 'resultado chega em /api/state (uplink) em alguns segundos' });
+});
+
+app.post('/api/la/end-trip', async (req, res) => {
+  if (!apnsLive.enabled) return res.status(503).json({ error: 'apns desativado' });
+  const tinhaToken = apnsLive.hasUpdateToken(TRIP_LA_TYPE);
+  const cs = _tripContentState(_lastTripSnapshot || autoTripsArr[0] || {}, false);
+  let erro = tinhaToken ? null : 'sem update token — o app precisa estar aberto pra registrar um';
+  if (tinhaToken) {
+    try {
+      await apnsLive.pushUpdate(TRIP_LA_TYPE, {}, cs, { isFinal: true, dismissalDate: Date.now() });
+    } catch (e) { erro = e.message; }
+  }
+  _tripActive = false;
+  _cancelTripEndTimer();
+  apnsLive.clearUpdateTokensByType(TRIP_LA_TYPE);
+  console.log(`[trip-la] encerramento forçado (token=${tinhaToken}${erro ? ', erro: ' + erro : ''})`);
+  res.json({ ok: !erro, tinhaToken, erro, current_trip: state.current_trip ? 'presente' : 'null' });
+});
+
 app.post('/api/la/relaunch', async (req, res) => {
   if (!apnsLive.enabled) return res.status(503).json({ error: 'apns desativado' });
   const done = [];
@@ -12938,7 +14362,7 @@ app.post('/api/charge-limit/cycle', (req, res) => {
   _pendingChargeTarget = next;
   _pendingChargeTargetMs = Date.now();
   // Feedback imediato: empurra a LA já com o novo alvo (sem throttle/charging gate).
-  if (apnsLive.enabled) apnsLive.pushUpdate('ChargeActivityAttributes', {}, _chargeContentState(), {}).catch(() => {});
+  if (apnsLive.enabled) apnsLive.pushUpdate('ChargeActivityAttributes', {}, _chargeContentState(), { staleDate: _chargeStale() }).catch(() => {});
   // Debounce o envio real pro carro: agrupa a rajada de taps num único cmd.
   if (_chargeCycleTimer) clearTimeout(_chargeCycleTimer);
   _chargeCycleTimer = setTimeout(() => {
@@ -14528,6 +15952,211 @@ mqttClient.on('message', (topic, payload, packet) => {
   //
   // Isto substitui a dedução por `network/info`, que só dizia "wifi" e não
   // distinguia Starlink de qualquer outra rede.
+  if (topic === MQTT_PREFIX + '/automation/event') {
+    // Inclui as BARRADAS (phase='barrada'): regra que não dispara era invisível, e
+    // isso custou duas manhãs de diagnóstico às cegas na cortina.
+    try {
+      const o = JSON.parse(value || '{}');
+      _autoEvents.push({ ...o, ts: o.ts || Date.now() });
+      while (_autoEvents.length > 500) _autoEvents.shift();
+      if (o.phase === 'barrada') {
+        console.log(`[automacao] BARRADA ${o.name || o.rule_id}: ${o.motivo}`
+          + ` (engine=${o.engine_state} shade=${o.shade_level} prev=${o.trig_prev})`);
+      }
+      try { fs.writeFileSync(AUTOMATION_EVENTS_FILE, JSON.stringify(_autoEvents)); } catch (_) {}
+    } catch (_) {}
+    return;
+  }
+  if (topic === MQTT_PREFIX + '/perf/procs') {
+    try {
+      const o = JSON.parse(value || '{}');
+      _perf.nCores = o.nCores || _perf.nCores || 8;
+      _perf.memKind = o.memKind || 'rss';
+      _perf.cpuScale = o.cpuScale || 'system_total';
+      _perf.totalProcs = o.totalProcs || null;
+      // Acumula por PROCESSO (pkg), não por pid: o pid muda quando o app reinicia e
+      // aí a média se partiria em duas linhas do mesmo app — justamente o que se
+      // quer acompanhar (quem cresce ao longo do tempo).
+      for (const item of (o.procs || [])) {
+        let p; try { p = typeof item === 'string' ? JSON.parse(item) : item; } catch (_) { continue; }
+        if (!p || !p.pkg) continue;
+        const k = String(p.pkg);
+        const acc = _perf.procs[k] || (_perf.procs[k] = {
+          pkg: k, rssSoma: 0, rssN: 0, rssPico: 0,
+          cpuSoma: 0, cpuN: 0, cpuPico: 0, state: p.state || '?', amostras: 0,
+        });
+        acc.amostras++;
+        acc.state = p.state || acc.state;   // último estado visto
+        if (Number.isFinite(p.rssMb)) {
+          acc.rssSoma += p.rssMb; acc.rssN++;
+          if (p.rssMb > acc.rssPico) acc.rssPico = p.rssMb;
+        }
+        // cpuPct pode ser null (processo novo, sem 2 amostras) — não conta como zero,
+        // senão a média de um app que só apareceu uma vez despenca sem motivo.
+        if (Number.isFinite(p.cpuPct)) {
+          acc.cpuSoma += p.cpuPct; acc.cpuN++;
+          if (p.cpuPct > acc.cpuPico) acc.cpuPico = p.cpuPct;
+        }
+      }
+    } catch (_) {}
+    return;
+  }
+  // Botão flutuante alternado NO CARRO. Alinha o estado e REESCREVE o retained: o
+  // `cmd/overlay` é retido, então sem isto o valor antigo (posto pelo app do iPhone)
+  // voltaria a valer na próxima reconexão do APK e desfaria a escolha feita no carro.
+  // Reescrever com o mesmo valor é idempotente — o carro recebe o que ele já aplicou.
+  if (topic === MQTT_PREFIX + '/overlay/estado') {
+    const on = String(value).trim() === '1';
+    state.overlay_destino = on;
+    scheduleStateSave();
+    try {
+      mqttClient.publish(`${MQTT_PREFIX}/cmd/overlay`, on ? '1' : '0', { qos: 1, retain: true });
+    } catch (_) {}
+    console.log(`[overlay] botão flutuante ${on ? 'LIGADO' : 'desligado'} pelo carro — retained alinhado`);
+    return;
+  }
+  // Resposta do popup de sugestão no carro: {id, aceito, expirou}. Reusa a mesma
+  // orquestração do accept HTTP — grava a rota, publica nav_dest retido e espelha no
+  // Waze. Aceitar pelo carro e aceitar pelo app têm que dar exatamente no mesmo lugar.
+  if (topic === MQTT_PREFIX + '/sugestao/resposta') {
+    try {
+      const o = JSON.parse(value || '{}');
+      const id = String(o.id || '');
+      if (!o.aceito) {
+        console.log(`[sugestao] ${o.expirou ? 'expirou sem resposta' : 'recusada pelo dono'} (id=${id})`);
+        return;
+      }
+      const c = _proximoCompromisso();
+      if (!c || (id && c.id !== id)) { console.warn(`[sugestao] aceite de sugestão inexistente/expirada (id=${id})`); return; }
+      if (!(c.lat && c.lng)) { console.warn('[sugestao] compromisso sem coordenada — nada a definir'); return; }
+      const nome = c.nome || 'Compromisso';
+      mqttClient.publish(`${MQTT_PREFIX}/cmd/nav_dest`,
+        JSON.stringify({ lat: c.lat, lng: c.lng, name: nome }), { qos: 1, retain: true });
+      state.route = { wps: [{ lat: c.lat, lng: c.lng, name: nome, isFinal: true }],
+                      completedIdx: -1, undo: null, ts: Date.now() };
+      _navDestRetained = true;
+      scheduleStateSave();
+      _espelhaDestinoNoWaze(c.lat, c.lng, nome);
+      recentNavDests.push({ name: nome, lat: c.lat, lng: c.lng, ts: Date.now() });
+      _registraRecente(nome, c.lat, c.lng);
+      if (recentNavDests.length > 30) recentNavDests.shift();
+      _saveNavDestsSoon();
+      console.log(`[sugestao] ACEITA no carro: "${nome}" — rota gravada e espelhada no Waze`);
+    } catch (e) { console.warn('[sugestao] resposta inválida:', e.message); }
+    return;
+  }
+  if (topic === MQTT_PREFIX + '/media/now_playing') {
+    try {
+      const o = JSON.parse(value || '{}');
+      // Guarda o metadado mesmo pausado (pausa vem com título), mas quem decide se
+      // APARECE é `playing` — ver as duas exposições abaixo. Faixa pausada há horas
+      // não é "tocando agora", e foi assim que interpretei errado em 11/08: vi
+      // playing=false com título e achei que a flag estivesse furada; era pausa real.
+      if (!o.title) { _media = { playing: false, ms: Date.now(), reason: o.reason || '' }; return; }
+      _media = {
+        playing: !!o.playing,
+        title:  o.title  || '',
+        artist: o.artist || '',
+        album:  o.album  || '',
+        app:    o.app    || '',
+        muted:  !!o.muted,
+        duration_ms:    +o.duration_ms    || 0,
+        position_ms:    o.position_ms    != null ? +o.position_ms : null,
+        position_at_ms: o.position_at_ms != null ? +o.position_at_ms : null,
+        has_art: !!o.has_art,
+        apk: o.apk || '',
+        ms: Date.now(),
+      };
+      broadcast('media', _media);
+    } catch (_) {}
+    return;
+  }
+  if (topic === MQTT_PREFIX + '/nav/directions') {
+    try {
+      const o = JSON.parse(value || '{}');
+      if (!o.active) {
+        // `reason` e `apk` vêm do probe: distinguem "sem rota" de "não consigo ler o
+        // provider", que antes chegavam as duas como silêncio.
+        _nav = { active: false, ms: Date.now(), reason: o.reason || '', apk: o.apk || '' };
+        if (o.reason && !/rota encerrada|sem rota/i.test(o.reason)) {
+          console.log(`[nav] probe mudo (apk ${o.apk || '?'}): ${o.reason}`);
+        }
+        // Rota do Waze acabou: esquece o candidato pendente, mas NÃO restaura a rota
+        // anterior do app — o destino novo passou a valer e continua valendo.
+        _navDestPend = null; _navDestAdotado = ''; _navLigadoNaRota = false;
+        return;
+      }
+      // Reconfere a idade AQUI também. O APK já filtra em 30s, mas entre a leitura dele
+      // e a chegada do MQTT cabe atraso (fila, reconexão, socket meio-aberto), e quem
+      // exibe é quem tem que responder pelo frescor.
+      // Payload CRU em ARQUIVO, não no log: o console truncava em 700 chars e o
+      // `steps[]` da rota inteira (com cues) passa disso fácil — eu decapitaria
+      // justamente o dado que preciso devolver pro dev do Impulse.
+      // Grava no início da rota e sempre que o `steps` mudar de tamanho (a lista
+      // encurta conforme as manobras são consumidas, então o 1º registro é o mais
+      // completo).
+      try {
+        const nSteps = Array.isArray(o.steps) ? o.steps.length : 0;
+        if (!_nav.active || nSteps !== _navStepsN) {
+          _navStepsN = nSteps;
+          fs.appendFileSync(path.join(DATA_DIR, 'nav-raw.ndjson'),
+            JSON.stringify({ ts: Date.now(), nSteps, payload: o }) + '\n');
+          if (nSteps) console.log(`[nav] payload cru gravado (${nSteps} passos) → nav-raw.ndjson`);
+        }
+      } catch (_) {}
+      const upd = +o.updated_at_ms || 0;
+      const idade = upd > 0 ? Date.now() - upd : Infinity;
+      if (!(idade < 60_000)) {
+        _nav = { active: false, ms: Date.now(), stale: true };
+        return;
+      }
+      _nav = {
+        active: true,
+        destination:       o.destination || (Array.isArray(o.destinations) ? o.destinations[0] : '') || '',
+        current_road:      o.currentRoad || '',
+        eta:               o.eta || '',
+        remaining_seconds: +o.remainingSeconds || 0,
+        remaining_meters:  +o.remainingMeters  || 0,
+        next_icon:         o.next?.icon || '',
+        next_road:         o.next?.road || '',
+        next_distance_m:   +(o.next?.distanceMeters) || 0,
+        // 'lastStep' = derivado do último passo pelo Impulse, não veio do host. Vale
+        // pra resolver e mostrar, mas quero saber a procedência.
+        destination_source: o.destinationSource || (o.destination ? 'host' : ''),
+        apk:               o.apk || '',
+        steps_n:           Array.isArray(o.steps) ? o.steps.length : 0,
+        updated_at_ms:     upd,
+        ms:                Date.now(),
+      };
+      _avaliaDestinoDoWaze(_nav.destination);
+      broadcast('nav_directions', _nav);
+    } catch (_) {}
+    return;
+  }
+  if (topic === MQTT_PREFIX + '/perf/sample') {
+    try {
+      const o = JSON.parse(value || '{}');
+      if (o.fim) { _perf.ativo = false; _perf.fimMs = Date.now(); return; }
+      if (!_perf.inicioMs) _perf.inicioMs = Date.now();   // amostra sem POST (APK já ligado)
+      _perf.amostras.push(o);
+      if (_perf.amostras.length > PERF_MAX_AMOSTRAS) _perf.amostras.shift();
+    } catch (_) {}
+    return;
+  }
+  if (topic === MQTT_PREFIX + '/uplink/result') {
+    try {
+      const o = JSON.parse(value || '{}');
+      // `retido` e ts separados: o tópico é retained, e marcar ts=agora ao receber
+      // fazia o broker reentregar um snapshot velho na reconexão e ele VENCER o
+      // status fresco — os toggles do app voltavam a valores antigos sozinhos
+      // ("algo brigando", 04/08). Mesmo vício do frescor: recebimento ≠ medição.
+      const retido = !!(packet && packet.retain);
+      state.uplink_cmd = { ...o, ts: Date.now(), retido };
+      if (o.ok === false) console.warn(`[uplink] comando ${o.metodo} falhou: ${o.erro || '?'}`);
+      broadcast('update', state); scheduleStateSave();
+    } catch (_) {}
+    return;
+  }
   if (topic === MQTT_PREFIX + '/uplink/status') {
     if (!String(value).trim()) { state.uplink = null; return; }   // limpeza do retained, não erro
     try {
@@ -14545,8 +16174,36 @@ mqttClient.on('message', (topic, payload, packet) => {
         controle4g: !!o.mobileControlEnabled,
         quatroGOn: !!o.mobile4gOn,
         motivoCorte: o.mobileBlockReason ?? null,
+        wifiPrioridade: o.wifiPriorityEnabled === 1,
+        wifiDaTela: o.headUnitWifiSsid ?? null,
+        // Regras de corte e consumo do ciclo: a partir do vc7267 vêm na própria
+        // query, e aí o app lê o estado sem precisar disparar call() a cada 4s só
+        // pra enxergar o snapshot. Ficam como null enquanto o Impulse não publicar.
+        manualBlock:   o.mobileManualBlock === undefined ? null : o.mobileManualBlock === 1,
+        blockOnWifi:   o.mobileBlockOnWifi === undefined ? null : o.mobileBlockOnWifi === 1,
+        blockProjecao: o.mobileBlockOnProjection === undefined ? null : o.mobileBlockOnProjection === 1,
+        autoblock:     o.mobileAutoblock === undefined ? null : o.mobileAutoblock === 1,
+        limiteMb:      Number.isFinite(o.mobileLimitMb) ? o.mobileLimitMb : null,
+        diaCiclo:      Number.isFinite(o.mobileCycleDay) ? o.mobileCycleDay : null,
+        usadoMb:       Number.isFinite(o.mobileUsedMb) ? o.mobileUsedMb : null,
+        // Quando o CARRO mediu. É o único número que sobrevive a restart do bridge
+        // e a retained: `ts: Date.now()` dizia só "quando eu recebi", e como o
+        // retained chega de novo em cada reconexão, dado de uma hora atrás voltava
+        // a parecer fresco (visto em 31/07: badge "Roteando" com o carro dormindo
+        // havia 66 min, exatamente o uptime do bridge).
+        medidoMs: Number.isFinite(o.medidoMs) ? o.medidoMs : null,
+        // Retained = o broker reentregou o último valor conhecido, ninguém acabou
+        // de medir. Sem esta flag não há como distinguir "o carro está roteando" de
+        // "o carro estava roteando quando dormiu".
+        retido: !!(packet && packet.retain),
         ts: Date.now(),
       };
+      // APK antigo não manda medidoMs. Aí a recepção ao vivo (não-retained) é a
+      // melhor estimativa que existe; retained fica sem idade em vez de ganhar uma
+      // falsa.
+      if (state.uplink.medidoMs == null && !state.uplink.retido) {
+        state.uplink.medidoMs = state.uplink.ts;
+      }
       if (!o.ok) console.warn(`[uplink] EcoTrip não leu o Impulse: ${o.erro}`);
       else if (antes !== state.uplink.texto) {
         console.log(`[uplink] ${state.uplink.modo}: ${state.uplink.texto || '(oculto)'}`
@@ -14640,6 +16297,7 @@ mqttClient.on('message', (topic, payload, packet) => {
       console.log(`[nav_to] multimídia escolheu '${nome}' (${lat},${lng}) app=${o.app || '?'}`);
       recentNavDests.push({ name: nome, lat, lng, ts: Date.now() });
       if (recentNavDests.length > 30) recentNavDests.shift();
+      _saveNavDestsSoon();
       _registraRecente(nome, lat, lng);   // alimenta a aba "Recentes"
       // state.route junto, não só o tópico: _maybeComputeArrival recalcula a
       // partir dela e republica o cmd/nav_dest. Sem atualizar aqui, o destino
@@ -15040,7 +16698,39 @@ try {
   } else {
     _srcChange = _raw;
   }
+  // Nada que veio do DISCO é medição desta sessão. Marca tudo como `r` (não-medido
+  // ao vivo) pra `_ultimaMedicaoMs` não confundir "estado restaurado" com "carro
+  // acabou de responder" — o valor e o ms seguem inteiros pro failover comparar,
+  // só o crédito de frescor é revogado. Sem isto o primeiro `/api/state` depois de
+  // um restart declarava tudo fresco, que é exatamente o bug que motivou o campo.
+  for (const e of Object.values(_srcChange)) {
+    for (const f of ['apk', 'gwm']) if (e && e[f]) e[f].r = true;
+  }
 } catch (_) {}
+/// Campos em que a GWM comprovadamente LÊ o carro (medido em 04/08: mudaram junto
+/// com a atividade recente). Só nestes o comando volta pra ela quando o APK emudece.
+///
+/// Fora da lista de propósito: `window_*` e `sunroof` (valor da nuvem parado há 5
+/// dias — ela não acompanha vidro/teto), `fuel_l` e `autonomy_ice_km` (idem), e
+/// `charging_state`, que a GWM não publica — quem sabe de carga é só o APK.
+const GWM_LE_DE_VERDADE = new Set([
+  'engine_state', 'lock_state', 'soc_pct', 'odometer_km', 'batt_12v_pct', 'ac_state',
+  'door_fl', 'door_fr', 'door_rl', 'door_rr', 'door_trunk',
+  'tyre_pressure_fl', 'tyre_pressure_fr', 'tyre_pressure_rl', 'tyre_pressure_rr',
+  'tyre_temp_fl', 'tyre_temp_fr', 'tyre_temp_rl', 'tyre_temp_rr',
+  'current_address', 'car_status_message', 'autonomy_ev_km', 'charge_remaining_min',
+  // window_* entram: a GWM LÊ vidro — em 02/08 (domingo) o dono abriu o do motorista
+  // e só `window_fl` mudou nela, os outros três seguiram parados. Valor estável era
+  // vidro fechado, não fonte morta. Eu os havia excluído por esse critério errado,
+  // que é o mesmo que critiquei no `gwmParado`.
+  'window_fl', 'window_fr', 'window_rl', 'window_rr',
+  // sunroof entra: escala da GWM confirmada pelo dono (3=fechado · 0=ventilação ·
+  // 10..100=% aberto) e normalizada na entrada. Ela distingue só aberto/fechado, o
+  // que basta pro alerta de segurança; a % existe apenas no APK (skylight_level).
+  'sunroof',
+  // FORA de propósito: `fuel_l` — o dono definiu o APK como fonte única (as duas
+  // medem o tanque com ~1 L de diferença e o litro do carro é o que vale).
+]);
 const GWM_VALUE_STALE_MS  = 8 * 60_000;      // valor parado > isso = suspeito
 const APK_TAKEOVER_MIN_MS = 3 * 60_000;      // e o APK precisa estar discordando há isso
 const APK_ALIVE_MS        = 15 * 60_000;     // janela de 'APK vivo': com o carro dormindo ele publica a cada ~4min
@@ -15058,11 +16748,24 @@ function _saveSrcChangeSoon() {
 
 /// Registra que `src` observou `value` para `key`. Só move o timestamp quando o
 /// valor MUDA — é o que distingue "dado novo" de "mesma resposta repetida".
-function _notaValorFonte(key, src, value) {
+function _notaValorFonte(key, src, value, retido = false) {
   const e = _srcChange[key] || (_srcChange[key] = {});
   const cur = e[src];
+  // `vistoMs` = última vez que esta fonte CONFIRMOU o valor ao vivo, mesmo sem
+  // mudança. É diferente de `ms` (quando mudou): o motor ligado há 20min e
+  // republicado a cada minuto tem ms=20min e vistoMs=agora. Pra saber se um campo
+  // é confiável importa o segundo — o primeiro diria "velho" sobre dado fresco.
+  // Só publish AO VIVO conta; retained é reentrega do broker.
+  if (!retido && cur) cur.vistoMs = Date.now();
   if (!cur || String(cur.v) !== String(value)) {
+    // `r` = o valor veio de uma reentrega do broker, não de uma medição. O ms ainda
+    // é gravado (no boot é a única estimativa que existe, e o failover precisa de
+    // uma base de comparação), mas quem mede FRESCOR tem que ignorar: sem isso o
+    // restart do bridge fazia a derivação de janela registrar medição nova a cada
+    // reconexão, e o painel escrevia "agora" com o carro dormindo há horas.
     e[src] = { v: value, ms: Date.now() };
+    if (!retido) e[src].vistoMs = Date.now();
+    if (retido) e[src].r = true; else delete e[src].r;
     _saveSrcChangeSoon();
   }
 }
@@ -15097,8 +16800,11 @@ function _normCmp(key, v) {
   // binários: GWM manda 0/1, o state guarda off/on, o APK manda 0/1
   if (s === 'off') return '0';
   if (s === 'on')  return '1';
-  // sunroof: GWM usa 0-3 (posição), APK 0/1 — qualquer coisa > 0 é "aberto"
-  if (key === 'sunroof') return (+s > 0 ? '1' : '0');
+  // sunroof: a escala da GWM é 3=fechado · 0=ventilação · 10..100=% aberto. A regra
+  // antiga (">0 = aberto") errava os DOIS extremos: lia 3 como aberto e 0 como
+  // fechado, quando é o inverso. Agora o valor da GWM chega aqui já normalizado
+  // (0/1) pelo applyGwmEntity, então só o legado precisa de tradução.
+  if (key === 'sunroof') return (s === '3' ? '0' : (+s > 0 ? '1' : s === '0' ? '0' : '1'));
   return s;
 }
 
@@ -15188,7 +16894,23 @@ function _valorAproveitavel(key, v) {
   return true;
 }
 
+/** Campos que o APK NUNCA pode assumir, em qualquer caminho. Extraído de dentro do
+ *  `_apkAssumeChave` porque o veto morava só lá dentro e o laço de retomada no boot
+ *  grava `_fieldSource` direto, sem consultar a função: a cada restart do bridge os
+ *  quatro vidros voltavam pro APK com o '1' (=aberto) que este carro lê errado, o que
+ *  é exatamente o gatilho da LA falsa de vidro aberto. Um veto, um lugar. */
+function _apkNuncaAssume(key) {
+  return /^window_/.test(key);
+}
+
 function _apkAssumeChave(key, apkValue, now = Date.now()) {
+  // VIDRO: o APK NUNCA assume. A leitura dele é errada neste carro — publicou '1'
+  // (=aberto) com os quatro vidros fechados, em 14/08, disparando a LA de vidro
+  // aberto. A GWM lê certo. Minha 1a tentativa só barrou o takeover por VALOR PARADO
+  // e deixou passar quando a GWM fica CEGA, que é o normal com o carro andando: bastou
+  // isso pra o alerta voltar. Sem leitura confiável, o certo é manter o último valor
+  // da nuvem, não trocar por dado que sabemos estar errado.
+  if (_apkNuncaAssume(key)) return false;
   if (!_valorAproveitavel(key, apkValue)) return false;   // dado ausente não substitui dado velho
   const e = _srcChange[key];
   if (!e || !e.gwm) return true;                       // GWM nunca falou: APK manda
@@ -15201,6 +16923,12 @@ function _apkAssumeChave(key, apkValue, now = Date.now()) {
   // o árbitro porque lê o CAN direto, e a saída por APK morto continua no fim.
   const apkNoComando = _fieldSource[key] === 'apk';
   const cega = _gwmCega(now);
+  // VIDRO: valor constante NÃO é fonte morta. Um vidro fechado fica fechado por horas,
+  // e a GWM "parada há 203min" era simplesmente a verdade — foi o que deixou o APK
+  // (que leu '1'=aberto por erro) assumir e disparar a LA de vidro aberto em 14/08,
+  // com os quatro vidros fechados. Aqui só a GWM CEGA de fato libera o APK; idade do
+  // valor não conta. É o mesmo erro do `gwmParado` que eu já havia criticado no
+  // sunroof e repeti aqui.
   const gwmParado = cega || now - e.gwm.ms > GWM_VALUE_STALE_MS;
   if (!gwmParado && !apkNoComando) return false;
   // Devolver pra GWM respeita a carência — evita o vai-e-vem quando ela volta
@@ -15217,9 +16945,51 @@ function _apkAssumeChave(key, apkValue, now = Date.now()) {
   // convergir (checado acima) nem produzir valor novo (gwmParado), o do APK vale
   // mais. Se alguém ligar o carro, ou o APK acorda junto e republica, ou a GWM
   // enxerga e vira gwmParado=false — os dois caminhos devolvem o comando.
+  // APK MUDO devolve o campo pra GWM — mas só nos campos que ela LÊ DE VERDADE.
+  //
+  // A lista vem de medição (04/08), não de suposição: comparei, por campo, quando
+  // cada fonte mudou de valor. Nos campos abaixo a GWM acompanhou a atividade do
+  // carro (mudou nos últimos ~30min junto com o uso). Nos de fora — window_*,
+  // sunroof, fuel_l, autonomy_ice_km — o valor dela estava parado há 5 DIAS, e
+  // charging_state ela nem publica. Devolver esses seria trocar dado velho do APK
+  // por dado ainda mais velho da nuvem.
+  //
+  // Por que devolver: o silêncio do APK é ele mesmo evidência — o app morre junto
+  // com o carro. Ficar com o último valor dele (motor ligado, porta aberta) gera
+  // alarme falso que não some, o que aconteceu quatro vezes em 04/08.
+  if (apkNoComando && GWM_LE_DE_VERDADE.has(key)) {
+    const apkMudoMs = e.apk && e.apk.vistoMs ? now - e.apk.vistoMs : Infinity;
+    const gwmAoVivo = e.gwm && e.gwm.vistoMs && (now - e.gwm.vistoMs) < 2 * 60_000;
+    if (apkMudoMs > 5 * 60_000 && gwmAoVivo && !cega) {
+      console.log(`[failover] ${key}: devolvendo à GWM — APK mudo há `
+        + `${Math.round(apkMudoMs / 60_000)}min e a nuvem está lendo o carro`);
+      return false;
+    }
+  }
+  // AMBOS ao vivo: vence quem MUDOU por último. Antes o APK ficava com o campo por
+  // padrão (ele lê o CAN), mas com as duas fontes ativas isso podia exibir um valor
+  // que o APK viu antes e a nuvem já corrigiu. "Último estado real" = mudança mais
+  // recente entre fontes que estão confirmando agora.
+  if (apkNoComando && e.apk && e.gwm) {
+    const apkVivo2 = e.apk.vistoMs && (now - e.apk.vistoMs) < 2 * 60_000;
+    const gwmVivo2 = e.gwm.vistoMs && (now - e.gwm.vistoMs) < 2 * 60_000;
+    if (apkVivo2 && gwmVivo2 && e.gwm.ms > e.apk.ms && !emCarencia) {
+      console.log(`[failover] ${key}: as duas fontes ao vivo e a GWM mudou depois `
+        + `(${Math.round((e.gwm.ms - e.apk.ms) / 1000)}s) — devolvendo`);
+      return false;
+    }
+  }
   if (apkNoComando) return gwmParado || emCarencia;
 
   const apk = e.apk;
+  // ENTRAR com "motor ligado" exige valor confirmado AO VIVO há pouco, não só o
+  // processo dentro da janela de 15min. Sem isto a devolução acima era desfeita na
+  // mesma mensagem: o retained do APK reentrava, `_apkVivo` ainda era true (15min é
+  // generoso de propósito, pro carro dormindo) e ele reassumia com o mesmo '1' velho.
+  if (key === 'engine_state' && _normCmp(key, apkValue) === '1') {
+    const vistoHa = apk && apk.vistoMs ? now - apk.vistoMs : Infinity;
+    if (vistoHa > 5 * 60_000) return false;
+  }
   const discordaHa = apk && _normCmp(key, apk.v) === _normCmp(key, apkValue) ? now - apk.ms : 0;
   if (discordaHa < ((CAMPOS_EVENTO.has(key) || cega) ? 0 : APK_TAKEOVER_MIN_MS)) return false;
   // "APK mais fresco" se mede pela ATIVIDADE dele, não comparando os timestamps
@@ -15236,6 +17006,30 @@ function _apkAssumeChave(key, apkValue, now = Date.now()) {
   // applyGwmEntity — ela se auto-alimentava e o APK parecia vivo pra sempre.
   // Só publish AO VIVO conta como prova de que o carro está publicando.
   return !!state.last_apk_live_ms && (now - state.last_apk_live_ms) < APK_ALIVE_MS;
+}
+
+/// Quando o carro foi MEDIDO de verdade, na melhor estimativa disponível. Existe
+/// porque `last_apk_ms`/`last_gwm_ms` marcam *atividade da fonte*, não medição:
+/// - `last_apk_ms` é renovado por retained (e pela re-injeção do failover), então
+///   rejuvenesce a cada reconexão do bridge;
+/// - `last_gwm_ms` marca 2s eternamente, porque a integração republica o cache da
+///   nuvem a cada 5s mesmo com o carro dormindo há horas.
+/// O painel usava o máximo dos dois e por isso escrevia "agora" embaixo da
+/// temperatura da cabine com o carro dormindo desde as 18h (visto em 31/07).
+///
+/// APK ao vivo é prova direta de medição. Sem ele, a única prova que sobra é um
+/// VALOR ter mudado — republicação de cache não move `_srcChange`.
+function _ultimaMedicaoMs(now = Date.now()) {
+  if (state.last_apk_live_ms && (now - state.last_apk_live_ms) < APK_ALIVE_MS) {
+    return state.last_apk_live_ms;
+  }
+  let melhor = state.last_apk_live_ms || 0;
+  for (const e of Object.values(_srcChange)) {
+    for (const f of ['apk', 'gwm']) {
+      if (e[f] && !e[f].r && e[f].ms > melhor) melhor = e[f].ms;
+    }
+  }
+  return melhor || null;
 }
 
 // Chaves que migraram pro HA — handlers do app são ignorados aqui pra evitar
@@ -15312,6 +17106,156 @@ function _chargeContentState() {
 
 // ── Live Activity de viagem ao vivo ───────────────────────────────────────
 const TRIP_LA_TYPE = 'TripActivityAttributes';
+
+/// `pushStart` que se cura quando os tokens de push-to-start morreram.
+///
+/// Em 19/08 06:06 a viagem começou e TODOS os pts-tokens devolveram 410 ExpiredToken:
+/// nenhuma LA foi criada, e a que estava na tela era a da viagem ANTERIOR — congelada
+/// em 3 km e sem poder ser encerrada, porque encerrar também exige token. O token só
+/// voltou às 11:36, quando o dono abriu o app na mão.
+///
+/// Esses tokens expiram sozinhos e só são re-registrados quando o app roda. O push
+/// silencioso sobe o app por alguns segundos, o registro acontece, e a segunda tentativa
+/// entrega. Sem isto, o dia inteiro fica sem LA se o app não for aberto.
+async function _pushStartComCura(tipo, attrs, contentState, opts, rotulo) {
+  try {
+    const r = await apnsLive.pushStart(tipo, '', attrs, contentState, opts);
+    if (r && r.sent > 0) return r;
+    console.warn(`[apns] ${rotulo} pushStart não entregou (token morto/ausente) — acordando o app`);
+    await apnsLive.wakeApp().catch(() => {});
+    // 12s: o app precisa subir e o registro chegar por HTTP até o bridge.
+    await new Promise(res => setTimeout(res, 12_000));
+    const r2 = await apnsLive.pushStart(tipo, '', attrs, contentState, opts);
+    console.log(`[apns] ${rotulo} pushStart 2a tentativa: sent=${r2 ? r2.sent : 0}`);
+    return r2;
+  } catch (e) {
+    console.warn(`[apns] ${rotulo} pushStart falhou: ${e.message}`);
+    return { sent: 0 };
+  }
+}
+// Navegação do Android Auto (Waze/Maps), lida pelo APK via Impulse e publicada em
+// nav/directions. NÃO tem lat/long — o host do AA não expõe coordenada; `destination`
+// é rótulo, não ponto. Serve pra ETA e distância/tempo restantes, não pra geofence.
+// Mantido só em memória de propósito: é sinal vivo, e ressuscitar ETA de antes de um
+// restart seria servir chegada de uma rota que já morreu.
+let _nav = { active: false, ms: 0 };
+
+// Destino jogado no Waze SUBSTITUI o destino definido no app. O canal do AA só dá o
+// RÓTULO (string) — sem lat/long —, e destino sem ponto não serve: geofence, detecção
+// de chegada e SOC previsto todos precisam de coordenada. Então o rótulo é resolvido
+// em ponto antes de substituir, em três degraus (Meus locais → geocode → desiste).
+let _navDestPend    = null;   // { label, desdeMs } — candidato aguardando estabilizar
+let _navDestAdotado = '';     // rótulo já adotado, pra não reprocessar a cada tick
+let _navDestBusy    = false;
+/** true só quando o destino que o Waze está navegando É o destino da rota do app.
+ *  Sem isso o ETA do Waze (que é pra OUTRO lugar) seria casado com o nome da rota
+ *  antiga — número coerente na aparência, destino errado no conteúdo. */
+let _navLigadoNaRota = false;
+let _navStepsN = -1;   // tamanho do steps[] da última amostra (dispara nova captura)
+
+// Mídia tocando no carro, lida pelo APK via Impulse. Só em memória: é sinal vivo, e
+// ressuscitar depois de um restart mostraria a faixa de ontem como "tocando agora".
+// `position_at_ms` já vem em tempo de parede (o APK converte do elapsedRealtime dele,
+// que é um relógio que só existe no device).
+let _media = { playing: false, ms: 0 };
+
+/** ~15s do mesmo rótulo. No arranque da rota o Waze oscila o destino, e sem isso a
+ *  rota do app seria reescrita 3-4 vezes seguidas. */
+const NAV_ADOPT_ESTAVEL_MS = 15_000;
+
+function _achaEmMeusLocais(label) {
+  const norm = (t) => String(t || '').toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+  const alvo = norm(label);
+  if (alvo.length < 3) return null;
+  // Match por TOKEN, não por substring. Substring casava "Casa de Ração do Vale" com
+  // "Casa" e mandava o carro pra casa em vez do petshop — destino errado afirmado com
+  // confiança é pior que não resolver. Apelido de uma palavra (Casa, Trabalho, Sogra)
+  // só vale em igualdade exata; com 2+ palavras, exige TODAS presentes no alvo.
+  const toks = (t) => norm(t).split(' ').filter(Boolean);
+  const alvoToks = new Set(toks(label));
+  for (const l of meusLocais) {
+    if (!_validLatLng(+l.lat, +l.lng)) continue;
+    const nome = l.name || l.nome;
+    const n = norm(nome), nt = toks(nome);
+    if (n && (n === alvo || (nt.length >= 2 && nt.every(t => alvoToks.has(t))))) {
+      return { name: nome, lat: +l.lat, lng: +l.lng, via: 'meus-locais' };
+    }
+    const et = toks(l.address || l.endereco);
+    // Endereço: exige 3+ tokens em comum (rua + número + bairro), senão "rua" e "avenida"
+    // sozinhos casariam qualquer coisa.
+    if (et.length >= 3 && et.filter(t => alvoToks.has(t)).length >= 3) {
+      return { name: nome, lat: +l.lat, lng: +l.lng, via: 'meus-locais-endereco' };
+    }
+  }
+  return null;
+}
+
+/** Substitui a rota do app pelo destino que está no Waze. */
+async function _adotaDestinoDoWaze(label) {
+  if (_navDestBusy) return;
+  _navDestBusy = true;
+  try {
+    let hit = _achaEmMeusLocais(label);
+    if (!hit) {
+      const g = await _geocode(label);
+      if (g && _validLatLng(+g.lat, +g.lng)) hit = { name: g.name || label, lat: +g.lat, lng: +g.lng, via: 'geocode' };
+    }
+    if (!hit) {
+      // Degrau 3: sem ponto, NÃO troca a rota. O card já mostra rótulo e ETA do Waze;
+      // afirmar um destino sem saber onde fica quebraria a chegada silenciosamente.
+      _navDestAdotado = label;   // não fica tentando geocodificar o mesmo a cada 7s
+      _navLigadoNaRota = false;
+      console.log(`[nav-adopt] '${label}' não resolveu em ponto — rota do app mantida, ETA segue do Directions`);
+      return;
+    }
+    const jaEsse = state.route?.wps?.some(w => w.isFinal
+      && Math.abs(w.lat - hit.lat) < 3e-4 && Math.abs(w.lng - hit.lng) < 3e-4);
+    _navDestAdotado = label;
+    if (jaEsse) {
+      _navLigadoNaRota = true;
+      console.log(`[nav-adopt] '${label}' → ${hit.name} via ${hit.via} — já era o destino do app, nada a trocar`);
+      return;
+    }
+
+    state.route = { wps: [{ lat: hit.lat, lng: hit.lng, name: hit.name, isFinal: true }],
+                    completedIdx: -1, undo: null, ts: Date.now() };
+    // PUBLICA cmd/nav_dest — é o que faz o destino APARECER no carro.
+    //
+    // Eu havia deixado de publicar aqui com medo de fechar laço (Waze → bridge → carro
+    // → Waze). Era confusão minha entre duas coisas diferentes: quem manda pro Waze é
+    // `_espelhaDestinoNoWaze`, e essa sim continua de fora. O `cmd/nav_dest` só alimenta
+    // o banner do APK, que confirmadamente não toca no Waze ao receber. O custo do
+    // excesso de zelo foi a adoção funcionar sem efeito visível: em 31/08 o log mostrou
+    // 'Don Lázaro Cozinha Goiana' adotado às 12:54 e o dono não viu nada no carro.
+    _navDestRetained = true;
+    try {
+      mqttClient.publish(`${MQTT_PREFIX}/cmd/nav_dest`,
+        JSON.stringify({ lat: hit.lat, lng: hit.lng, name: hit.name, ts: Date.now() }),
+        { qos: 1, retain: true });
+    } catch (e) { console.warn('[nav-adopt] nav_dest falhou:', e.message); }
+    _navLigadoNaRota = true;
+    recentNavDests.push({ name: hit.name, lat: hit.lat, lng: hit.lng, ts: Date.now() });
+    if (recentNavDests.length > 30) recentNavDests.shift();
+    _saveNavDestsSoon();
+    scheduleStateSave();
+    scheduleStateBroadcast();
+    addEvent('nav_dest_adotado', `🧭 Destino do Waze assumido: ${hit.name}`);
+    console.log(`[nav-adopt] '${label}' → ${hit.name} (${hit.lat},${hit.lng}) via ${hit.via} — rota do app substituída`);
+  } catch (e) {
+    console.warn('[nav-adopt]', e.message);
+  } finally { _navDestBusy = false; }
+}
+
+/** Chamado a cada amostra de navegação. Só adota rótulo estável e ainda não adotado. */
+function _avaliaDestinoDoWaze(label) {
+  const l = String(label || '').trim();
+  if (!l) { _navDestPend = null; return; }
+  if (l === _navDestAdotado) return;
+  if (!_navDestPend || _navDestPend.label !== l) { _navDestPend = { label: l, desdeMs: Date.now() }; return; }
+  if (Date.now() - _navDestPend.desdeMs >= NAV_ADOPT_ESTAVEL_MS) _adotaDestinoDoWaze(l);
+}
+
 let _tripActive = false;
 // Sobrevive a restart: se o bridge reinicia no fim da viagem (ou o _endTripLA
 // dispara duas vezes), o snapshot in-memory sumia → LA final zerava. Persistido
@@ -15342,8 +17286,12 @@ function _tripContentState(ct, active) {
     tyreAlert: Object.values(_tyreDropAlertSent).some(Boolean),
     // Navegação (frame 2a): velocidade atual + destino/ETA quando o nav tem rota.
     speedKmh: active ? Math.max(0, +state.speed_kmh || 0) : undefined,
-    ...(active && state.arrival && state.arrival.name ? {
-      destName:   String(state.arrival.name),
+    // Destino na LA: o gatilho é ter ETA/distância, NÃO ter nome. Com a navegação do
+    // Android Auto o nome vem vazio de propósito (o host não entrega o destino), e a
+    // condição antiga em `arrival.name` derrubava ETA, km e a barra de progresso junto
+    // — a LA ficava sem linha do tempo enquanto o app iOS mostrava tudo.
+    ...(active && state.arrival && (+state.arrival.etaMin > 0 || +state.arrival.distKm > 0) ? {
+      ...(state.arrival.name ? { destName: String(state.arrival.name) } : {}),
       destEtaMin: Math.round(+state.arrival.etaMin || 0),
       destKm:     +(+state.arrival.distKm || 0).toFixed(1),
     } : {}),
@@ -15361,6 +17309,15 @@ function handleTripUpdate(ct, isRetained) {
   if (ct) {
     _cancelTripEndTimer();   // chegou snapshot → viagem em curso, cancela encerramento agendado
     const cs = _tripContentState(ct, true);
+    // Saiu com o carro → a LA de "não esqueça o motor ligado" perdeu o sentido. Ela
+    // só encerrava no engine_state='0', então quem ligava remoto e depois viajava
+    // ficava com as duas LAs empilhadas a viagem inteira (relatado em 01/08). O
+    // lembrete existe pro carro ligado e PARADO; dirigindo, quem informa é a LA de
+    // viagem, e não há nada pra esquecer de desligar remotamente.
+    if (_motorActive) {
+      console.log('[motor-la] viagem começou — encerra o lembrete de motor ligado');
+      _endMotorLA();
+    }
     if (!_tripActive) {
       _tripActive = true;
       // Decide CRIAR (pushStart) vs ATUALIZAR (pushUpdate) pela existência de uma
@@ -15368,14 +17325,23 @@ function handleTripUpdate(ct, isRetained) {
       // bridge no meio da viagem, a mensagem retida só atualizava e a LA nunca era
       // criada → nenhuma LA aparecia. iOS dedupa pushStart se já houver LA viva.
       if (apnsLive.hasUpdateToken(TRIP_LA_TYPE)) {
-        apnsLive.pushUpdate(TRIP_LA_TYPE, {}, cs, {}).catch(() => {});
+        apnsLive.pushUpdate(TRIP_LA_TYPE, {}, cs, { staleDate: Date.now() + 6 * 3600_000 }).catch(() => {});
       } else {
-        apnsLive.pushStart(TRIP_LA_TYPE, '', { carName: 'Haval H6 PHEV' }, cs,
-          { staleDate: Date.now() + 6 * 3600_000, alert: { title: '🚗 Viagem iniciada', body: 'Acompanhe na tela bloqueada.' } })
-          .catch(e => console.warn('[apns] trip pushStart falhou:', e.message));
+        _pushStartComCura(TRIP_LA_TYPE, { carName: 'Haval H6 PHEV' }, cs,
+          { staleDate: Date.now() + 6 * 3600_000, alert: { title: '🚗 Viagem iniciada', body: 'Acompanhe na tela bloqueada.' } },
+          'trip');
+        // Criada por push-to-start com o app fechado → sem update token, e sem ele
+        // a LA congela no estado inicial. Em 02/08 o card ficou em "0,0 km" com o
+        // carro já a 2,6 km. O push silencioso sobe o app por alguns segundos, o
+        // token chega, e os updates seguintes passam a funcionar.
+        setTimeout(() => {
+          if (!apnsLive.hasUpdateToken(TRIP_LA_TYPE)) {
+            apnsLive.wakeApp().catch(() => {});
+          }
+        }, 8_000);
       }
     } else {
-      apnsLive.pushUpdate(TRIP_LA_TYPE, {}, cs, {}).catch(() => {});
+      apnsLive.pushUpdate(TRIP_LA_TYPE, {}, cs, { staleDate: Date.now() + 6 * 3600_000 }).catch(() => {});
     }
   } else if (_tripActive || apnsLive.hasUpdateToken(TRIP_LA_TYPE)) {
     // Viagem encerrada (current_trip foi a null). Mostra o resumo por 5 min e some.
@@ -16206,16 +18172,79 @@ function _clearRoute(consumedWps) {
     if (_navDestRetained) console.log('[nav_dest] limpo (chegou ao destino ou rota expirou)');
     _navDestRetained = false;
   }
-  // Zera ts dos pontos consumidos no histórico pra não "ressuscitarem" no próximo tick.
+  // Marca os pontos consumidos pra não "ressuscitarem" como destino ATUAL (o
+  // auto-share olha isto). Antes zerava `nd.ts`, e como a idade é o filtro do
+  // _navDestNameFor, chegar ao destino apagava justamente o nome que a viagem
+  // recém-terminada precisava: em 01/08 a chegada às 09:41 deixou o POST das
+  // 09:43 sem nome, e "Casa → New Vikings Barbearia Moderna" virou o bairro.
+  // Consumido continua valendo pra NOMEAR (é onde a viagem acabou), só não vale
+  // como "estou indo pra lá".
   for (const w of (consumedWps || [])) {
     for (const nd of recentNavDests) {
-      if (Math.abs(nd.lat - w.lat) < 1e-6 && Math.abs(nd.lng - w.lng) < 1e-6) nd.ts = 0;
+      if (Math.abs(nd.lat - w.lat) < 1e-6 && Math.abs(nd.lng - w.lng) < 1e-6) {
+        nd.consumidoMs = Date.now();
+      }
     }
   }
+  _saveNavDestsSoon();
 }
+/** "19:08" → minutos de agora até lá. Trata virada de dia (ETA 00:20 às 23:50). */
+function _minutosAte(hhmm) {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(String(hhmm || '').trim());
+  if (!m) return 0;
+  const agora = new Date();
+  const alvo = new Date(agora);
+  alvo.setHours(+m[1], +m[2], 0, 0);
+  let dif = Math.round((alvo - agora) / 60000);
+  if (dif < -60) dif += 24 * 60;      // ETA depois da meia-noite
+  return dif > 0 ? dif : 0;
+}
+
 async function _maybeComputeArrival() {
   const now = Date.now();
   const route = state.route;
+  // ── Waze indo pra um lugar que não conseguimos virar ponto ────────────────
+  // A regra do dono é "se mudar no Waze, muda no EcoTrip". Antes eu mantinha a rota
+  // antiga quando o rótulo não geocodificava, e aí o app mostrava um destino que o
+  // dono tinha abandonado. Nome, ETA e km do Waze são coerentes ENTRE SI, então o
+  // destino passa a ser o dele mesmo sem coordenada — só o traçado do mapa e o SOC
+  // previsto ficam de fora (dependem de ponto).
+  // `remaining_seconds` chega 0 no carro mesmo com `eta` preenchido (visto em 10/08),
+  // então o tempo é derivado do relógio de chegada quando os segundos faltam. Exigir
+  // os segundos deixava o ETA de fora por um campo que o host simplesmente não manda.
+  const _navMin = _nav.remaining_seconds > 0
+    ? Math.round(_nav.remaining_seconds / 60)
+    : _minutosAte(_nav.eta);
+  const _navOk = _nav.active && (now - (_nav.ms || 0)) < 45_000
+    && !!_nav.eta && (_nav.remaining_meters > 0 || _navMin > 0);
+  // Sem rótulo de destino: só assume a tela se o app NÃO tiver rota própria. Com rota
+  // definida, não dá pra saber se o Waze vai pro mesmo lugar, e casar o nome de um
+  // destino com o ETA de outro seria pior que não mostrar.
+  if (_nav.active) {
+    console.log(`[nav-arr] ok=${_navOk} ligado=${_navLigadoNaRota} dest='${_nav.destination}' route=${!!route} min=${_navMin} m=${_nav.remaining_meters} idade=${Math.round((now-(_nav.ms||0))/1000)}s`);
+  }
+  if (_navOk && !_navLigadoNaRota && (_nav.destination || !route)) {
+    const km = _nav.remaining_meters > 0 ? +(_nav.remaining_meters / 1000).toFixed(1) : 0;
+    const a = state.arrival;
+    // Sem nome de destino, por decisão do dono (11/08): o canal do AA não entrega o
+    // destino pro Waze e inventar rótulo ("Destino no Waze") só polui. O que vale é
+    // chegada + tempo + km restantes, que vêm corretos. `name` vazio é o sinal pros
+    // consumidores renderizarem sem "indo pra X".
+    const nome = _nav.destination || '';
+    if (!a || a.name !== nome || a.etaClock !== _nav.eta || a.distKm !== km) {
+      state.arrival = {
+        name: nome, distKm: km,
+        etaMin: _navMin, etaClock: _nav.eta,
+        eta_src: 'android_auto',
+        sem_ponto: true,          // sem lat/lng: sem rota desenhada, sem SOC previsto
+        socArrival: null, traffic: null, legs: null, geometry: null, maneuvers: [],
+        speedLimit: null, undo: null, ts: now,
+      };
+      scheduleStateBroadcast();
+      console.log(`[nav-arr] ESCREVI arrival: eta=${state.arrival.etaClock} km=${state.arrival.distKm} min=${state.arrival.etaMin}`);
+    }
+    return;   // não gasta Directions pra uma rota que o dono não está seguindo
+  }
   // Sem rota OU rota velha (>6h) → limpa estado e retido (não reaparece no carro).
   if (!route || !Array.isArray(route.wps) || !route.wps.length || now - (route.ts || 0) > 6 * 3600 * 1000) {
     if (route) _clearRoute();
@@ -16248,6 +18277,18 @@ async function _maybeComputeArrival() {
     // Avanço por proximidade. Parada (não-final) alcançada a ≤300 m → marca concluída
     // e abre janela de desfazer de 5 min (fica riscada). Destino final a ≤500 m → encerra.
     if (next.isFinal) {
+      // Chegada também por LINHA RETA. `distToNext` é distância de DIREÇÃO, e num
+      // destino de contramão ela não cai: em 14/08 o carro ficou estacionado a 51 m
+      // do Limpa Gyn, carregando, e o Directions insistia em 3,3 km de percurso — a
+      // rota nunca encerrava e o painel mostrava "EM ROTA" com o carro no destino.
+      // Estar fisicamente ao lado é chegar, independente do caminho de carro.
+      const _retaM = haversineM(carLat, carLng, next.lat, next.lng);
+      if (_retaM < 150) {
+        console.log(`[arrival] chegou por linha reta (${Math.round(_retaM)}m) — `
+          + `Directions dizia ${distToNext.toFixed(1)}km, rota encerrada`);
+        if (route.predSoc != null && route.predOnFuel === false) _logSocPrediction(route.predSoc, Math.round(soc));
+        _clearRoute(route.wps); return;
+      }
       if (distToNext < 0.5) {
         // Calibração: registra previsto×real só pra trajetos que a previsão dizia
         // chegar no EV (onFuel=false). Trajeto que já ia a gasolina não tem SOC útil.
@@ -16286,8 +18327,22 @@ async function _maybeComputeArrival() {
     const fin = legs[legs.length - 1];
     // Snapshot da 1ª previsão pra calibração na chegada (previsto×real).
     if (route.predSoc == null) { route.predSoc = em.predictedSoc; route.predOnFuel = em.onFuel; scheduleStateSave(); }
+    // Com o Waze navegando, o ETA DELE manda: é a rota que o carro está de fato
+    // seguindo, com trânsito. Antes isso só valia no card do painel, e o link do
+    // familiar, o Drive e o cluster mostravam número diferente da tela do carro.
+    // Só os números finais são trocados — legs/geometry/manobras seguem do nosso
+    // plano, que é quem desenha o mapa.
+    const _navFresco = _nav.active && (now - (_nav.ms || 0)) < 45_000;
+    const _navMinFin = _nav.remaining_seconds > 0
+      ? Math.round(_nav.remaining_seconds / 60) : _minutosAte(_nav.eta);
+    const _usaNav = _navFresco && _navLigadoNaRota && !!_nav.eta && _navMinFin > 0;
+    const _navKm  = _nav.remaining_meters > 0 ? +(_nav.remaining_meters / 1000).toFixed(1) : fin.distKm;
     state.arrival = {
-      name: fin.name, distKm: fin.distKm, etaMin: fin.etaMin, etaClock: fin.etaClock,
+      name: fin.name,
+      distKm:   _usaNav ? _navKm : fin.distKm,
+      etaMin:   _usaNav ? _navMinFin : fin.etaMin,
+      etaClock: _usaNav ? _nav.eta : fin.etaClock,
+      eta_src:  _usaNav ? 'android_auto' : 'directions',
       socArrival: fin.socArrival, traffic: plan.traffic, legs, ts: now,
       geometry: plan.geometry || null,
       maneuvers: plan.maneuvers || [], speedLimit: plan.speedLimit != null ? plan.speedLimit : null,
@@ -16299,7 +18354,8 @@ async function _maybeComputeArrival() {
     scheduleStateBroadcast();
     // Republica o nav_dest retido com as pernas + janela de desfazer pro carro renderizar.
     mqttClient.publish(`${MQTT_PREFIX}/cmd/nav_dest`, JSON.stringify({
-      lat: fin.lat, lng: fin.lng, name: fin.name, etaClock: fin.etaClock,
+      lat: fin.lat, lng: fin.lng, name: fin.name,
+      etaClock: state.arrival.etaClock,
       legs, completedIdx: route.completedIdx,
       undo: route.undo ? { name: route.undo.name, lat: route.undo.lat, lng: route.undo.lng, untilMs: route.undo.untilMs, skipped: !!route.undo.skipped } : null,
       ts: now,
@@ -17392,14 +19448,35 @@ function _motorContentState(active) {
     startedAtMs: _motorStartedAtMs || Date.now(),
     cabinTemp:   +state.inside_temp  || 0,
     outsideTemp: +state.outside_temp || 0,
-    acOn:        state.ac_state === 'on' || (parseInt(state.hvac_fan_speed, 10) || 0) > 0,
+    // ac_state manda quando confirmado ao vivo: hvac_fan_speed é só do APK (a GWM não
+    // publica), então congela no último valor e o OR fazia auxiliar morto vencer fonte
+    // viva — "AC ligado" com o carro desligado (04/08).
+    acOn:        _campoConfiavel('ac_state')
+                   ? state.ac_state === 'on'
+                   : (state.ac_state === 'on' || (parseInt(state.hvac_fan_speed, 10) || 0) > 0),
     active:      !!active,
     updatedAtMs: Date.now(),
   };
 }
 // Chamado quando o app dispara o ligar-motor remoto.
+/// Pede ao APK que adie o OTA por um tempo. Retido: se o app subir no meio da
+/// janela, ele já nasce sabendo que não deve instalar.
+function _seguraOta(porMs, motivo) {
+  const ate = Date.now() + porMs;
+  try {
+    mqttClient.publish(`${MQTT_PREFIX}/ota_hold`,
+      JSON.stringify({ untilMs: ate, motivo }), { qos: 1, retain: true });
+    console.log(`[ota] segurando update por ${Math.round(porMs/60_000)}min — ${motivo}`);
+  } catch (e) { console.warn('[ota] hold falhou:', e.message); }
+}
+
 function markRemoteEngineStart() {
   _remoteEnginePending = true;
+  // Segura o OTA: motor ligado remotamente quase sempre é pré-clima, e pré-clima é
+  // o prenúncio de uma saída. O APK só enxerga "motor ligou, marcha em P" e acharia
+  // que é a janela perfeita pra instalar — justo quando o dono está prestes a entrar
+  // e sair. Instalar mata o processo (Shizuku) e o começo do trajeto se perde.
+  _seguraOta(30 * 60_000, 'motor ligado remotamente');
   _lastEngineOnCmdMs = Date.now();   // marca: foi comando NOSSO (não é auto-start)
   clearTimeout(_remoteEnginePendingTimer);
   // Janela de 2 min pra o engine_state='1' confirmar; senão descarta a intenção.
@@ -17410,7 +19487,12 @@ function _startMotorLA() {
   _motorActive      = true;
   _motorStartedAtMs = Date.now();
   apnsLive.pushStart(MOTOR_LA_TYPE, '', { carName: 'Haval H6 PHEV' }, _motorContentState(true),
-    { staleDate: Date.now() + 3 * 3600_000,
+    // 40min e não 3h: o motor remoto desliga sozinho em ~1h e o lembrete existe pro
+    // carro ligado e PARADO. Sem update token o bridge não consegue encerrar a LA
+    // (o iOS só emite o token com o app rodando), então o staleDate é o único freio
+    // que funciona com o app fechado — passado ele, o iOS para de mostrar como
+    // informação viva. Com 3h o card ficava contando a tarde inteira.
+    { staleDate: Date.now() + 40 * 60_000,
       alert: { title: '🔑 Motor ligado remotamente', body: 'Não esqueça o veículo ligado.' } })
     .catch(e => console.warn('[apns] motor pushStart falhou:', e.message));
 }
@@ -17583,13 +19665,44 @@ function _persistSecurityGate() {
 const _DOOR_LABELS = { fl: 'Porta diant. esq.', fr: 'Porta diant. dir.', rl: 'Porta tras. esq.', rr: 'Porta tras. dir.' };
 const _WIN_LABELS  = { fl: 'Vidro diant. esq.', fr: 'Vidro diant. dir.', rl: 'Vidro tras. esq.', rr: 'Vidro tras. dir.' };
 
+/// Há leitura AO VIVO do carro? Sem isso, nenhuma abertura pode ser afirmada —
+/// só o último valor conhecido, que pode ser de horas atrás.
+/// Quando este campo foi confirmado ao vivo pela última vez (qualquer fonte).
+/// null = nunca visto ao vivo desde que o bridge subiu.
+function _fieldSeenMs(key) {
+  const e = _srcChange[key];
+  if (!e) return null;
+  // Da fonte que está NO COMANDO do campo, não o máximo das duas. Com o máximo, um
+  // campo servido pelo APK morto era reportado como fresco porque a GWM continuava
+  // publicando — o app dizia "motor ligado" (valor do APK) e "visto há 0s" (idade da
+  // GWM). A idade tem que descrever o valor exibido.
+  const ativa = _fieldSource[key] === 'gwm' ? 'gwm' : 'apk';
+  return (e[ativa] && e[ativa].vistoMs) || null;
+}
+
+/// Este campo específico tem leitura ao vivo? Avalia pela FONTE dele: "GWM viva"
+/// não prova nada sobre um campo que quem publica é o APK — foi o que deixou
+/// `door_fl` acusando porta aberta com o APK mudo há 9 min (as mensagens seguintes
+/// eram todas isRetained=true, reentrega do broker).
+function _campoConfiavel(key) {
+  return (_fieldSource[key] === 'gwm')
+    ? _gwmAlive()
+    : (!!state.last_apk_live_ms && (Date.now() - state.last_apk_live_ms) < 5 * 60_000);
+}
+/// Alguma das aberturas atualmente acusadas vem de fonte ao vivo?
+function _leituraAoVivoDoCarro(campos = ['door_fl', 'door_fr', 'door_rl', 'door_rr', 'door_trunk', 'lock_state']) {
+  return campos.filter(k => state[k] === 'on').some(_campoConfiavel);
+}
+
 function _securitySnapshot() {
   // Estado por posição (vista de cima): fl=diant.esq, fr=diant.dir, rl=tras.esq, rr=tras.dir.
   const door = {};
   const win  = {};
   for (const s of ['fl', 'fr', 'rl', 'rr']) {
-    door[s] = state['door_' + s] === 'on';
-    win[s]  = state['window_' + s] === 'on';
+    // Só acusa abertura com leitura ao vivo. Valor congelado diz o que ESTAVA
+    // aberto, não o que está — e um alerta que não some ensina a ignorá-lo.
+    door[s] = state['door_' + s] === 'on' && _campoConfiavel('door_' + s);
+    win[s]  = state['window_' + s] === 'on' && _campoConfiavel('window_' + s);
   }
   const trunkOpen   = state.door_trunk === 'on';
   const sunroofOpen = state.sunroof === 'on';
@@ -17669,15 +19782,23 @@ function _evalSecurityAlert() {
   const _lockAoVivo = !!state.last_apk_live_ms && (Date.now() - state.last_apk_live_ms) < 5 * 60_000;
   const _lockDaGwm  = _fieldSource['lock_state'] === 'gwm' && _gwmAlive();
   const _travaConfiavel = _lockAoVivo || _lockDaGwm;
-  const _soTrava = snap.issues.length === 1 && /destranc|trava/i.test(String(snap.issues[0]));
-  if (_soTrava && !_travaConfiavel) {
+  // Vale pra QUALQUER abertura, não só a trava. Antes o gate era `_soTrava`, e
+  // porta/vidro/porta-malas seguiam acusando com dado congelado: em 02/08 a LA
+  // insistia "Porta diant. esq. aberto" com o carro trancado e fechado — o APK
+  // publicou {1,0,0,0,0,0} às 11:18 quando o dono abriu a porta e o carro dormiu
+  // antes de publicar o fechamento. O último valor virou verdade permanente.
+  //
+  // Silenciar aqui é o certo pelo mesmo motivo que já valia pra trava: sem fonte
+  // ao vivo não dá pra afirmar que ESTÁ aberto, só que ESTAVA. Um alerta que não
+  // some ensina o dono a ignorá-lo.
+  if (!_travaConfiavel) {
     if (_securityActive) {
-      console.log('[security] só a trava acusa e o dado não é ao vivo — encerrando alerta');
+      console.log(`[security] sem leitura ao vivo (${snap.issues.join(', ')}) — encerrando alerta`);
       _securityActive = false; _securitySig = '';
       state._security_la_active = false; state._security_la_sig = '';
       state._security_la_since = 0; scheduleStateSave();
       const endCs = _securityContentState(snap, false);
-      endCs.summary = 'Encerrado · sem leitura ao vivo da trava';
+      endCs.summary = 'Encerrado · sem leitura ao vivo do carro';
       apnsLive.pushUpdate(SECURITY_LA_TYPE, {}, endCs,
         { isFinal: true, dismissalDate: Date.now() + 8_000 })
         .catch(e => console.warn('[apns] security end falhou:', e.message));
@@ -17750,7 +19871,7 @@ app.post('/api/security/refresh', requireAuth, async (req, res) => {
 // por push enquanto o app está fechado; ao abrir, o app consulta e encerra local).
 app.get('/api/security/status', requireAuth, (_req, res) => {
   const snap = _securitySnapshot();
-  res.json({ issues: snap.issues, active: _securityActive });
+  res.json({ stale: !_leituraAoVivoDoCarro(), issues: snap.issues, active: _securityActive });
 });
 
 // ── Live Activity de infra/monitoramento ──────────────────────────────────
@@ -17869,12 +19990,12 @@ function handleChargingStateTransition(value, isRetained) {
       // (> teto de vida da LA → ActivityKit removeu; token morto): limpa e recria.
       const summaryStale = _lastChargeEndMs > 0 && (Date.now() - _lastChargeEndMs) >= CHARGE_SUMMARY_MAX_MS;
       if (apnsLive.hasUpdateToken('ChargeActivityAttributes') && !summaryStale) {
-        apnsLive.pushUpdate('ChargeActivityAttributes', {}, _chargeContentState(), {}).catch(() => {});
+        apnsLive.pushUpdate('ChargeActivityAttributes', {}, _chargeContentState(), { staleDate: _chargeStale() }).catch(() => {});
       } else {
         if (summaryStale) apnsLive.clearUpdateTokensByType('ChargeActivityAttributes');
-        apnsLive.pushStart('ChargeActivityAttributes', '', { carName: 'Haval H6 PHEV' }, _chargeContentState(),
-          { staleDate: Date.now() + 3600_000, alert: { title: '⚡ Recarga iniciada', body: 'Acompanhe o progresso na tela bloqueada.' } })
-          .catch(e => console.warn('[apns] charge pushStart falhou:', e.message));
+        _pushStartComCura('ChargeActivityAttributes', { carName: 'Haval H6 PHEV' }, _chargeContentState(),
+          { staleDate: _chargeStale(), alert: { title: '⚡ Recarga iniciada', body: 'Acompanhe o progresso na tela bloqueada.' } },
+          'charge');
       }
     }
     if (!isRetained) {
@@ -17903,11 +20024,16 @@ function handleChargingStateTransition(value, isRetained) {
     // (offline/travado/self-killed), o bridge sintetiza o registro sozinho
     // usando SOC/potência/duração que tem no state. Sem isso, cargas com o
     // APK fora ficavam invisíveis (caso 24-25/07 Recanto da Paz).
+    // endSoc PRECISA ser declarado antes daqui. Estava 4 linhas abaixo, e `const`
+    // é hoisted mas não inicializado (TDZ): toda recarga que terminava lançava
+    // ReferenceError e derrubava o processo — 28 vezes em 8 dias. Junto morriam a
+    // auto-síntese do registro (a rede de segurança pra quando o APK está fora), a
+    // restauração do limite de carga e o evento charge_end.
+    const endSoc = state.soc_pct || 0;
     _scheduleChargeSelfSynthesis(chargeSessionStartMs, chargeStartSoc, endSoc);
     // Recarga encerrou: NÃO limpa o token — a LA final não é encerrada, vira card-
     // resumo fixo (ver sendChargeLiveUpdate). Manter o token deixa a próxima
     // recarga reaproveitar a MESMA LA (transforma o resumo de volta em live).
-    const endSoc = state.soc_pct || 0;
     // Corte custom ativo e já freou: restaura o carro pra "sem limite" (100) — assim
     // a próxima sessão volta a carregar descapada e o corte rearma no alvo. Mantém
     // charge_custom_target persistido (só o user trocando o alvo o desliga).
@@ -18068,6 +20194,16 @@ function _fmtChargeLiveBody(stateObj) {
   return parts.join(' · ');
 }
 
+/// Prazo de obsolescência ROLANTE da LA de recarga.
+///
+/// A LA nasce com `staleDate = início + 1h` no pushStart, e os updates seguintes não
+/// mandavam prazo nenhum (`staleDate: undefined`) — então o original valia para sempre.
+/// Passando de uma hora de recarga, o iOS considera o conteúdo vencido e para de
+/// aplicar o que chega: a LA congelava e só "descongelava" ao abrir o app, que a
+/// atualiza localmente. Foi o que o dono viu em 19/08, com a sessão em ~67 min.
+/// 30 min à frente em cada update mantém a LA fresca por recarga de qualquer duração.
+function _chargeStale() { return Date.now() + 30 * 60_000; }
+
 function sendChargeLiveUpdate(isFinal = false) {
   // Só dispara se o estado é Carregando (ou se é a notif final)
   const charging = state.charging_state === 'Carregando';
@@ -18111,6 +20247,18 @@ function sendChargeLiveUpdate(isFinal = false) {
   // pushTokens registrados pelo app companion. No-op se APNS_ENABLED=false.
   // No FINAL leva alert → toca/vibra no nativo (é o "toque" do fim da recarga).
   if (apnsLive.enabled) {
+    // Diagnóstico: NaN vira `null` no JSON, e `null` num campo não-opcional do
+    // ContentState faz o iOS DESCARTAR o update inteiro — com o APNs devolvendo 200.
+    // Loga o payload quando algum número não for finito, pra não caçar isso no escuro.
+    {
+      const _chk = { soc, pwr, rem, kwh: +state.charge_session_kwh || 0,
+                     target: _effectiveChargeTarget() };
+      const _ruim = Object.entries(_chk).filter(([, v]) => !Number.isFinite(v));
+      if (_ruim.length) {
+        console.warn(`[charge-la] PAYLOAD INVÁLIDO — campos não finitos: `
+          + JSON.stringify(_ruim) + ` — o iOS vai descartar este update`);
+      }
+    }
     apnsLive.pushUpdate('ChargeActivityAttributes', {}, {
       soc, powerKw: pwr,
       // No final, usa o total guardado (o APK zera o contador ao terminar).
@@ -18127,7 +20275,7 @@ function sendChargeLiveUpdate(isFinal = false) {
       // próxima recarga (que a transforma de volta em live) ou o teto de vida da
       // LA. O alert toca o "ding" do fim uma vez; staleDate longo evita dimming.
       isFinal: false,
-      staleDate: isFinal ? Date.now() + CHARGE_SUMMARY_MAX_MS : undefined,
+      staleDate: isFinal ? Date.now() + CHARGE_SUMMARY_MAX_MS : _chargeStale(),
       alert:     isFinal ? { title, body } : undefined,
     })
       .catch(err => console.warn('[apns] push falhou:', err.message));
@@ -18139,7 +20287,7 @@ function sendChargeLiveUpdate(isFinal = false) {
 // Trancar/Destrancar sozinho (ficava stale até o próximo tick de carga/heartbeat).
 function _pushChargeLockUpdate() {
   if (!apnsLive.enabled || !apnsLive.hasUpdateToken('ChargeActivityAttributes')) return;
-  apnsLive.pushUpdate('ChargeActivityAttributes', {}, _chargeContentState())
+  apnsLive.pushUpdate('ChargeActivityAttributes', {}, _chargeContentState(), { staleDate: _chargeStale() })
     .catch(err => console.warn('[apns] push lock falhou:', err.message));
 }
 
@@ -18808,6 +20956,7 @@ async function _handleSharedDest(value) {
     recentNavDests.push({ name: d.name, lat: d.lat, lng: d.lng, ts: Date.now() });
     _registraRecente(d.name, d.lat, d.lng);
     if (recentNavDests.length > 30) recentNavDests.shift();
+    _saveNavDestsSoon();
     // Destino único compartilhado → rota de uma perna (PERSISTIDA, sobrevive ao desligar).
     state.route = { wps: [{ lat: d.lat, lng: d.lng, name: d.name, isFinal: true }], completedIdx: -1, undo: null, ts: Date.now() };
     scheduleStateSave();
@@ -18859,6 +21008,29 @@ function _registraRecente(name, lat, lng) {
   _salvaRecentes();
 }
 
+/// "Meus locais" = a lista que o dono cadastrou na tela de destino do iPhone
+/// (PlacesStore), sincronizada pra cá. NÃO são os automationPlaces: aqueles são
+/// geofence de automação (portaria, cancela, rotatória) e ele não usa como
+/// destino — foi o que eu tinha colocado por engano.
+const MEUS_LOCAIS_FILE = path.join(DATA_DIR, 'meus_locais.json');
+let meusLocais = [];
+try { meusLocais = JSON.parse(fs.readFileSync(MEUS_LOCAIS_FILE, 'utf8')) || []; } catch (_) {}
+
+app.post('/api/meus-locais', (req, res) => {
+  const arr = Array.isArray(req.body) ? req.body : (req.body && req.body.items);
+  if (!Array.isArray(arr)) return res.status(400).json({ error: 'esperado array' });
+  // Substitui a lista inteira: o iPhone é a fonte, então sincronizar é espelhar,
+  // não mesclar — mesclar deixaria lugar apagado no celular ressuscitando aqui.
+  meusLocais = arr
+    .filter(p => p && String(p.name || '').trim() && _validLatLng(p.lat, p.lng))
+    .map(p => ({ name: String(p.name).trim().slice(0, 60), lat: +p.lat, lng: +p.lng }))
+    .slice(0, 100);
+  try { fs.writeFileSync(MEUS_LOCAIS_FILE, JSON.stringify(meusLocais, null, 2)); } catch (_) {}
+  _publicaNavFavs();
+  console.log(`[meus-locais] iPhone sincronizou ${meusLocais.length} local(is)`);
+  res.json({ ok: true, count: meusLocais.length });
+});
+
 const NAV_FAVS_FILE = path.join(DATA_DIR, 'nav_favorites.json');
 let navFavorites = [];
 try { navFavorites = JSON.parse(fs.readFileSync(NAV_FAVS_FILE, 'utf8')) || []; } catch (_) {}
@@ -18871,6 +21043,16 @@ function _salvaNavFavs() {
 /// apagar o que é favorito de verdade.
 /// As três abas, já com distância do carro. `origem` diz de qual aba o item é:
 /// 'lugar' = lugares salvos · 'fav' = favoritado numa busca · 'recente' = histórico.
+/// Posição fixa de Casa (0) e Trabalho (1) no topo das listas de destino; qualquer
+/// outro nome cai em 2 e é ordenado alfabeticamente entre si. Compara sem acento e
+/// sem caixa porque o nome vem digitado à mão no iPhone ("casa", "CASA", "Casa").
+function _rankFixo(nome) {
+  const n = String(nome || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
+  if (n === 'casa') return 0;
+  if (n === 'trabalho') return 1;
+  return 2;
+}
+
 function _navListasParaUI() {
   const lat = +state.gps_lat, lng = +state.gps_lng;
   const dist = (a, b) => (lat && lng) ? +(haversineM(lat, lng, a, b) / 1000).toFixed(1) : null;
@@ -18879,9 +21061,15 @@ function _navListasParaUI() {
   // Alfabética em Meus locais e Favoritos: são listas que o dono conhece de cor,
   // e nome é o que ele procura. Recentes fica em ordem de USO (mais novo primeiro),
   // porque ali o critério é "o que eu acabei de fazer", não o nome.
-  const porNome = (a, b) => a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' });
+  // Casa e Trabalho sempre no topo, nesta ordem — são os dois destinos do dia a
+  // dia e ninguém procura por eles na lista, só toca no primeiro item. O resto sai
+  // alfabético.
+  const porNome = (a, b) => _rankFixo(a.name) - _rankFixo(b.name)
+    || a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' });
   return {
-    lugares: base.filter(f => f.origem === 'lugar').sort(porNome),
+    lugares: meusLocais
+      .map(p => ({ ...p, origem: 'lugar', distKm: dist(p.lat, p.lng) }))
+      .sort(porNome),
     favoritos: base.filter(f => f.origem === 'fav').sort(porNome),
     // Recente que já virou favorito sai da aba: estaria nas duas.
     recentes: navRecentes
@@ -19050,11 +21238,13 @@ app.post('/api/nav-to', (req, res) => {
     : [];
   recentNavDests.push({ name, lat, lng, ts: Date.now() });
   if (recentNavDests.length > 30) recentNavDests.shift();
+  _saveNavDestsSoon();
   // Registra também cada parada no histórico (pra nomear viagem que termine perto).
   for (const s of stops) {
     if (s.name) { recentNavDests.push({ name: s.name, lat: s.lat, lng: s.lng, ts: Date.now() }); }
   }
   while (recentNavDests.length > 30) recentNavDests.shift();
+  _saveNavDestsSoon();
   // Painel/Chegada do carro: só quando NÃO é navegação dedicada ao celular.
   // Quando device específico foi escolhido, usa o role registrado dele pra decidir.
   const effectiveRole = device && _navDevices[device]?.role || target;
@@ -19557,7 +21747,9 @@ function _createShareToken(ttlMinRaw, opts) {
   if (!destName) destName = (state.arrival && state.arrival.name) || null;
   if (!destName && recentNavDests.length) {
     const last = recentNavDests[recentNavDests.length - 1];
-    if (Date.now() - last.ts < 6 * 3600_000) destName = last.name;
+    // `consumidoMs` = já chegou lá; não é mais "pra onde estou indo". Este era o
+    // efeito que o antigo `nd.ts = 0` produzia, agora explícito.
+    if (!last.consumidoMs && Date.now() - last.ts < 6 * 3600_000) destName = last.name;
   }
   _shareTokens[token] = { createdMs: Date.now(), expiresMs, code, recipientName, recipientRole,
                            includeSoc, destName: destName || null,
@@ -19764,14 +21956,28 @@ app.get('/api/share/:token/state', (req, res) => {
     speedKmh: Math.max(0, +state.speed_kmh || 0),
     soc: Math.round(+state.soc_pct || 0),
     fuelL: +state.fuel_l || 0,
+    media: (_media.playing && _media.title && (Date.now() - (_media.ms || 0)) < 90_000)
+      ? { title: _media.title, artist: _media.artist, app: _media.app,
+          muted: _media.muted, playing: true }
+      : null,
     tripKm: +(tr.distKm || 0), tripSec: +(tr.timeSec || 0),
+    // km/L equivalente da viagem em curso. Soma as DUAS energias (elétrica convertida
+    // pelo conteúdo da gasolina + litros queimados de fato): num PHEV, contar só o kWh
+    // daria número fantasia em qualquer trecho que acionou o motor.
+    tripKmPerLeq: (() => {
+      const km = +(tr.distKm || 0), kwh = +(tr.netKwh || 0), l = +(tr.fuelL || 0);
+      const litrosEq = (kwh / 9.1) + l;
+      return (km > 0.3 && litrosEq > 0.01) ? +(km / litrosEq).toFixed(1) : null;
+    })(),
     rangeEvKm: Math.round(+state.range_ev_km || 0),
     gear: (['P', 'R', 'N', 'D'].includes(String(state.gear || '').toUpperCase()) ? String(state.gear).toUpperCase() : '--'),
     tempIn: +state.inside_temp || 0,
     tempOut: +state.outside_temp || 0,
     driveMode: ({ 0: 'HEV', 1: 'Prior. EV', 3: 'EV Puro' })[state.drive_mode] || null,
     terrain: ({ 0: 'Normal', 1: 'Sport', 2: 'Eco', 3: 'Neve', 4: 'Areia', 5: 'Lama', 11: 'AWD' })[state.terrain_mode] || null,
-    ac: (state.hvac_ac_enable === '1' || state.ac_state === 'on'),
+    ac: _campoConfiavel('ac_state')
+          ? state.ac_state === 'on'
+          : (state.hvac_ac_enable === '1' || state.ac_state === 'on'),
     setTemp: (state.hvac_driver_temp != null && +state.hvac_driver_temp > 0) ? +state.hvac_driver_temp : null,
     // Mesma fonte do app (autonomy_*_km = valor do painel/HA). fuel_remain_km/range_ice_km
     // são sensores CAN legados que divergem do painel — só fallback se não houver oficial.
@@ -19878,6 +22084,7 @@ app.get('/api/route-plan', async (req, res) => {
       if (!last || last.name !== toName || haversineM(last.lat, last.lng, toLat, toLng) > 50) {
         recentNavDests.push({ name: toName, lat: toLat, lng: toLng, ts: Date.now() });
         if (recentNavDests.length > 30) recentNavDests.shift();
+        _saveNavDestsSoon();
       }
     }
     // Copiloto de energia: SOC de chegada + handoff PHEV + banda de confiança.
@@ -20007,12 +22214,36 @@ app.post('/api/activity/start', (req, res) => {
   // app reportar o update token (a LA ficava presa em "Veículo desprotegido").
   if (t === SECURITY_LA_TYPE && apnsLive.enabled) {
     const snap = _securitySnapshot();
-    if (snap.issues.length === 0) {
+    // Encerra também quando não há leitura ao vivo: a LA estaria afirmando uma
+    // abertura que ninguém confirma agora (02/08 — "porta aberta" com o carro
+    // trancado, valor congelado desde que o carro dormiu).
+    if (snap.issues.length === 0 || !_leituraAoVivoDoCarro()) {
       _securityActive = false; _securitySig = '';
       state._security_la_active = false; state._security_la_sig = ''; scheduleStateSave();
       apnsLive.pushUpdate(SECURITY_LA_TYPE, {}, _securityContentState(snap, false),
         { isFinal: true, dismissalDate: Date.now() + 60_000 }).catch(() => {});   // tudo seguro → 60s e encerra
     }
+  }
+  // Mesma reconciliação pra LA de VIAGEM — faltava, e era a causa do card preso em
+  // "viagem em curso" depois de chegar em casa (01/08: viagem terminou 13:53 e às
+  // 14:04 o bridge ainda não tinha update token pra encerrar). Quando a LA nasce por
+  // push-to-start com o app morto, `pushTokenUpdates` só emite quando o app volta a
+  // rodar: até então o `isFinal` do _endTripLA sai sem destinatário e o card
+  // sobrevive. Se o token chega e não há viagem, essa LA é órfã — encerra agora.
+  // Motor: mesma reconciliação. Era o único tipo sem ela — em 02/08 o lembrete
+  // "não esqueça o motor ligado" sobreviveu 20 min ao motor desligado e a uma
+  // viagem inteira, porque todo `isFinal` que o bridge mandou saiu sem token.
+  if (t === MOTOR_LA_TYPE && apnsLive.enabled && (!_motorActive || String(state.engine_state) === '0')) {
+    _motorActive = false;
+    apnsLive.pushUpdate(MOTOR_LA_TYPE, {}, _motorContentState(false),
+      { isFinal: true, dismissalDate: Date.now() + 10_000 }).catch(() => {});
+    console.log('[motor-la] token registrado com motor desligado — encerrando LA órfã');
+  }
+  if (t === TRIP_LA_TYPE && apnsLive.enabled && !state.current_trip && !_tripActive) {
+    const cs = _tripContentState(_lastTripSnapshot || autoTripsArr[0] || {}, false);
+    apnsLive.pushUpdate(TRIP_LA_TYPE, {}, cs,
+      { isFinal: true, dismissalDate: Date.now() + 60_000 }).catch(() => {});
+    console.log('[trip-la] token registrado sem viagem ativa — encerrando LA órfã');
   }
   res.json({ ok: true, registered: apnsLive.tokenCount() });
 });
@@ -20066,7 +22297,21 @@ function applyGwmEntity(id, value, isRetained = false) {
   // Registra o valor visto pela GWM. O timestamp só anda quando o valor MUDA —
   // é isso que permite detectar "a nuvem está repetindo dado cacheado" e liberar
   // o APK. Retained não conta: é eco do broker, não observação nova.
-  if (!isRetained) _notaValorFonte(field, 'gwm', value);
+  if (!isRetained) {
+    // Normaliza antes de guardar: o `0` significa coisas OPOSTAS nas duas fontes —
+    // ventilação (=aberto) na GWM, fechado no APK. Guardar cru fazia o failover
+    // comparar escalas diferentes e ver discordância permanente. Escala da GWM
+    // (confirmada pelo dono em 04/08): 3=fechado · 0=ventilação · 10..100=% aberto.
+    // VIDRO tem o mesmo vício e ficou de fora quando consertei o teto: a GWM manda
+    // 1=fechado (2=aberto, 3=entreaberto) e o APK manda 0=fechado. Guardado cru, o
+    // failover via '0' contra '1' e concluía discordância permanente — em 14/08 o
+    // window_fl trocou de fonte a cada 5s ("APK assume → devolvendo à GWM → APK
+    // retoma") com o vidro FECHADO nas duas leituras, e o estado oscilava na tela.
+    const _vg = field === 'sunroof' ? (String(value) === '3' ? '0' : '1')
+              : /^window_/.test(field) ? (String(value) === '1' ? '0' : '1')
+              : value;
+    _notaValorFonte(field, 'gwm', _vg);
+  }
 
   // Campos SEM gate (soc_pct e afins, fora de MIGRATED_TO_HA) eram "último a
   // escrever ganha" — e como a nuvem GWM publica com mais frequência que o APK,
@@ -20089,7 +22334,31 @@ function applyGwmEntity(id, value, isRetained = false) {
   // 30/07: engine_state preso em '1' por 74 min com a GWM congelada e o APK
   // dizendo '0'. Avaliar sempre, independente de quem é a fonte agora.
   const apkV = _srcChange[field]?.apk?.v;
-  if (apkV !== undefined && _apkAssumeChave(field, apkV)) {
+  // Fonte que NUNCA confirmou o campo ao vivo não pode assumir. Sem isto o cálculo
+  // de idade devolvia `Infinity` ("APK mudo há Infinitymin" no log de 14/08) e as
+  // duas condições — assumir e devolver — ficavam verdadeiras ao mesmo tempo: os
+  // quatro vidros trocavam de fonte 140x por minuto, e a cada volta o valor velho
+  // do APK ('1' = aberto) era reinjetado, disparando a LA de vidro aberto a cada 5s.
+  const _apkVistoMs = _srcChange[field]?.apk?.vistoMs || 0;
+  // ...e "confirmou UM DIA" também não basta. Em 02/09 o SOC pulou 49 ↔ 73 na tela
+  // do iPhone: o APK estava mudo há 600 min, mas `vistoMs > 0` liberava a retomada
+  // com o 73 de dez horas antes; o `_apkAssumeChave` aprovava porque a GWM, em 49
+  // (correto), parecia "congelada" — valor constante com o carro parado. Só que a
+  // regra de DEVOLUÇÃO lá dentro (APK mudo >5min + nuvem lendo) disparava logo em
+  // seguida e devolvia. Duas regras com critérios diferentes, ambas verdadeiras ao
+  // mesmo tempo: o campo trocava de dono sem parar, que é o mesmo mecanismo do vidro
+  // em 14/08 num campo numérico. Aqui a retomada passa a usar EXATAMENTE o critério
+  // da devolução, então as duas não podem mais ser verdadeiras juntas.
+  const _gwmLendoAgora = GWM_LE_DE_VERDADE.has(field)
+    && _srcChange[field]?.gwm?.vistoMs
+    && Date.now() - _srcChange[field].gwm.vistoMs < 2 * 60_000;
+  const _apkMudoMs = _apkVistoMs ? Date.now() - _apkVistoMs : Infinity;
+  if (_gwmLendoAgora && _apkMudoMs > 5 * 60_000) {
+    if (_fieldSource[field] === 'apk') {
+      console.log(`[failover] ${field}: APK mudo há ${Math.round(_apkMudoMs / 60_000)}min `
+        + `e a nuvem está lendo — não retoma com '${apkV}'`);
+    }
+  } else if (apkV !== undefined && _apkVistoMs > 0 && _apkAssumeChave(field, apkV)) {
     if (_fieldSource[field] !== 'apk') {
       console.log(`[failover] ${field}: APK retoma ('${apkV}') — GWM congelada em '${value}'`);
       // Re-injeta: só dar `return` deixaria o state com o valor velho da GWM até
@@ -20190,6 +22459,7 @@ function applyGwmEntity(id, value, isRetained = false) {
     if (!isRetained && prev !== undefined && prev !== null && prev !== value) {
       if (value === '1') {
         _exitedSincePark = false; _unlockedWhileOff = false; _persistSecurityGate();   // voltou/dirigindo → rearma o portão
+        state._engine_on_ms = Date.now();   // âncora pra detectar trip que começou tarde
         addEvent('engine_on',  'Motor ligado');
         sendPush('🔑 Motor ligado',  'O veículo foi ligado.', 'engine_on');
         checkRefuelOnEngineOn();
@@ -20198,11 +22468,39 @@ function applyGwmEntity(id, value, isRetained = false) {
         // Saídas monitoradas: bridge path GWM (o path 'case engine_state' do APK
         // também chama isso — o carro atualmente publica engine pelo GWM).
         try { _evalDepartureAsk(); } catch (e) { console.warn('[departure-ask]', e.message); }
+        // Sugestão por compromisso: 8s depois da partida, pra não competir com o
+        // arranque do APK (a UI dele ainda está subindo) e pra dar tempo de o
+        // retained de rota chegar — senão sugeriria por cima de um destino que já
+        // existe e a checagem de `state.route` ainda não veria.
+        setTimeout(() => {
+          try { _sugereDestinoNoCarro('motor ligado'); }
+          catch (e) { console.warn('[sugestao]', e.message); }
+        }, 8_000);
       } else if (value === '0') {
+        // Desligou perto do destino = chegou. Independe do que o Directions acha do
+        // percurso: ninguém desliga o carro a 200 m do destino e segue viagem. Cobre o
+        // caso em que a chegada por linha reta (<150m) não pega — estacionamento na
+        // rua de trás, prédio com entrada pelo outro lado.
+        try {
+          const _fin = (state.route?.wps || []).find(w => w.isFinal);
+          const _cl = +state.gps_lat, _cg = +state.gps_lng;
+          if (_fin && Number.isFinite(_cl) && Number.isFinite(_cg) && (_cl || _cg)) {
+            const _m = haversineM(_cl, _cg, _fin.lat, _fin.lng);
+            if (_m < 200) {
+              console.log(`[arrival] motor desligado a ${Math.round(_m)}m de "${_fin.name}" — rota encerrada`);
+              _clearRoute(state.route.wps);
+            }
+          }
+        } catch (e) { console.warn('[arrival] chegada por desligamento:', e.message); }
+        if (_selfStartTimer) {
+          clearTimeout(_selfStartTimer); _selfStartTimer = null;
+          console.log('[engine] candidato a auto-start cancelado — motor desligou antes da confirmação');
+        }
         addEvent('engine_off', 'Motor desligado');
         sendPush('🔑 Motor desligado', 'O veículo foi desligado.', 'engine_off');
         _fuelLAtPark = +state.fuel_l || 0;
         _fuelParkTs  = Date.now();
+        _saveFuelPark();
         _scheduleWindowForgottenAlert();
         _scheduleLockForgottenAlert();
         _scheduleTrunkForgottenAlert();
@@ -20242,12 +22540,29 @@ function applyGwmEntity(id, value, isRetained = false) {
   // pro handler único — sem isso, eventos de recarga param de ser registrados.
   if (field === 'charging_state_raw') {
     const txt = mapChargingStateText(value);
+    // Credita a GWM como fonte de `charging_state`. Ela ALIMENTA o campo por este
+    // caminho (raw → texto), mas o crédito ficava no APK: `_field_source` dizia 'apk'
+    // e nenhum `vistoMs` da nuvem era gravado. Quem julga frescor concluía "campo
+    // morto" no meio de uma recarga sendo reportada ao vivo pela GWM — e o card de
+    // recarga sumiria. `charging_state` NÃO é exclusivo do APK, como eu tinha lido.
+    if (txt) {
+      _notaValorFonte('charging_state', 'gwm', txt, isRetained);
+      if (!isRetained) _fieldSource['charging_state'] = 'gwm';
+    }
     handleChargingStateTransition(txt, isRetained);
     return;
   }
 
   // ── Sensores numéricos (soc, 12v, odo, pneus, autonomia, remaining_min) ──
   if (field === 'fuel_l') {
+    // Combustível vem SEMPRE do APK (decisão do dono, 04/08): as duas fontes medem o
+    // tanque com leve diferença (GWM 27 L vs APK 26 L sem ter abastecido) e o valor
+    // do carro é o que ele considera correto. A GWM segue sendo lida pra registrar
+    // atividade, mas não escreve o campo.
+    if (_fieldSource['fuel_l'] === 'apk' && _srcChange['fuel_l']?.apk) {
+      _notaValorFonte('fuel_l', 'gwm', String(num(value)), isRetained);
+      return;
+    }
     state.fuel_l = _fuelWithCalib(num(value));
   } else if (field === 'soc_pct') {
     // GWM às vezes envia 0 quando o carro dorme / GWM indisponível.
@@ -20278,6 +22593,7 @@ for (const [k, e] of Object.entries(_srcChange)) {
   // Só pula se o APK JÁ está no comando. Se o que ficou salvo foi 'gwm' — o
   // estado errado que motivou isto — a derivação tem que poder corrigir, senão
   // o próprio arquivo perpetua o dado congelado.
+  if (_apkNuncaAssume(k)) continue;
   if (_fieldSource[k] === 'apk' || !e || !e.gwm || !e.apk) continue;
   if (Date.now() - e.gwm.ms <= GWM_VALUE_STALE_MS) continue;
   // Odômetro só cresce, então o MAIOR valor é o mais atual — não precisa (nem
@@ -20405,7 +22721,15 @@ function applyMqttMessage(key, value, isRetained = false) {
   // MIGRATED_TO_HA. Campos sem gate (soc_pct à frente) também são escritos pelas
   // duas fontes, e sem este histórico o bloqueio da GWM não tinha como saber que
   // o APK discordava: o SOC seguia em 88% com o carro em 74%.
-  if (_camposDisputados.has(key)) _notaValorFonte(key, 'apk', value);
+  if (_camposDisputados.has(key)) {
+    // Normaliza antes de comparar: os vidros chegam como "1:1785688932293"
+    // (valor:ms_da_mudanca, formato do voting filter do APK) e a GWM manda só "1".
+    // Gravando o cru, APK e GWM NUNCA batiam — o failover via divergência
+    // permanente nos quatro vidros e podia disparar takeover sem motivo.
+    const _v = /^window_/.test(key) && value.includes(':')
+      ? value.slice(0, value.indexOf(':')) : value;
+    _notaValorFonte(key, 'apk', _v, isRetained);
+  }
 
   if (MIGRATED_TO_HA.has(key)) {
     // Gate normal: GWM publicando → ela manda. MAS se o valor dela está
@@ -20457,6 +22781,21 @@ function applyMqttMessage(key, value, isRetained = false) {
     case 'status_message': state.status_message = value; break; // pipe-sep alerts
     case 'engine_state': {
       const prevEng = prevEngineState;
+      // "Ligado" recém-publicado por um APK que acabou de subir, com o carro em P e
+      // parado, é ruído da inicialização — não partida. Em 04/08 a reinstalação do
+      // v6.200 fez o APK publicar '1' com o carro desligado na garagem; o failover
+      // deu takeover (a GWM estava congelada em '0' há 88min) e o app passou a
+      // mostrar motor ligado. É o espelho do 31/07, quando ele publicou '0' na subida.
+      //
+      // Só descarta o caso duplamente improvável: valor NOVO, APK subiu há <2min,
+      // marcha em P e velocidade zero. Partida real muda a marcha ou a velocidade em
+      // segundos, então nada legítimo é engolido por muito tempo.
+      if (value === '1' && prevEng !== '1' && !isRetained
+          && _apkAcordouMs && (Date.now() - _apkAcordouMs) < 120_000
+          && String(state.gear) === 'P' && !(+state.speed_kmh > 0)) {
+        console.warn('[engine] ignorado "ligado" logo após o APK subir (gear=P, speed=0) — ruído de inicialização');
+        return;
+      }
       state.engine_state = value;
       prevEngineState    = value;
       // Transiente do CAN: enquanto o head unit acorda, driving_ready oscila. Em
@@ -20475,6 +22814,7 @@ function applyMqttMessage(key, value, isRetained = false) {
       }
       if (!isRetained && !_flapEng && prevEng !== null && prevEng !== value) {
         if (value === '1') {
+          state._engine_on_ms = Date.now();   // âncora pra detectar trip que começou tarde
           addEvent('engine_on',  'Motor ligado');
           sendPush('🔑 Motor ligado',  'O veículo foi ligado.', 'engine_on');
           _cancelTrunkForgottenTimer();
@@ -20500,10 +22840,51 @@ function applyMqttMessage(key, value, isRetained = false) {
           // saber se alguém entrou (a porta que o motorista abriu não foi publicada
           // por ninguém, o app estava encerrado).
           const _apkAcabouDeAcordar = _apkAcordouMs && (_nowEng - _apkAcordouMs < 240_000);
-          if (!_commandedByUs && !_someoneEntered && !_apkAcabouDeAcordar) {
-            addEvent('engine_self_start', 'Motor ligou sozinho (sem comando e sem ninguém entrar) — provável auto-start do carro');
-            sendPush('⚠️ Motor ligou sozinho', 'O motor ligou sem comando do app e sem ninguém entrar — provável auto-start do PHEV ou remote start externo.', 'engine_self_start');
-            console.log('[engine] ⚠️ AUTO-START detectado (sem comando nosso, sem porta aberta recente)');
+          // RECARGA: durante a carga o sistema de alta tensão fica ativo e o
+          // `engine_state` vai a valor não-zero sem ninguém ligar nada (visto em
+          // 13/08: engine=10 com o carro parado carregando). No FIM da sessão essa
+          // chave transiciona e disparava "Motor ligou sozinho" — falso alarme que
+          // chegou junto com o "Recarga concluída" das 10:22. Carregando, ou até 5 min
+          // depois de encerrar, engine_on não é partida.
+          const _cargaAtiva = state.charging_state === 'Carregando';
+          const _cargaAcabouAgora = _lastChargeEndMs > 0 && (_nowEng - _lastChargeEndMs) < 5 * 60_000;
+          if (!_commandedByUs && !_someoneEntered && !_apkAcabouDeAcordar
+              && !_cargaAtiva && !_cargaAcabouAgora) {
+            clearTimeout(_selfStartTimer);
+            console.log(`[engine] candidato a auto-start — confirmando em ${SELF_START_CONFIRMA_MS / 1000}s`);
+            _selfStartTimer = setTimeout(() => {
+              _selfStartTimer = null;
+              // Reavalia TUDO no momento de afirmar: o motor pode ter voltado a 0
+              // (transiente), alguém pode ter entrado, ou uma recarga pode ter começado.
+              if (state.engine_state === '0' || state.engine_state === 0) {
+                console.log('[engine] auto-start descartado — motor voltou a 0 (era transiente do CAN)');
+                return;
+              }
+              // CARRO ANDANDO = tem gente dentro. Auto-start de PHEV acontece parado;
+              // se está em movimento, alguém está dirigindo. A guarda de "alguém entrou"
+              // depende do evento de porta, que não chega quando o APK está dormindo —
+              // e foi por isso que o alerta saiu em 14/08 com o dono dirigindo a 2,3 km/h.
+              const _vel = +state.speed_kmh || 0;
+              const _marcha = String(state.gear || '').toUpperCase();
+              if (_vel > 1 || _marcha === 'D' || _marcha === 'R') {
+                console.log(`[engine] auto-start descartado — carro em movimento (${_vel} km/h, marcha ${_marcha || '?'})`);
+                return;
+              }
+              const ag = Date.now();
+              if (ag - _lastEngineOnCmdMs < SELF_START_CONFIRMA_MS + 30_000
+                  || PRECLIMAT_BUSY_PHASES.includes(preclimatStatus.phase)
+                  || ag - _lastDoorOpenMs < 180_000
+                  || state.charging_state === 'Carregando') {
+                console.log('[engine] auto-start descartado na confirmação (comando/porta/recarga)');
+                return;
+              }
+              addEvent('engine_self_start', 'Motor ligou sozinho (sem comando e sem ninguém entrar) — provável auto-start do carro');
+              sendPush('⚠️ Motor ligou sozinho', 'O motor ligou sem comando do app e sem ninguém entrar — provável auto-start do PHEV ou remote start externo.', 'engine_self_start');
+              console.log('[engine] ⚠️ AUTO-START CONFIRMADO (motor seguiu ligado por 60s)');
+            }, SELF_START_CONFIRMA_MS);
+          } else if (_cargaAtiva || _cargaAcabouAgora) {
+            console.log(`[engine] engine_on durante/após recarga — não é auto-start `
+              + `(carregando=${_cargaAtiva}, fim há ${Math.round((_nowEng - _lastChargeEndMs) / 1000)}s)`);
           }
           // Motor ligado pelo app (fora da pré-clima): inicia a LA de lembrete.
           if (_remoteEnginePending && !PRECLIMAT_BUSY_PHASES.includes(preclimatStatus.phase)) {
@@ -20514,6 +22895,13 @@ function applyMqttMessage(key, value, isRetained = false) {
           // configurada (janela + dia da semana). Push-to-start APNs cria a LA
           // "Indo pra <dest>?" no iPhone do dono mesmo com app fechado.
           try { _evalDepartureAsk(); } catch (e) { console.warn('[departure-ask]', e.message); }
+          // Sugestão por compromisso — nos DOIS caminhos de motor ligado. Existem dois
+          // handlers (GWM e APK) e pôr só num deixava o gatilho dependente de qual
+          // fonte publicou o engine primeiro; hoje é a GWM, mas isso já alternou.
+          setTimeout(() => {
+            try { _sugereDestinoNoCarro('motor ligado (apk)'); }
+            catch (e) { console.warn('[sugestao]', e.message); }
+          }, 8_000);
         } else if (value === '0') {
           addEvent('engine_off', 'Motor desligado');
           sendPush('🔑 Motor desligado', 'O veículo foi desligado.', 'engine_off');
@@ -20557,6 +22945,19 @@ function applyMqttMessage(key, value, isRetained = false) {
       const realTs   = colonIdx >= 0 ? (parseInt(value.slice(colonIdx + 1), 10) || 0) : 0;
       const norm     = normRaw === '1' ? 'on' : 'off';
       if (isRetained) {
+        // Retained NÃO decide contra leitura viva. O broker reentrega este tópico em
+        // CADA reconexão do APK, e em 12/08 houve 5 reconexões em 5 min: a cada uma o
+        // valor antigo do APK sobrescrevia o da GWM e a trava ficava alternando entre
+        // trancado e destrancado na tela. Só aceita se a GWM não confirmou este campo
+        // mais recentemente que o próprio APK.
+        const eSrc = _srcChange['lock_state'] || {};
+        const vistoApk = (eSrc.apk && eSrc.apk.vistoMs) || 0;
+        const vistoGwm = (eSrc.gwm && eSrc.gwm.vistoMs) || 0;
+        if (vistoGwm > vistoApk) {
+          console.log(`[lock] retained do APK ('${norm}') ignorado — GWM confirmou `
+            + `${Math.round((vistoGwm - vistoApk) / 1000)}s depois ('${state.lock_state}')`);
+          break;
+        }
         state.lock_state = norm;
         prevLockState    = norm;
         break;
@@ -20830,7 +23231,7 @@ function applyMqttMessage(key, value, isRetained = false) {
           const k = campos[i];
           if (state[k] !== norm) {
             state[k] = norm; _fieldSource[k] = 'apk';
-            _notaValorFonte(k, 'apk', norm === 'on' ? '1' : '0');
+            _notaValorFonte(k, 'apk', norm === 'on' ? '1' : '0', isRetained);
             mudou = true;
             console.log(`[window] ${k} derivado do raw ${v}: ${norm === 'on' ? 'aberto' : 'fechado'}`);
           }
@@ -20878,7 +23279,7 @@ function applyMqttMessage(key, value, isRetained = false) {
           const prev = state.lock_state;
           state.lock_state = norm;
           _fieldSource['lock_state'] = 'apk';
-          _notaValorFonte('lock_state', 'apk', norm === 'on' ? '1' : '0');
+          _notaValorFonte('lock_state', 'apk', norm === 'on' ? '1' : '0', isRetained);
           console.log(`[lock] derivado do raw ${_rawLk}: ${prev} → ${norm} (${norm === 'off' ? 'trancado' : 'destrancado'})`);
           if (!isRetained && prev != null) {
             if (norm === 'on') addEvent('lock_open',  'Carro destrancado');
@@ -20918,6 +23319,14 @@ function applyMqttMessage(key, value, isRetained = false) {
       state._speed_kmh_ms = _now;   // ts da última msg de velocidade (pra detectar APK travado)
       const curSpeed  = +state.speed_kmh || 0;
       checkSpeedFence(curSpeed);
+      // Rede de segurança do lembrete de motor remoto: normalmente ele encerra
+      // quando a LA de viagem começa, mas se a viagem não abrir LA (preferência
+      // off, current_trip atrasado) o carro andando já prova que o dono está
+      // dentro. 10 km/h pra não reagir a manobra de garagem com o carro só ligado.
+      if (_motorActive && curSpeed > 10) {
+        console.log(`[motor-la] carro a ${Math.round(curSpeed)} km/h — encerra o lembrete de motor ligado`);
+        _endMotorLA();
+      }
       if (curSpeed > 0) {
         _cancelAcParkedTimer(); // carro em movimento — cancela alerta pendente
       } else if (prevSpeed > 0) {
@@ -21254,7 +23663,7 @@ function applyMqttMessage(key, value, isRetained = false) {
                   + `— mantendo ${state.soc_pct}% e liberando outras fontes`);
         break;
       }
-      _notaValorFonte('soc_pct', 'apk', String(v));
+      _notaValorFonte('soc_pct', 'apk', String(v), isRetained);
       if (_gwmAlive(_now) && !_apkAssumeChave('soc_pct', String(v), _now)) break;
       if (state.soc_pct !== v) {
         console.log(`[failover] soc_pct: CAN assume ${v}% (GWM em ${_srcChange['soc_pct']?.gwm?.v}%)`);
@@ -21358,8 +23767,16 @@ function applyMqttMessage(key, value, isRetained = false) {
             } else if (socDelta > 0) {
               const expected = (socDelta / 100) * PACK_KWH;
               const reported = +newCharge.energy_kwh || 0;
-              // Tolerância: se expected > 2× reported, o APK perdeu telemetria
-              if (reported > 0 && expected > reported * 2 && !newCharge.energy_kwh_overridden) {
+              // Critério por CAPACIDADE IMPLÍCITA (energia ÷ ΔSOC), não por razão fixa.
+              // O limiar antigo era `expected > reported × 2`, calibrado pra "o APK
+              // perdeu quase toda a telemetria" — e por isso 11/08 passou reto: 16,27 kWh
+              // para 64 pontos dá razão 1,34, abaixo de 2, mas capacidade implícita 25,4
+              // contra uma mediana histórica de 35,2 (72 sessões, corpo entre 31 e 42).
+              // Corrige só PARA CIMA e só abaixo de 28: acima de 42 o problema é outro
+              // (SOC subnotificado) e inventar energia ali seria pior.
+              const capImpl = reported > 0 ? reported / (socDelta / 100) : 0;
+              if (reported > 0 && socDelta >= 15 && capImpl > 0 && capImpl < 28
+                  && !newCharge.energy_kwh_overridden) {
                 console.log(`[charge] energy_kwh corrigido ts=${newCharge.timestamp_ms}: ${reported.toFixed(2)}→${expected.toFixed(2)} kWh (SOC ${newCharge.soc_start}→${newCharge.soc_end})`);
                 newCharge.energy_kwh_reported = reported;     // mantém o original pra debug
                 newCharge.energy_kwh = +expected.toFixed(3);
@@ -21402,6 +23819,15 @@ function applyMqttMessage(key, value, isRetained = false) {
             if (existing.avg_temp_c       != null) keep.avg_temp_c       = existing.avg_temp_c;
             if (existing.manual_overrides != null) keep.manual_overrides = existing.manual_overrides;
             if (existing._updated_ms      != null) keep._updated_ms      = existing._updated_ms;
+            // Anotações do bridge sobre coerência. Sem preservar, a re-ingestão do
+            // retained recria o objeto, a marca some e o aviso volta a ser logado a
+            // cada ciclo — era o que fazia a recarga de 31/07 aparecer no log pra
+            // sempre, mesmo com o "logar uma vez por registro".
+            if (existing._energia_suspeita != null) keep._energia_suspeita = existing._energia_suspeita;
+            if (existing._cap_implicita    != null) keep._cap_implicita    = existing._cap_implicita;
+            if (existing._soc_incoerente   != null) keep._soc_incoerente   = existing._soc_incoerente;
+            if (existing._precoAtipico     != null) keep._precoAtipico     = existing._precoAtipico;
+            if (existing._precoConfirmado  != null) keep._precoConfirmado  = existing._precoConfirmado;
             // Recarga consolidada (merge): preserva os campos somados — sem isso
             // o APK retained sobrescreve com os valores originais da `early` e o
             // merge "se desfaz" em cada reconnect.
@@ -21425,7 +23851,62 @@ function applyMqttMessage(key, value, isRetained = false) {
             }
             return { ...newCharge, ...keep };
           });
-          chargesArr = [...preservedOldEntries, ...mergedEntries];
+          // ── Duplicata da MESMA sessão física ────────────────────────────────
+          // A identidade de uma recarga é o PAR de SOC. Duas entradas com o mesmo
+          // soc_start E o mesmo soc_end não podem ser as duas reais: a bateria não
+          // volta ao SOC inicial sem descarga no meio.
+          //
+          // Casos vistos: 11/08 duas entradas 15→79/80% nascidas com 929 ms de
+          // diferença; 12/08 duas entradas 55→80% ADJACENTES (a primeira terminando
+          // 5 s antes da segunda começar) — a segunda com medidor, custo, temperatura
+          // e curva de potência, a primeira sem nada. O critério de proximidade de
+          // início (10 min) não pega o segundo caso, porque ali são 88 min de
+          // diferença; o que os une é o par de SOC com janelas encostadas.
+          //
+          // Vence quem tem CORROBORAÇÃO: medidor do carregador, custo lançado,
+          // temperatura média ou amostras. Empate → capacidade implícita mais perto
+          // de 34 kWh. Empate ainda → maior duração.
+          const _fimMs = (c) => (+c.timestamp_ms || 0) + (+c.duration_sec || 0) * 1000;
+          const _corrob = (c) => (c.charger_kwh != null ? 1 : 0) + (c.cost_override != null ? 1 : 0)
+                               + (c.avg_temp_c != null ? 1 : 0) + (Array.isArray(c.samples) && c.samples.length ? 1 : 0);
+          const _plaus = (c) => {
+            const d = (+c.soc_end || 0) - (+c.soc_start || 0);
+            if (d <= 0 || !(+c.energy_kwh > 0)) return Infinity;
+            return Math.abs((+c.energy_kwh / (d / 100)) - 34);
+          };
+          /** Mesma sessão: par de SOC idêntico E janelas sobrepostas ou encostadas
+           *  (menos de 5 min entre o fim de uma e o início da outra). */
+          const _mesmaSessao = (a, b) => {
+            if ((+a.soc_start || 0) !== (+b.soc_start || 0)) return false;
+            // Folga de 2 pontos no fim: em 11/08 as duas entradas da mesma carga
+            // fecharam em 80 e 79 (uma viu um sample de SOC a mais que a outra).
+            // Exigir igualdade exata deixava esse caso passar.
+            if (Math.abs((+a.soc_end || 0) - (+b.soc_end || 0)) > 2) return false;
+            const ini = Math.max(+a.timestamp_ms, +b.timestamp_ms);
+            const fim = Math.min(_fimMs(a), _fimMs(b));
+            return (ini - fim) < 5 * 60_000;   // negativo = sobrepostas
+          };
+          // Roda sobre o conjunto TODO, não só o retained: as duplicatas antigas ficam
+          // em `preservedOldEntries` (o APK truncou o histórico local dele) e passariam
+          // por fora do filtro. Ordenado por início, pra "primeira vista" ser a mais
+          // antiga e a adjacência ser avaliada na ordem cronológica.
+          const mantidas = [];
+          for (const c of [...preservedOldEntries, ...mergedEntries]
+                            .sort((a, b) => (+a.timestamp_ms || 0) - (+b.timestamp_ms || 0))) {
+            const i = mantidas.findIndex(m => _mesmaSessao(m, c));
+            if (i < 0) { mantidas.push(c); continue; }
+            const atual = mantidas[i];
+            const venceu = _corrob(c) !== _corrob(atual) ? _corrob(c) > _corrob(atual)
+                         : _plaus(c)  !== _plaus(atual)  ? _plaus(c)  < _plaus(atual)
+                         : (+c.duration_sec || 0) > (+atual.duration_sec || 0);
+            const perdeu = venceu ? atual : c;
+            if (venceu) mantidas[i] = c;
+            markDeleted('charges', perdeu.timestamp_ms);   // tombstone: não volta pelo retained
+            console.warn(`⚠ [charge] duplicata da mesma sessão descartada ts=${perdeu.timestamp_ms} `
+              + `(${perdeu.energy_kwh}kWh ${perdeu.soc_start}→${perdeu.soc_end}%, corrob=${_corrob(perdeu)}) `
+              + `— mantida ts=${mantidas[i].timestamp_ms} (${mantidas[i].energy_kwh}kWh, corrob=${_corrob(mantidas[i])})`);
+          }
+          chargesArr = mantidas;
           // Fragmento novo pode fechar contiguidade com o anterior (APK perdeu o
           // fio no meio da carga). Roda antes do broadcast pra que a PWA já receba
           // o registro consolidado, não os dois pedaços.
@@ -21452,18 +23933,32 @@ function applyMqttMessage(key, value, isRetained = false) {
                 console.log(`↩ new_charge ts=${nova.timestamp_ms} suprimido — consolidado pelo auto-merge`);
                 continue;
               }
-              if (stored && !stored.location_name && state.gps_lat && state.gps_lng) {
-                stored.location_lat = state.gps_lat;
-                stored.location_lng = state.gps_lng;
-                const match = autoMatchLocation(state.gps_lat, state.gps_lng);
-                if (match) {
-                  stored.location_name = match.name;
-                  console.log(`📍 Auto-tag recarga ${nova.timestamp_ms}: "${match.name}"`);
-                } else {
-                  console.log(`📍 Recarga ${nova.timestamp_ms} salva com GPS (${state.gps_lat.toFixed(5)}, ${state.gps_lng.toFixed(5)}) — fora de locais conhecidos`);
+              // A COORDENADA é gravada sempre; o NOME só se ainda não houver. Antes as
+              // duas coisas estavam sob o mesmo `if (!location_name)`, e como o nome
+               // chega herdado do auto-merge (`_mergeChargePair` copia o location_name da
+              // recarga anterior), o bloco inteiro era pulado: nenhuma recarga tinha
+              // lat/lng e todas herdavam "Limpa Gyn" — inclusive as feitas em casa.
+              // Sem coordenada, nem o reprocess-places consegue renomear depois.
+              if (stored && state.gps_lat && state.gps_lng) {
+                if (stored.location_lat == null || stored.location_lng == null) {
+                  stored.location_lat = state.gps_lat;
+                  stored.location_lng = state.gps_lng;
+                  stored._updated_ms = Date.now();
+                  scheduleChargesFlush();
                 }
-                stored._updated_ms = Date.now();
-                scheduleChargesFlush();
+                const match = autoMatchLocation(state.gps_lat, state.gps_lng);
+                if (match && stored.location_name !== match.name) {
+                  // O local DETECTADO vence o herdado: a posição é medida, o nome
+                  // copiado do merge é só suposição.
+                  const antes = stored.location_name || '(vazio)';
+                  stored.location_name = match.name;
+                  stored._updated_ms = Date.now();
+                  scheduleChargesFlush();
+                  console.log(`📍 Auto-tag recarga ${nova.timestamp_ms}: "${match.name}" (era ${antes})`);
+                } else if (!match) {
+                  console.log(`📍 Recarga ${nova.timestamp_ms} com GPS (${state.gps_lat.toFixed(5)}, ${state.gps_lng.toFixed(5)}) — fora dos locais cadastrados`
+                    + (stored.location_name ? ` — mantendo "${stored.location_name}" (herdado, pode estar errado)` : ''));
+                }
               }
               broadcast('new_charge', {
                 timestamp_ms: nova.timestamp_ms,
