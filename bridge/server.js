@@ -16083,7 +16083,7 @@ mqttClient.on('message', (topic, payload, packet) => {
         }
         // Rota do Waze acabou: esquece o candidato pendente, mas NÃO restaura a rota
         // anterior do app — o destino novo passou a valer e continua valendo.
-        _navDestPend = null; _navDestAdotado = ''; _navLigadoNaRota = false;
+        _navDestPend = null; _setNavAdotado('', false);
         return;
       }
       // Reconfere a idade AQUI também. O APK já filtra em 30s, mas entre a leitura dele
@@ -17145,12 +17145,31 @@ let _nav = { active: false, ms: 0 };
 // de chegada e SOC previsto todos precisam de coordenada. Então o rótulo é resolvido
 // em ponto antes de substituir, em três degraus (Meus locais → geocode → desiste).
 let _navDestPend    = null;   // { label, desdeMs } — candidato aguardando estabilizar
-let _navDestAdotado = '';     // rótulo já adotado, pra não reprocessar a cada tick
+// Rótulo já adotado, pra não re-geocodificar o mesmo a cada tick. Vive EXATAMENTE o
+// tempo da rota, e por dois motivos que se resolvem no mesmo lugar:
+//
+// 1. `_clearRoute` não zerava isto. Chegando ao destino a rota some, mas o rótulo
+//    seguia marcado como adotado — e voltar ao MESMO lugar mais tarde batia no
+//    early-return de `_avaliaDestinoDoWaze` e nunca mais publicava `cmd/nav_dest`.
+//    Segunda ida ao mesmo destino no dia = carro sem destino, em silêncio.
+// 2. Só em memória, um restart do bridge no meio da viagem zerava o rótulo e a
+//    adoção rodava de novo 15s depois: re-geocode, `cmd/nav_dest` retido republicado
+//    e evento 'nav_dest_adotado' duplicado na timeline.
+//
+// Guardado em `state.nav_adopt` (que já é persistido) e reidratado só se a rota
+// também sobreviveu — adoção sem rota é resíduo, não estado.
+let _navDestAdotado = (state.route && state.nav_adopt?.label) || '';
 let _navDestBusy    = false;
 /** true só quando o destino que o Waze está navegando É o destino da rota do app.
  *  Sem isso o ETA do Waze (que é pra OUTRO lugar) seria casado com o nome da rota
  *  antiga — número coerente na aparência, destino errado no conteúdo. */
-let _navLigadoNaRota = false;
+let _navLigadoNaRota = !!(state.route && state.nav_adopt?.ligado);
+function _setNavAdotado(label, ligado) {
+  _navDestAdotado = label || '';
+  _navLigadoNaRota = !!ligado;
+  state.nav_adopt = label ? { label, ligado: !!ligado, ts: Date.now() } : null;
+  scheduleStateSave();
+}
 let _navStepsN = -1;   // tamanho do steps[] da última amostra (dispara nova captura)
 
 // Mídia tocando no carro, lida pelo APK via Impulse. Só em memória: é sinal vivo, e
@@ -17204,16 +17223,15 @@ async function _adotaDestinoDoWaze(label) {
     if (!hit) {
       // Degrau 3: sem ponto, NÃO troca a rota. O card já mostra rótulo e ETA do Waze;
       // afirmar um destino sem saber onde fica quebraria a chegada silenciosamente.
-      _navDestAdotado = label;   // não fica tentando geocodificar o mesmo a cada 7s
-      _navLigadoNaRota = false;
+      _setNavAdotado(label, false);   // não fica tentando geocodificar o mesmo a cada 7s
       console.log(`[nav-adopt] '${label}' não resolveu em ponto — rota do app mantida, ETA segue do Directions`);
       return;
     }
     const jaEsse = state.route?.wps?.some(w => w.isFinal
       && Math.abs(w.lat - hit.lat) < 3e-4 && Math.abs(w.lng - hit.lng) < 3e-4);
-    _navDestAdotado = label;
+    _setNavAdotado(label, false);
     if (jaEsse) {
-      _navLigadoNaRota = true;
+      _setNavAdotado(label, true);
       console.log(`[nav-adopt] '${label}' → ${hit.name} via ${hit.via} — já era o destino do app, nada a trocar`);
       return;
     }
@@ -17234,7 +17252,7 @@ async function _adotaDestinoDoWaze(label) {
         JSON.stringify({ lat: hit.lat, lng: hit.lng, name: hit.name, ts: Date.now() }),
         { qos: 1, retain: true });
     } catch (e) { console.warn('[nav-adopt] nav_dest falhou:', e.message); }
-    _navLigadoNaRota = true;
+    _setNavAdotado(label, true);
     recentNavDests.push({ name: hit.name, lat: hit.lat, lng: hit.lng, ts: Date.now() });
     if (recentNavDests.length > 30) recentNavDests.shift();
     _saveNavDestsSoon();
@@ -18162,6 +18180,10 @@ function _chargeStations() {
 // Limpa toda a rota ativa (chegou ao destino final OU expirou). Apaga o estado,
 // o nav_dest retido e a rota persistida.
 function _clearRoute(consumedWps) {
+  // A adoção morre com a rota — ver o comentário em `_navDestAdotado`. Sem isto,
+  // voltar ao mesmo destino depois de chegar nunca mais chegava no carro.
+  if (_navDestAdotado) _setNavAdotado('', false);
+  _navDestPend = null;
   if (state.arrival) { state.arrival = null; scheduleStateBroadcast(); }
   if (state.route)   { state.route   = null; scheduleStateSave(); }
   // Publica a limpeza sem depender da flag: publicar '' retido num tópico já
