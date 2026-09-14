@@ -7505,13 +7505,20 @@ app.get('/api/wall', requireAuth, (_req, res) => {
       linhaBat(bat1('casa')),
       `Home Assistant · ${_haStatus.up ? 'no ar' : 'fora'}`,
     ].filter(Boolean)),
-    sitio: nodeDe(/^(starlink|bluetti_sitio)/, (() => {
+    // ext_monitor_down é o dead-man's-switch do HA do SÍTIO (ele bate a cada
+    // 60s), não um alerta de rede — estava caindo em REDE por causa do prefixo.
+    sitio: nodeDe(/^(starlink|bluetti_sitio|ext_monitor)/, (() => {
       const st = starlink.status(), sn = starlink.snapshot();
+      const beat = _extMonitorLastBeat
+        ? Math.round((Date.now() - _extMonitorLastBeat) / 60000) : null;
       return [
         linhaBat(bat1('sitio')),
         !st.configured ? 'Starlink · não configurado'
           : `Starlink · ${sn.ok ? 'respondendo' : 'sem resposta'}` +
             (st.stale_s != null ? ` · leitura há ${Math.round(st.stale_s / 60)} min` : ''),
+        // Batida do HA do sítio: é ele quem prova que o sítio inteiro está vivo.
+        beat == null ? 'HA do sítio · nunca bateu'
+          : `HA do sítio · batida ${beat < 1 ? 'agora' : 'há ' + beat + ' min'}`,
       ].filter(Boolean);
     })()),
     mac: nodeDe(/^(disk|ssd|mem_|rss|restarts|backup|icloud)/, [
@@ -7525,7 +7532,7 @@ app.get('/api/wall', requireAuth, (_req, res) => {
       // Ancorado: /Assist/ solto casava com 'Home Assistant'.
       svc.filter(x => /^(Delega|Assist\.|Gastos|Driver Cred|Clockin)/.test(x.nome))
          .map(x => `${x.nome} · ${x.ok ? 'no ar' : 'FORA'}${x.det ? ' · ' + x.det : ''}`)),
-    rede: nodeDe(/^(mqtt|cf|dns|funnel|gw_|ts_|local_|ext_monitor|broker|cert)/,
+    rede: nodeDe(/^(mqtt|cf|dns|funnel|gw_|ts_|local_|broker|cert)/,
       svc.filter(x => /Home Assistant|MQTT|Cloudflare|Gateway/.test(x.nome))
          .map(x => `${x.nome} · ${x.ok ? 'ok' : 'FORA'}`)),
   };
@@ -22644,6 +22651,32 @@ app.get('/api/share/:token/state', (req, res) => {
     evRemainKm: Math.max(0, Math.round(+state.autonomy_ev_km || +state.ev_remain_km || +state.range_ev_km || 0)),
     iceRemainKm: Math.max(0, Math.round(+state.autonomy_ice_km || +state.fuel_remain_km || 0)),
     odometer: Math.round(+state.odometer_km || 0),
+    // Onde o carro está conectado: Wi-Fi (com o nome da rede) ou dados móveis.
+    //
+    // O sinal primário é o `icone` do Impulse, NÃO o `routingMode`. Derivar do modo
+    // está errado num caso real e já documentado no app iOS: com o HotRouter off e a
+    // tela navegando por WiFi, o modo vem 'OFF' — o Impulse sabe distinguir "hotspot
+    // roteando" de "a própria tela está no WiFi", o modo cru não carrega isso.
+    //
+    // Sem afirmar nada com dado velho: com o carro dormindo o uplink congela, e exibir
+    // o último SSID daria uma conexão que não existe mais. Acima de 10 min, null.
+    net: (() => {
+      const u = state.uplink;
+      if (!u) return null;
+      const idade = Date.now() - (+u.medidoMs || +u.ts || 0);
+      if (!(idade >= 0 && idade < 10 * 60_000)) return null;
+      const rede = String(u.wifi || u.wifiDaTela || '').trim();
+      switch (String(u.icone || '')) {
+        case 'wifi':      return { tipo: 'wifi', nome: rede || 'Wi-Fi' };
+        case 'satellite': return { tipo: 'wifi', nome: rede || 'Wi-Fi', roteando: true };
+        case 'cell':      return { tipo: '4g',   nome: 'dados móveis' };
+        case 'cell_off':  return { tipo: 'off',  nome: '4G bloqueado' };
+        case 'alert':     return { tipo: 'erro', nome: 'falha de rede' };
+      }
+      if (String(u.modo || '').toUpperCase() === 'WLAN') return { tipo: 'wifi', nome: rede || 'Wi-Fi' };
+      if (u.quatroGOn) return { tipo: '4g', nome: 'dados móveis' };
+      return null;
+    })(),
     heading: +state.car_heading || 0,
     pm25: (state.hvac_pm25 != null && +state.hvac_pm25 > 0) ? Math.round(+state.hvac_pm25) : null,
     alerts: _shareAlerts(state.status_message),
