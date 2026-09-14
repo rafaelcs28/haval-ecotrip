@@ -4269,6 +4269,34 @@ function _carIsAwake() {
   return false;
 }
 
+// ── Zonas de silêncio esperado ───────────────────────────────────────────────
+// Lugares onde o carro comprovadamente fica sem rede (subsolo de garagem, por
+// exemplo). Lá o APK silenciar é o comportamento normal, não anomalia, e alertar
+// só ensina o dono a ignorar alerta — que é o pior estrago possível num alarme.
+//
+// A posição usada é a ÚLTIMA CONHECIDA: `gps_lat/lng` vêm só do APK, então quando
+// ele emudece a coordenada congela exatamente onde o carro entrou. É o dado certo
+// pra esta decisão, e é o único que existe enquanto o silêncio dura.
+const SILENCE_ZONES_FILE = path.join(DATA_DIR, 'silence_zones.json');
+let _silenceZones = [];
+let _zonaSilencioAtual = null;   // pra logar só a transição, não a cada minuto
+try { _silenceZones = JSON.parse(fs.readFileSync(SILENCE_ZONES_FILE, 'utf8')) || []; } catch (_) {}
+function _saveSilenceZones() {
+  try { atomicWriteFileSync(SILENCE_ZONES_FILE, JSON.stringify(_silenceZones, null, 2)); }
+  catch (e) { console.warn('[zona-silencio] falha ao salvar:', e.message); }
+}
+
+/** Zona que contém a última posição conhecida do carro, ou null. */
+function _zonaDeSilencio() {
+  const lat = +state.gps_lat, lng = +state.gps_lng;
+  if (!lat || !lng) return null;
+  for (const z of _silenceZones) {
+    if (!(z.lat && z.lng)) continue;
+    if (haversineM(lat, lng, z.lat, z.lng) <= (+z.radiusM || 250)) return z;
+  }
+  return null;
+}
+
 setInterval(() => {
   const now    = Date.now();
   const apkMs  = state.last_apk_ms || 0;
@@ -4287,9 +4315,19 @@ setInterval(() => {
   const apkAge = now - apkMs;
   const gwmAge = now - gwmMs;
 
+  // Zona de silêncio esperado: lá o APK mudo é o normal. Logado na TRANSIÇÃO — um
+  // alerta que some sem explicação é tão ruim quanto um alerta falso.
+  const zona = _zonaDeSilencio();
+  if (!!zona !== !!_zonaSilencioAtual) {
+    _zonaSilencioAtual = zona;
+    console.log(zona
+      ? `[zona-silencio] carro na zona '${zona.name}' — alertas de silêncio suspensos`
+      : '[zona-silencio] carro saiu da zona — alertas de silêncio normais');
+  }
+
   // 1. APK silente mas GWM ativa — só alerta com carro acordado (dormir = normal).
   _alert('car_apk_stall',
-    apkAge > SOURCE_STALL_MS && gwmAge < SOURCE_STALL_MS && _carIsAwake(),
+    apkAge > SOURCE_STALL_MS && gwmAge < SOURCE_STALL_MS && _carIsAwake() && !zona,
     'App do carro silente',
     `Sem dados do APK há ${Math.round(apkAge / 60_000)}min (GWM continua ativa).`,
     'high', ['car']);
@@ -4308,7 +4346,7 @@ setInterval(() => {
   const bothSilent    = apkAge > SOURCE_STALL_MS && gwmAge > SOURCE_STALL_MS;
   const recentlyAwake = _lastCarAwakeMs > 0 && (now - _lastCarAwakeMs) < CAR_AWAKE_WINDOW;
   _alert('car_total_silence',
-    bothSilent && recentlyAwake,
+    bothSilent && recentlyAwake && !zona,
     'Carro sem comunicação',
     `APK ${Math.round(apkAge / 60_000)}min + GWM ${Math.round(gwmAge / 60_000)}min sem dados. Ativo há ${Math.round((now - _lastCarAwakeMs) / 60_000)}min.`,
     'high', ['sos']);
@@ -14093,6 +14131,52 @@ setInterval(_reporLimiteDoCiclo, 5 * 60_000).unref?.();
 // primeira avaliação só aconteceria até 5 min depois do boot, e o carimbo inicial
 // (que protege o ciclo corrente) ficava dependendo da sorte de o processo durar.
 setTimeout(_reporLimiteDoCiclo, 90_000).unref?.();
+
+app.get('/api/silence-zones', (_req, res) => {
+  // `dentro` diz qual zona contém o carro AGORA — o app mostra isso na lista, e é
+  // também o que torna a regra verificável sem esperar 20min de silêncio.
+  const atual = _zonaDeSilencio();
+  res.json({
+    zones: _silenceZones.map(z => ({ ...z, dentro: !!atual && atual.id === z.id })),
+    carro: { lat: +state.gps_lat || null, lng: +state.gps_lng || null },
+    emZona: atual ? atual.id : null,
+  });
+});
+
+app.post('/api/silence-zones', requireAuth, (req, res) => {
+  const b = req.body || {};
+  const nome = String(b.name || '').trim();
+  if (!nome) return res.status(400).json({ error: 'name obrigatório' });
+  // Sem lat/lng no corpo, usa onde o carro está — é o caso de uso real: o dono
+  // está no lugar, o carro acabou de emudecer, e ele marca dali mesmo.
+  const lat = b.lat !== undefined ? +b.lat : +state.gps_lat;
+  const lng = b.lng !== undefined ? +b.lng : +state.gps_lng;
+  if (!_validLatLng(lat, lng)) return res.status(400).json({ error: 'sem coordenada válida (nem no corpo nem no carro)' });
+  const raio = Math.min(2000, Math.max(50, parseInt(b.radiusM, 10) || 250));
+  const perto = _silenceZones.find(z => haversineM(lat, lng, z.lat, z.lng) < 100);
+  if (perto) return res.json({ ok: true, zone: perto, jaExistia: true });
+  const z = { id: 'z-' + Date.now().toString(36), name: nome.slice(0, 60), lat, lng, radiusM: raio, createdMs: Date.now() };
+  _silenceZones.push(z); _saveSilenceZones();
+  console.log(`[zona-silencio] criada '${z.name}' (${z.lat.toFixed(5)},${z.lng.toFixed(5)} r=${z.radiusM}m)`);
+  res.json({ ok: true, zone: z });
+});
+
+app.delete('/api/silence-zones/:id', requireAuth, (req, res) => {
+  const i = _silenceZones.findIndex(z => z.id === req.params.id);
+  if (i < 0) return res.status(404).json({ error: 'não encontrada' });
+  const [fora] = _silenceZones.splice(i, 1); _saveSilenceZones();
+  console.log(`[zona-silencio] removida '${fora.name}'`);
+  res.json({ ok: true });
+});
+
+app.patch('/api/silence-zones/:id', requireAuth, (req, res) => {
+  const z = _silenceZones.find(x => x.id === req.params.id);
+  if (!z) return res.status(404).json({ error: 'não encontrada' });
+  if (req.body?.name)    z.name    = String(req.body.name).trim().slice(0, 60);
+  if (req.body?.radiusM) z.radiusM = Math.min(2000, Math.max(50, parseInt(req.body.radiusM, 10) || z.radiusM));
+  _saveSilenceZones();
+  res.json({ ok: true, zone: z });
+});
 
 app.post('/api/uplink/cmd', requireAuth, (req, res) => {
   const metodo = String(req.body?.metodo || '');
