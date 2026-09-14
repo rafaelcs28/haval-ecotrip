@@ -106,6 +106,34 @@ struct ConfigV2View: View {
                         }
                         div
                         NavigationLink {
+                            PerfView()
+                        } label: {
+                            rowLabel(icon: "speedometer", tint: DS.orange,
+                                     title: "Medir desempenho",
+                                     value: "CPU e RAM do carro", chevron: true)
+                        }
+                        .buttonStyle(.plain)
+                        div
+                        NavigationLink {
+                            ConectividadeView()
+                        } label: {
+                            rowLabel(icon: "antenna.radiowaves.left.and.right", tint: DS.teal,
+                                     title: "Conectividade do carro",
+                                     value: CarStore.shared.uplinkModo.isEmpty ? "—" : CarStore.shared.uplinkModo,
+                                     chevron: true)
+                        }
+                        .buttonStyle(.plain)
+                        div
+                        NavigationLink {
+                            ZonasSilencioView()
+                        } label: {
+                            rowLabel(icon: "mappin.slash", tint: DS.orange,
+                                     title: "Locais sem cobertura",
+                                     value: "Não alertar silêncio do app", chevron: true)
+                        }
+                        .buttonStyle(.plain)
+                        div
+                        NavigationLink {
                             DiagnosticoV2View(cfg: cfg, latencyMs: latencyMs)
                         } label: {
                             rowLabel(icon: "waveform.path.ecg", tint: DS.green, title: "Diagnóstico",
