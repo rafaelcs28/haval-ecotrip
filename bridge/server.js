@@ -3950,7 +3950,13 @@ function recomputeBatteryAvgPrice() {
   const ordered = [...chargesArr].sort((a, b) => (a.timestamp_ms || 0) - (b.timestamp_ms || 0));
   let avgPrice = SEED_KWH_PRICE;  // R$/kWh médio inicial = seed
   for (const c of ordered) {
-    const energy = +c.energy_kwh || 0;
+    // LÊ pelo valor efetivo (com `manual_overrides` aplicados), ESCREVE no registro
+    // cru. Sem isto, corrigir um SOC errado pela tela de edição não chegava aqui: a
+    // recarga de 31/07 continuou entrando com peso neutro e ostentando o selo de
+    // incoerente mesmo depois de consertada, porque este laço lia `c.soc_start`
+    // direto. A edição existia e não valia pra nada no custo.
+    const eff = applyChargeOverrides(c);
+    const energy = +eff.energy_kwh || 0;
     if (energy < 0.05) continue;
     const ovr = c.cost_override;
     // PREFERE total/energy_kwh atual em vez do perKwh salvo. Se energy_kwh
@@ -3975,8 +3981,8 @@ function recomputeBatteryAvgPrice() {
     // Critério: o ΔSOC declarado tem que explicar a energia, com folga de 2×. Fora
     // disso o SOC não é confiável e a sessão entra com peso pela ENERGIA (não zera
     // o histórico) — perde precisão, mas não destrói a série.
-    const socStart = +c.soc_start || 0;
-    const socEnd   = +c.soc_end   || 0;
+    const socStart = +eff.soc_start || 0;
+    const socEnd   = +eff.soc_end   || 0;
     const dSoc = socEnd - socStart;
     const kwhEsperado = dSoc > 0 ? dSoc * BATTERY_CAPACITY_KWH / 100 : 0;
     const socConfiavel = socStart > 0 && kwhEsperado > 0
