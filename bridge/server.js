@@ -13984,6 +13984,77 @@ app.get('/api/perf', requireAuth, (_req, res) => {
   });
 });
 
+// ── Volta o limite de dados ao piso na virada do ciclo ───────────────────────
+// O dono sobe o limite ao longo do mês pra não ser cortado. Na virada o CONSUMO
+// zera mas o limite fica onde parou, e um limite alto no dia 1 permite gastar o
+// mês inteiro na primeira semana. Aqui ele volta ao piso quando o ciclo vira.
+//
+// Três coisas que o desenho tem que respeitar:
+//
+// 1. `cmd/uplink` vai SEM retain. Se o carro estiver dormindo à meia-noite o
+//    comando evapora — então não basta disparar no horário: tem que insistir até
+//    o carro CONFIRMAR o novo limite no `uplink.limiteMb`.
+// 2. O bridge pode estar fora no dia 1. Por isso o gatilho não é "são 00:00", é
+//    "o ciclo corrente ainda não foi tratado" — vale quando o bridge voltar.
+// 3. Se o dono mexer no limite durante o ciclo, isso é deliberado e vence. Um
+//    `setDataLimit` manual carimba o ciclo como tratado e o automático não
+//    encosta mais até a próxima virada.
+const UPLINK_LIMITE_BASE_MB = parseInt(process.env.UPLINK_LIMITE_BASE_MB || '250', 10);
+const UPLINK_REENVIO_MS = 15 * 60_000;
+let _uplinkLimiteEnvioMs = 0;
+
+/** Rótulo do ciclo de faturamento corrente ("2026-09"). Antes do dia de virada
+ *  ainda estamos no ciclo que começou no mês anterior. */
+function _cicloUplink(diaCiclo) {
+  const d = new Date();
+  const atrasado = d.getDate() < diaCiclo ? 1 : 0;
+  const ref = new Date(d.getFullYear(), d.getMonth() - atrasado, 1);
+  return `${ref.getFullYear()}-${String(ref.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function _carimbaCicloUplink(motivo) {
+  const dia = +state.uplink?.diaCiclo >= 1 ? +state.uplink.diaCiclo : 1;
+  const ciclo = _cicloUplink(dia);
+  if (state.uplink_limite_ciclo !== ciclo) {
+    state.uplink_limite_ciclo = ciclo;
+    scheduleStateSave();
+    console.log(`[uplink-limite] ciclo ${ciclo} carimbado (${motivo})`);
+  }
+}
+
+function _reporLimiteDoCiclo() {
+  const u = state.uplink;
+  if (!u) return;
+  const dia = +u.diaCiclo >= 1 ? +u.diaCiclo : 1;
+  const ciclo = _cicloUplink(dia);
+  // Primeira execução: carimba o ciclo corrente SEM mandar nada. Sem isto, ligar
+  // esta rotina no meio do mês derrubaria o limite que o dono acabou de subir —
+  // exatamente o estrago que ela existe pra evitar.
+  if (!state.uplink_limite_ciclo) return _carimbaCicloUplink('primeira execução — ciclo corrente preservado');
+  if (state.uplink_limite_ciclo === ciclo) return;
+
+  const atual = +u.limiteMb || 0;
+  if (atual > 0 && atual <= UPLINK_LIMITE_BASE_MB) {
+    return _carimbaCicloUplink(`já estava em ${atual}MB`);
+  }
+  if (!mqttClient?.connected) return;
+  const agora = Date.now();
+  if (agora - _uplinkLimiteEnvioMs < UPLINK_REENVIO_MS) return;
+  _uplinkLimiteEnvioMs = agora;
+  try {
+    mqttClient.publish(`${MQTT_PREFIX}/cmd/uplink`,
+      JSON.stringify({ metodo: 'setDataLimit', mb: UPLINK_LIMITE_BASE_MB }),
+      { qos: 1, retain: false });
+    console.log(`[uplink-limite] ciclo virou para ${ciclo} — pedindo ${UPLINK_LIMITE_BASE_MB}MB `
+      + `(estava ${atual}MB). Sem retain: insisto a cada ${UPLINK_REENVIO_MS / 60000}min até confirmar.`);
+  } catch (e) { console.warn('[uplink-limite] publish falhou:', e.message); }
+}
+setInterval(_reporLimiteDoCiclo, 5 * 60_000).unref?.();
+// Uma passada no arranque, depois que o retained do uplink já chegou: sem isto a
+// primeira avaliação só aconteceria até 5 min depois do boot, e o carimbo inicial
+// (que protege o ciclo corrente) ficava dependendo da sorte de o processo durar.
+setTimeout(_reporLimiteDoCiclo, 90_000).unref?.();
+
 app.post('/api/uplink/cmd', requireAuth, (req, res) => {
   const metodo = String(req.body?.metodo || '');
   // API completa do Impulse (vc7261). setWifiEnabled fica FORA de propósito: desligar
@@ -14025,6 +14096,8 @@ app.post('/api/uplink/cmd', requireAuth, (req, res) => {
   try {
     mqttClient.publish(`${MQTT_PREFIX}/cmd/uplink`, JSON.stringify(msg), { qos: 1, retain: false });
   } catch (e) { return res.status(502).json({ error: e.message }); }
+  // Ajuste manual do dono vence o automático até a próxima virada.
+  if (metodo === 'setDataLimit') _carimbaCicloUplink('limite ajustado na mão');
   if (metodo === 'setWifiEnabled' && msg.valor === false) {
     console.warn('[uplink] ⚠️ DESLIGANDO o WiFi do carro — se ele não tiver 4G, o acesso remoto cai aqui');
   }
