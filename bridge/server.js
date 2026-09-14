@@ -854,10 +854,20 @@ const AGENT_OWNED = new Set([
 ]);
 
 const DNS_MISMATCH_SUSTAIN_MS = +(process.env.DNS_MISMATCH_SUSTAIN_MIN || 10) * 60_000;
+// Baileys cai e religa sozinho em quedinha de rede — sustentacao evita push por
+// reconexao de um ciclo.
+const LARI_SUSTAIN_MS      = +(process.env.LARI_SUSTAIN_MIN || 15) * 60_000;
 const DELEGA_SUSTAIN_MS    = +(process.env.DELEGA_SUSTAIN_MIN || 3) * 60_000;
 const ICLOUD_SUSTAIN_MS    = +(process.env.ICLOUD_SUSTAIN_H || 4) * 3600_000;
 const COLLECTOR_SUSTAIN_MS = +(process.env.COLLECTOR_SUSTAIN_MIN || 15) * 60_000;
 const BLUETTI_SUSTAIN_MS   = +(process.env.BLUETTI_SUSTAIN_MIN   || 10) * 60_000;
+// Janelas medidas em 10 dias de eventos reais. A mediana de cada episódio é o
+// que separa problema de excursão: temperatura alta durava 17min (pico de sol),
+// geração perdida 3-5min (nuvem), inversor solo 2min (restart do próprio).
+// Problema térmico ou elétrico de verdade não some sozinho em minutos.
+const SOLAR_TEMP_SUSTAIN_MS = +(process.env.SOLAR_TEMP_SUSTAIN_MIN || 45) * 60_000;
+const SOLAR_GEN_SUSTAIN_MS  = +(process.env.SOLAR_GEN_SUSTAIN_MIN  || 20) * 60_000;
+const SOLAR_SOLO_SUSTAIN_MS = +(process.env.SOLAR_SOLO_SUSTAIN_MIN || 15) * 60_000;
 const STR_IMB_RATIO      = +(process.env.STRING_IMBALANCE_RATIO || 0.5);
 const STR_IMB_MIN_W       = +(process.env.STRING_IMBALANCE_MIN_W || 1500);
 const STR_IMB_SUSTAIN_MS  = +(process.env.STRING_IMBALANCE_SUSTAIN_MIN || 30) * 60_000;
@@ -5817,6 +5827,9 @@ function _evalBluettiAlerts() {
     // OU battery<100). Isso elimina falso positivo de flap momentâneo de grid=0
     // com bateria cheia em passthrough perfeito.
     const offgrid = _bluettiOffgridConfirmed(key, grid, batt);
+    // Grava no estado: `/api/bluetti-status`, `/api/wall` e a página de health
+    // têm que ler o MESMO veredito. Cada um recalculando é como divergem.
+    s.offgrid = (_bluettiHist[key]?.length || 0) < 3 ? null : offgrid;
     // 2. AC desligado — dispositivos ligados apagaram agora. Urgentíssimo.
     _alert(`bluetti_${key}_ac_off`, acOff,
       `${emoji} — AC DESLIGADO`,
@@ -5868,7 +5881,20 @@ app.get('/api/bluetti-status', async (req, res) => {
     needs_login: !cs.has_token || (days != null && days < 7),
   };
   if (_bridgeTokenOk(req)) auth.reauth_url = _bluettiReauthLink();
-  res.json({ ..._bluettiCache.data, auth });
+  // Quem decide "está na bateria" é aqui, com a MESMA regra dos alertas
+  // (_bluettiOffgridConfirmed). grid_in_w=0 sozinho não prova descarga: em
+  // passthrough com a bateria cheia a estação reporta 0 em todos os medidores, e
+  // a página — que tinha regra própria — lia isso como "na bateria" com a rede
+  // ligada e a Casa em 100% (13/09). null = histórico ainda curto pra afirmar.
+  const out = { ..._bluettiCache.data, auth };
+  for (const key of ['casa', 'sitio']) {
+    const s = out[key];
+    if (!s || !s.reachable) continue;
+    out[key] = { ...s, offgrid: (_bluettiHist[key]?.length || 0) < 3
+      ? null
+      : _bluettiOffgridConfirmed(key, s.grid_in_w ?? 0, s.battery_pct) };
+  }
+  res.json(out);
 });
 
 // ── OAuth da nuvem Bluetti ───────────────────────────────────────────────────
@@ -6328,7 +6354,8 @@ async function _evalSolarAlerts() {
     'default', ['clock', 'sun.max']);
   // 4) Temperatura alta em algum inversor (>65°C limite operacional típico)
   for (const inv of _solarState.invs) {
-    _alert(`solar_${inv.short}_temp_high`, (inv.temperature ?? 0) > 65 && p.online !== false,
+    const kT = `solar_${inv.short}_temp_high`;
+    _alert(kT, _sustained(kT, p.online !== false, (inv.temperature ?? 0) > 65 && p.online !== false, SOLAR_TEMP_SUSTAIN_MS),
       `☀️ ${inv.label} — temperatura alta ${inv.temperature}°C`,
       `Inversor ${inv.short} acima de 65°C. Pode entrar em derating. Ver ventilação/insolação direta.`,
       'high', ['thermometer.sun', 'flame']);
@@ -6339,7 +6366,8 @@ async function _evalSolarAlerts() {
   const hour = now.getHours();
   const middayNow = hour >= 10 && hour <= 14;
   const genLost = middayNow && p.online !== false && (p.pv_power ?? 0) < 200;
-  _alert('solar_generation_lost', genLost,
+  _alert('solar_generation_lost',
+    _sustained('solar_gen_lost', middayNow && p.online !== false, genLost, SOLAR_GEN_SUSTAIN_MS),
     '☀️ Solar Catalão — sem geração ao meio-dia',
     `PV power = ${p.pv_power ?? 0}W entre 10-14h. Pode ser nublado extremo, disjuntor abriu ou string caída.`,
     'high', ['sun.max.trianglebadge.exclamationmark']);
@@ -6349,11 +6377,13 @@ async function _evalSolarAlerts() {
     const [a, b] = _solarState.invs;
     const aDown = (a.power ?? 0) < 100, bDown = (b.power ?? 0) < 100;
     const aUp = (a.power ?? 0) > 500,   bUp   = (b.power ?? 0) > 500;
-    _alert(`solar_${a.short}_solo_down`, aDown && bUp,
+    const kA = `solar_${a.short}_solo_down`;
+    _alert(kA, _sustained(kA, true, aDown && bUp, SOLAR_SOLO_SUSTAIN_MS),
       `☀️ ${a.label} parou (o outro segue)`,
       `${a.label} em 0W enquanto ${b.label} gera ${b.power}W. Problema local (fusível, string, disjuntor CC).`,
       'high', ['bolt.slash']);
-    _alert(`solar_${b.short}_solo_down`, bDown && aUp,
+    const kB = `solar_${b.short}_solo_down`;
+    _alert(kB, _sustained(kB, true, bDown && aUp, SOLAR_SOLO_SUSTAIN_MS),
       `☀️ ${b.label} parou (o outro segue)`,
       `${b.label} em 0W enquanto ${a.label} gera ${a.power}W. Problema local (fusível, string, disjuntor CC).`,
       'high', ['bolt.slash']);
@@ -6494,7 +6524,10 @@ function _expectedNow(key) {
 const _solarPowerHist = {};
 function _detectPowerDrop(key, currentW, daytime) {
   const arr = _solarPowerHist[key] || (_solarPowerHist[key] = []);
-  arr.push({ w: currentW || 0, ts: Date.now() });
+  // null = telemetria ausente, não 0 W. `|| 0` fazia o datalogger mudo virar
+  // queda de 100% e disparar 'urgent' com o inversor gerando normal.
+  if (currentW == null) return false;
+  arr.push({ w: currentW, ts: Date.now() });
   if (arr.length > 6) arr.shift();
   if (!daytime || arr.length < 4) return false;
   // Referência: leitura mais antiga da janela (4 ticks atrás, ~4min)
@@ -6620,37 +6653,51 @@ async function _fetchSolisStatus() {
     // Agrega por sistema (soma potência/energia hoje)
     const buildSystem = (cfg, key) => {
       const invs = cfg.invs.map(readInv);
-      const sum = (k) => invs.reduce((a, i) => a + (i[k] ?? 0), 0);
+      // `?? 0` transformava "sem dado" em "gerando 0 W". Zero é uma afirmação:
+      // com o datalogger mudo a planta aparecia zerada na tela enquanto o app
+      // Solis mostrava geração normal (Palmeiras, 13/09). Agora: ninguém
+      // reportou → null; parcial → soma o que veio.
+      const sum = (k) => {
+        const v = invs.map(i => i[k]).filter(x => x != null);
+        return v.length ? v.reduce((a, x) => a + x, 0) : null;
+      };
       // Se algum inversor não trouxe gen_today (Solis manda `unavailable`
       // esporadicamente), soma vai vir subestimada. Deriva a partir de
       // gen_month_kwh - snapshot_do_inicio_do_dia (monotônico até virar mês).
       const someMissing = invs.some(i => i.gen_today_kwh == null);
       const genMonth = sum('gen_month_kwh');
-      _ensureDayStart(key, genMonth);
+      if (genMonth != null) _ensureDayStart(key, genMonth);
       let genToday = sum('gen_today_kwh');
       let genTodaySource = 'inverter_field';
       // Fallback A: deriva de gen_month_kwh - snapshot_do_inicio_do_dia
-      if (someMissing || genToday === 0) {
+      if (someMissing || !genToday) {
         const start = _dayStartMonthKwh(key);
-        if (start != null && genMonth >= start) {
+        if (start != null && genMonth != null && genMonth >= start) {
           const derived = +(genMonth - start).toFixed(2);
-          if (derived > genToday) { genToday = derived; genTodaySource = 'derived_month_delta'; }
+          if (genToday == null || derived > genToday) { genToday = derived; genTodaySource = 'derived_month_delta'; }
         }
       }
       // Fallback B: monotonic clamp — última leitura BOA persistida hoje
       // sempre vence uma leitura pior (Solis manda unavailable → 0 e depois
       // volta). Usa `_solarHistory[key]` que já é atualizado pelo _recordSolarSnap.
-      if (someMissing || genToday === 0) {
+      if (someMissing || !genToday) {
         const today = _todayDateStr();
         const persisted = (_solarHistory[key] || []).find(d => d.date === today);
-        if (persisted && (persisted.kwh || 0) > genToday) {
+        if (persisted && (persisted.kwh || 0) > (genToday ?? 0)) {
           genToday = +persisted.kwh.toFixed(2);
           genTodaySource = 'persisted_max';
         }
       }
+      // Quantos inversores REALMENTE reportaram potência. Uma planta de 2 com 1
+      // mudo soma metade, e sem dizer isso a tela mostra uma queda de 50% que
+      // não existe — e pior, compara essa metade contra a mediana da planta
+      // inteira. Quem desenha precisa saber que a soma está incompleta.
+      const reporting = invs.filter(i => i.ac_power_w != null).length;
       return {
         label: cfg.label,
         ac_power_w:      sum('ac_power_w'),
+        invs_reporting:  reporting,
+        invs_total:      invs.length,
         gen_today_kwh:   genToday,
         gen_today_src:   genTodaySource,
         gen_month_kwh:   genMonth,
@@ -6888,7 +6935,13 @@ async function _evalSolisAlerts() {
     // Com `some()` isso virava alerta 'high' de "monitoramento cego" enquanto a
     // planta produzia normal. É o mesmo erro de ANY-em-vez-de-ALL que já apareceu
     // no desligamento do ventilador.
-    const collsOff = sys.invs.filter(i => i.collector && i.collector !== 'online').length;
+    // `unavailable` no HA vira null em str(), e null não contava como offline: o
+    // alerta ficava mudo EXATAMENTE quando a planta cegou de vez (a entidade
+    // some em vez de reportar 'offline'). Sem telemetria nenhuma — nem coletor,
+    // nem potência, nem temperatura — é cego.
+    const invBlind = (i) => i.collector ? i.collector !== 'online'
+                                        : (i.ac_power_w == null && i.temperature_c == null);
+    const collsOff = sys.invs.filter(invBlind).length;
     const collOff  = collsOff > 0;                       // ainda usado pra suprimir o alarme
     const plantBlind = collsOff === sys.invs.length;
     // Mediana de 1min nos últimos 14 dias: stick reconecta sozinho. Só é problema
@@ -6909,7 +6962,9 @@ async function _evalSolisAlerts() {
     // Temperatura alta (>80°C — S6-GR1P6K tem limite 85°C)
     for (const inv of sys.invs) {
       const _tId = key + '_' + inv.label.toLowerCase().replace(/[^a-z0-9]/g,'');
-      _alert(`solis_${_tId}_temp_high`, (inv.temperature_c ?? 0) > 80 && daytime,
+      const kT2 = `solis_${_tId}_temp_high`;
+      const tEval = daytime && inv.temperature_c != null;
+      _alert(kT2, _sustained(kT2, tEval, tEval && inv.temperature_c > 80, SOLAR_TEMP_SUSTAIN_MS),
         `☀️ ${sys.label} · ${inv.label} — temperatura alta ${inv.temperature_c}°C`,
         `Acima de 80°C. Pode entrar em derating. Ver ventilação/insolação direta.`,
         'high', ['thermometer.sun', 'flame']);
@@ -6920,13 +6975,18 @@ async function _evalSolisAlerts() {
       const now = new Date(), h = now.getHours();
       const midday = h >= 10 && h <= 14;
       const [a, b] = sys.invs;
-      const aDown = (a.ac_power_w ?? 0) < 100, bDown = (b.ac_power_w ?? 0) < 100;
-      const aUp   = (a.ac_power_w ?? 0) > 500, bUp   = (b.ac_power_w ?? 0) > 500;
-      _alert(`solis_${key}_inv1_solo_down`, aDown && bUp && midday,
+      // Com `?? 0` o inversor mudo virava "em 0W" e o outro gerando confirmava
+      // um problema local que não existe. Comparação exige os DOIS lados.
+      const pair  = a.ac_power_w != null && b.ac_power_w != null;
+      const aDown = pair && a.ac_power_w < 100, bDown = pair && b.ac_power_w < 100;
+      const aUp   = pair && a.ac_power_w > 500, bUp   = pair && b.ac_power_w > 500;
+      const kS1 = `solis_${key}_inv1_solo_down`;
+      _alert(kS1, _sustained(kS1, midday && pair, aDown && bUp && midday, SOLAR_SOLO_SUSTAIN_MS),
         `☀️ ${sys.label} — ${a.label} parou`,
         `${a.label} em 0W enquanto ${b.label} gera ${b.ac_power_w}W. Problema local (string/disjuntor/CC).`,
         'high', ['bolt.slash']);
-      _alert(`solis_${key}_inv2_solo_down`, bDown && aUp && midday,
+      const kS2 = `solis_${key}_inv2_solo_down`;
+      _alert(kS2, _sustained(kS2, midday && pair, bDown && aUp && midday, SOLAR_SOLO_SUSTAIN_MS),
         `☀️ ${sys.label} — ${b.label} parou`,
         `${b.label} em 0W enquanto ${a.label} gera ${a.ac_power_w}W. Problema local (string/disjuntor/CC).`,
         'high', ['bolt.slash']);
@@ -6934,7 +6994,9 @@ async function _evalSolisAlerts() {
     // Geração perdida ao meio-dia (10-14h) — sistema inteiro em <10% do esperado
     const now2 = new Date();
     const midday2 = now2.getHours() >= 10 && now2.getHours() <= 14;
-    _alert(`solis_${key}_generation_lost`, midday2 && (sys.ac_power_w ?? 0) < 500,
+    const kG = `solis_${key}_generation_lost`;
+    const genEval = midday2 && sys.ac_power_w != null;   // sem leitura, congela
+    _alert(kG, _sustained(kG, genEval, genEval && sys.ac_power_w < 500, SOLAR_GEN_SUSTAIN_MS),
       `☀️ ${sys.label} — sem geração ao meio-dia`,
       `Potência ${sys.ac_power_w}W entre 10-14h. Nublado extremo, disjuntor ou coletor caído.`,
       'high', ['sun.max.trianglebadge.exclamationmark']);
@@ -7049,6 +7111,18 @@ app.get('/api/cloudflare-status', async (_req, res) => {
 // A severidade NÃO é recalculada: vem dos alertas que o bridge já mantém. A
 // triagem da página é rollup de cor no cliente; duplicar aquele critério aqui
 // criaria a terceira régua pro mesmo fato, que é o erro que essa base já cometeu
+// Totais de uma usina, seja qual for o formato. Catalão (SAJ) guarda o agregado
+// em `.plant` e as Solis guardam na raiz — ler só a raiz devolvia null pro
+// Catalão, e o `?? 0` pintava 0,00 kW com os inversores em 16,9 kW (13/09).
+// null aqui significa "sem leitura", e quem desenha tem que dizer isso, não 0.
+function _plantTotals(p) {
+  if (!p) return null;
+  const a = p.plant || p;
+  const w = a.pv_power ?? a.ac_power_w ?? null;
+  return { kw:  w == null ? null : w / 1000,
+           kwh: a.energy_today ?? a.gen_today_kwh ?? null,
+           online: a.online };
+}
 // várias vezes.
 app.get('/api/monitor-glance', requireAuth, (_req, res) => {
   const now = Date.now();
@@ -7065,9 +7139,10 @@ app.get('/api/monitor-glance', requireAuth, (_req, res) => {
   const crit = firing.filter(f => f.sev === 'crit').length;
   const warn = firing.length - crit;
 
-  const plants = [_solarState, _solisState?.ivonei, _solisState?.palmeiras].filter(Boolean);
-  const kw   = plants.reduce((a, p) => a + ((p.pv_power ?? p.ac_power_w ?? 0) / 1000), 0);
-  const kwh  = plants.reduce((a, p) => a + (p.gen_today_kwh ?? p.energy_today ?? 0), 0);
+  const tot  = [_solarState, _solisState?.ivonei, _solisState?.palmeiras].map(_plantTotals).filter(Boolean);
+  const some = (k) => { const v = tot.map(t => t[k]).filter(x => x != null);
+                        return v.length ? v.reduce((a, x) => a + x, 0) : null; };
+  const kw = some('kw'), kwh = some('kwh');
 
   res.json({
     ts: now,
@@ -7075,9 +7150,539 @@ app.get('/api/monitor-glance', requireAuth, (_req, res) => {
     crit, warn,
     worst: firing[0] ? { title: firing[0].title, sev: firing[0].sev, since_ms: firing[0].since_ms } : null,
     alerts: firing.slice(0, 5),
-    solar: { kw: +kw.toFixed(1), kwh_today: +kwh.toFixed(1), plants: plants.length },
+    solar: { kw: kw == null ? null : +kw.toFixed(1),
+             kwh_today: kwh == null ? null : +kwh.toFixed(1), plants: tot.length },
     car: { awake: _carIsAwake(), apk_age_ms: state.last_apk_ms ? now - state.last_apk_ms : null },
     bridge: { uptime_sec: Math.round(process.uptime()) },
+  });
+});
+
+// ── GET /api/wall/detail — o número da parede, aberto ────────────────────────
+// A parede mostra UM número por coisa. Este endpoint responde "de onde saiu?":
+// devolve as leituras cruas que produziram aquele número, com unidade e idade.
+// Existe pra o clique não virar um dump de JSON de 117KB nem uma segunda página
+// que precisa ser mantida em paralelo.
+app.get('/api/wall/detail', requireAuth, (req, res) => {
+  const k = String(req.query.k || '');
+  const now = Date.now();
+  const idade = (ts) => ts ? Math.round((now - ts) / 60000) + ' min' : 'sem registro';
+  const R = [];
+  const add = (rot, val, nota) => R.push({ k: rot, v: val == null ? '—' : String(val), n: nota || null });
+
+  const [tipo, alvo] = k.split(':');
+
+  if (tipo === 'plant') {
+    const cfgs = {
+      catalao:   { t: 'Catalão (SAJ)',  p: _solarState, agg: (p) => p.plant || {}, tk: 'temperature' },
+      ivonei:    { t: 'Ivonei (Solis)', p: _solisState?.ivonei,    agg: (p) => p, tk: 'temperature_c' },
+      palmeiras: { t: 'Palmeiras (Solis)', p: _solisState?.palmeiras, agg: (p) => p, tk: 'temperature_c' },
+    };
+    const c = cfgs[alvo];
+    if (!c || !c.p) return res.status(404).json({ error: 'usina desconhecida' });
+    const a = c.agg(c.p);
+    // Somas de float acumulam cauda (1040.3000000000002): arredonda na saída.
+    const kwh = (v, d = 1) => v == null ? null : `${(+v).toFixed(d)} kWh`;
+    add('Potência agora', (a.pv_power ?? a.ac_power_w) != null ? `${Math.round(a.pv_power ?? a.ac_power_w)} W` : null);
+    add('Gerado hoje',  kwh(a.energy_today ?? a.gen_today_kwh),
+        c.p.gen_today_src ? `fonte: ${c.p.gen_today_src}` : null);
+    add('Gerado no mês', kwh(a.gen_month_kwh));
+    add('Acumulado', kwh(a.gen_total_kwh, 0));
+    const exp = c.p.expected;
+    add('Esperado nesta hora', exp?.median_power != null ? `${exp.median_power} W` : null,
+        exp ? `mediana de ${exp.samples} dias` : 'histórico insuficiente');
+    if (c.p.invs_total != null)
+      add('Inversores reportando', `${c.p.invs_reporting} de ${c.p.invs_total}`);
+    for (const i of (c.p.invs || [])) {
+      add(i.label, [
+        // SAJ chama de `power`, Solis de `ac_power_w`.
+        (i.ac_power_w ?? i.power) != null ? `${i.ac_power_w ?? i.power} W` : 'sem leitura',
+        i[c.tk] != null ? `${(+i[c.tk]).toFixed(1)} °C` : null,
+        i.gen_today_kwh != null ? `${(+i.gen_today_kwh).toFixed(1)} kWh` : null,
+      ].filter(Boolean).join(' · '), [i.collector, i.status].filter(Boolean).join(' / ') || null);
+    }
+    add('Leitura de', idade(c.p.ts || _solarState?.ts));
+    return res.json({ title: c.t, rows: R });
+  }
+
+  if (tipo === 'bat') {
+    const b = _bluettiState?.[alvo];
+    if (!b) return res.status(404).json({ error: 'estação desconhecida' });
+    add('Bateria', b.battery_pct != null ? `${b.battery_pct} %` : null);
+    add('Na bateria?', b.offgrid == null ? 'ainda medindo' : (b.offgrid ? 'SIM — descarregando' : 'não'),
+        'grid=0 só conta com bateria caindo ou <100%');
+    add('Entrada da rede', b.grid_in_w != null ? `${b.grid_in_w} W` : null);
+    add('Entrada solar', b.pv_in_w != null ? `${b.pv_in_w} W` : null);
+    add('Saída AC', `${b.ac_out_w ?? '—'} W`, b.ac_on === false ? 'DESLIGADA' : null);
+    add('Saída DC', `${b.dc_out_w ?? '—'} W`, b.dc_on === false ? 'desligada' : null);
+    add('Autonomia', b.battery_time_min ? `${b.battery_time_min} min` : null,
+        b.offgrid ? null : 'só significa algo descarregando');
+    add('Modo', b.working_mode);
+    add('Comunicação', b.reachable ? 'ok' : 'sem comunicação');
+    return res.json({ title: `Bluetti ${b.label || alvo}`, rows: R });
+  }
+
+  if (tipo === 'car') {
+    if (alvo === 'songpro') {
+      const sp = songProStatus();
+      add('Bateria', sp.soc != null ? `${sp.soc} %` : null);
+      add('Carregando', sp.charging ? 'sim' : 'não');
+      if (sp.charging) {
+        add('Potência', `${sp.powerKw} kW`);
+        add('Nesta sessão', `${sp.sessionKwh} kWh`);
+        add('Falta', `${sp.remainingMin} min`);
+      }
+      if (sp.finished) add('Última recarga', `${sp.finishedKwh} kWh → ${sp.finishedSoc}%`, idade(sp.finishedAtMs));
+      add('Leitura de', idade(sp.updatedAtMs));
+      return res.json({ title: 'BYD Song Pro (Grasi)', rows: R });
+    }
+    add('Bateria', state.soc_pct != null ? `${state.soc_pct} %` : null);
+    add('Carregando', state.charging_state === 'Carregando' ? 'sim' : (state.charging_state || 'não'));
+    add('Potência de recarga', state.charge_power_kw != null ? `${state.charge_power_kw} kW` : null);
+    add('Acordado', _carIsAwake() ? 'sim' : 'não');
+    add('Última publicação do APK', idade(state.last_apk_ms));
+    add('Última leitura da GWM', idade(state.last_gwm_ms));
+    return res.json({ title: 'Haval H6 GT', rows: R });
+  }
+
+  if (tipo === 'host') {
+    const m = _macStats || {};
+    const gb = (v) => v == null ? null : `${Math.round(v)} GB`;
+    add('No ar há', m.uptime_sec ? `${Math.floor(m.uptime_sec / 86400)}d ${Math.round(m.uptime_sec % 86400 / 3600)}h` : null);
+    if (m.disk) add('Disco interno', `${gb(m.disk.total_gb - m.disk.avail_gb)} de ${gb(m.disk.total_gb)}`,
+                    `${gb(m.disk.avail_gb)} livres`);
+    if (m.disk_ext) add('SSD externo', m.disk_ext.mounted
+      ? `${gb(m.disk_ext.total_gb - m.disk_ext.avail_gb)} de ${gb(m.disk_ext.total_gb)}` : 'NÃO MONTADO',
+      m.disk_ext.mounted ? `${gb(m.disk_ext.avail_gb)} livres · ${m.disk_ext.path}` : null);
+    if (m.mem) add('Memória', `${(m.mem.total_gb - m.mem.avail_gb).toFixed(1)} de ${m.mem.total_gb} GB`,
+                   `${m.mem.avail_gb} GB livres`);
+    add('Bridge (RSS)', process.memoryUsage ? `${Math.round(process.memoryUsage().rss / 1048576)} MB` : null);
+    if (_netBw) add('Rede', `↓${_netBw.rx_kbps} ↑${_netBw.tx_kbps} kbps`,
+                    `${_netBw.link_type} ${_netBw.link_mbps} Mbps`);
+    add('IP público', _netStatus?.public_ip, _netStatus?.match === false ? 'DNS divergente' : null);
+    add('Certificado', _certStatus?.days_left != null ? `${_certStatus.days_left} dias` : null);
+    // Quem está comendo memória: é a pergunta seguinte quando a barra sobe.
+    for (const t of (m.top_mem || []).slice(0, 4)) add(t.name, `${t.mb} MB`);
+    return res.json({ title: 'Mac Mini', rows: R });
+  }
+
+  if (tipo === 'svc') {
+    const nome = alvo;
+    if (/^Delega/.test(nome)) {
+      for (const d of _delega) add(d.label, d.up ? 'no ar' : 'fora',
+        d.open_tasks != null ? `${d.open_tasks} abertas` : d.url);
+    } else if (/^Assist/.test(nome)) {
+      for (const l of _lari) add(l.user || '?',
+        l.up ? (l.connected === false ? 'no ar, WhatsApp DESCONECTADO' : 'no ar e conectada') : 'fora',
+        l.url || null);
+    } else if (/^Gastos/.test(nome)) {
+      for (const x of _pixbot) add(x.label, x.up ? 'no ar' : 'fora', x.url || null);
+    } else if (/Driver Cred/.test(nome)) {
+      add('Estado', _credito?.up ? 'no ar' : 'fora', _credito?.url || null);
+    } else if (/Home Assistant/.test(nome)) {
+      add('Estado', _haStatus.up ? 'no ar' : 'fora', _haStatus.error || null);
+      add('Latência', _haStatus.latency_ms != null ? `${_haStatus.latency_ms} ms` : null);
+      add('Verificado', idade(_haStatus.checked_at));
+    } else if (/MQTT/.test(nome)) {
+      add('Cliente do bridge', mqttClient?.connected ? 'conectado' : 'desconectado');
+      for (const [porta, ok] of [[1883, _mqttBrokerStatus.port1883], [1884, _mqttBrokerStatus.port1884], [8883, _mqttBrokerStatus.port8883]])
+        add(`Porta ${porta}`, ok == null ? null : (ok ? 'escutando' : 'fechada'));
+    } else if (/Outros/.test(nome)) {
+      const ja = new Set(['bridge','assinador','gwm-bridge','ellevar-clockin','ecotrip-gateway',
+        'credito','delega','delega-deivid','pixbot-renan','pixbot-rafael','pixbot-teste']);
+      for (const p of _processes.filter(p => !ja.has(p.name)))
+        add(p.name, p.status, `${p.mem_mb} MB · ${p.restarts} restarts`);
+    } else {
+      const p = _processes.find(x => new RegExp(nome.split(' ')[0], 'i').test(x.name));
+      if (p) { add('Processo', p.name); add('Estado', p.status);
+               add('Memória', `${p.mem_mb} MB`); add('Restarts', p.restarts);
+               add('No ar há', Math.round(p.uptime_sec / 3600) + ' h'); }
+      else add('Estado', 'sem detalhe adicional');
+    }
+    return res.json({ title: nome, rows: R });
+  }
+
+  res.status(400).json({ error: 'chave desconhecida' });
+});
+
+// ── GET /api/wall — o que a tela de parede precisa ───────────────────────────
+// Separado do /api/monitor-glance (191B, orçado pro widget do iOS) e do
+// /api/health (117KB, pra investigação). Aqui é o meio: o suficiente pra encher
+// uma tela vista de longe, sem carregar o payload inteiro a cada 2s.
+//
+// `pulse_ms` existe pra animação ser HONESTA: a tela só pulsa quando um desses
+// timestamps muda, ou seja, um pulso = uma publicação real observada. Animação em
+// loop numa tela de monitoramento é mentira bonita — dá sensação de vida com o
+// sistema morto, que é exatamente o oposto do que a página serve.
+app.get('/api/wall', requireAuth, (_req, res) => {
+  const now = Date.now();
+  const firing = [];
+  for (const [id, v] of _alertState) {
+    if (!v || !v.firing) continue;
+    const ao = AGENT_OWNED.has(id);
+    firing.push({ id, title: v.title || id,
+                  sev: (!ao && (v.priority === 'urgent' || v.priority === 'high')) ? 'crit' : 'warn',
+                  since_ms: v.firedAt || null });
+  }
+  firing.sort((a, b) => (a.sev === b.sev ? (a.since_ms || 0) - (b.since_ms || 0) : a.sev === 'crit' ? -1 : 1));
+  const crit = firing.filter(f => f.sev === 'crit').length;
+
+  // Limiar de temperatura é POR FABRICANTE: SAJ avisa em 65 e é crítico em 80;
+  // Solis avisa em 80 e é crítico em 85 (S6-GR1P6K tem limite 85). A parede
+  // usava 65 pra todas e pintava o Ivonei a 67°C de âmbar sendo normal — é a
+  // página inventando severidade que o bridge já sabe.
+  const tempState = (t, marca) => {
+    if (t == null) return null;
+    const [w, c] = marca === 'saj' ? [65, 80] : [80, 85];
+    return t > c ? 'crit' : t > w ? 'warn' : 'ok';
+  };
+  // Mediana do ACUMULADO desta hora nos dias anteriores, por usina. É contra
+  // isso que "% do normal" tem que comparar: potência instantânea balança com
+  // qualquer nuvem passageira, e uma nuvem em cima do tick não diz nada sobre
+  // como foi a manhã. `snaps[h].kwh` é o acumulado do dia naquela hora.
+  const paceDe = (chave) => {
+    const h = new Date().getHours(), hoje = _todayDateStr();
+    const vals = (_solarHistory[chave] || [])
+      .filter(d => d.date !== hoje)
+      .map(d => d.snaps && d.snaps[h] && d.snaps[h].kwh)
+      .filter(v => v > 0).sort((a, b) => a - b);
+    return vals.length < 3 ? null : +vals[Math.floor(vals.length / 2)].toFixed(1);
+  };
+  const plant = (p, label, tempKey, marca, chave) => {
+    const t = _plantTotals(p);
+    if (!t) return null;
+    const temps = (p.invs || []).map(i => i[tempKey]).filter(v => v != null);
+    // Mediana desta HORA nos últimos 14 dias (null com <3 amostras). É o que
+    // transforma "17 kW" em "17 kW é bom?" — a pergunta que a parede responde.
+    const exp = p.expected?.median_power;
+    // Soma incompleta não se compara com a mediana da planta inteira: seria
+    // dizer "58% do normal" de uma planta que está gerando normal.
+    const rep = p.invs_reporting, tot = p.invs_total;
+    const partial = (rep != null && tot != null && rep > 0 && rep < tot) ? [rep, tot] : null;
+    const pace = partial ? null : paceDe(chave);
+    return { label, key: chave,
+             kw:   t.kw  == null ? null : +t.kw.toFixed(2),
+             kwh:  t.kwh == null ? null : +t.kwh.toFixed(1),
+             exp_kw: (exp && !partial) ? +(exp / 1000).toFixed(2) : null,
+             pace_kwh: pace,
+             partial,
+             temp: temps.length ? Math.max(...temps) : null,
+             temp_state: tempState(temps.length ? Math.max(...temps) : null, marca) };
+  };
+
+  // Arrays fora do literal: os vereditos de cada nó do desenho derivam deles.
+  const plantsArr = [plant(_solarState, 'Catalão', 'temperature', 'saj', 'catalao'),
+                     plant(_solisState?.ivonei, 'Ivonei', 'temperature_c', 'solis', 'ivonei'),
+                     plant(_solisState?.palmeiras, 'Palmeiras', 'temperature_c', 'solis', 'palmeiras')].filter(Boolean);
+  // SOC de carro parado não deriva, então leitura velha continua VERDADEIRA —
+  // diferente de potência solar, onde o valor antigo já não descreve o agora.
+  // Por isso não vira "—": vai o valor com a idade, e quem desenha diz de quando.
+  const carsArr = [
+    { key: 'haval', label: 'Haval',
+      soc: state.soc_pct != null ? Math.round(+state.soc_pct) : null,
+      charging: state.charging_state === 'Carregando',
+      power_kw: +state.charge_power_kw || 0,
+      awake: _carIsAwake(),
+      ts: Math.max(state.last_apk_ms || 0, state.last_gwm_ms || 0) || null },
+    (() => {
+      const sp = songProStatus();          // BYD Song Pro (Grasi)
+      if (!sp.hasData) return null;
+      return { key: 'songpro', label: 'Song Pro',
+               soc: sp.soc != null ? Math.round(sp.soc) : null,
+               charging: !!sp.charging, power_kw: +sp.powerKw || 0,
+               awake: null, ts: sp.updatedAtMs || null };
+    })(),
+  ].filter(Boolean);
+  // Percentual é grandeza LIMITADA (0-100) e vira arco. Autonomia só significa
+  // algo descarregando — com a rede presente é número bonito e vazio.
+  const batArr = ['casa', 'sitio'].map(k => {
+    const b = _bluettiState?.[k];
+    if (!b) return null;
+    return { key: k, label: b.label || k, pct: b.battery_pct ?? null,
+             offgrid: b.offgrid ?? null, grid_w: b.grid_in_w ?? null,
+             autonomy_min: b.battery_time_min ?? null,
+             reachable: !!b.reachable };
+  }).filter(Boolean);
+
+  const svc = [];
+  const push = (nome, ok, det) => svc.push({ nome, ok, det });
+  // Família com várias instâncias vira UMA linha enquanto todas concordam, e se
+  // separa sozinha assim que uma divergir — nada de informação se perde, e a
+  // lista para de gastar 3 linhas pra dizer "os três estão bem".
+  const familia = (nome, itens, okDe, detDe) => {
+    const arr = itens.filter(Boolean);
+    if (!arr.length) return;
+    const oks = arr.map(okDe);
+    if (arr.length > 1 && oks.every(o => o === oks[0])) {
+      const dets = arr.map(detDe).filter(v => v != null);
+      const soma = dets.length === arr.length
+        ? dets.reduce((a, v) => a + (+v || 0), 0) : null;
+      return push(`${nome} ×${arr.length}`, oks[0], soma != null ? `${soma}` : null);
+    }
+    arr.forEach((x, i) => push(`${nome} ${x.__lbl || i + 1}`, oks[i], detDe(x)));
+  };
+
+  push('Home Assistant', _haStatus.up === true, null);
+  push('MQTT', !!(mqttClient && mqttClient.connected), null);
+  // O status do túnel vive no cache do /api/cloudflare-status; sem leitura ainda,
+  // não afirmo que está ruim — ausência de dado não é falha.
+  const cf = _cfCache && _cfCache.data;
+  push('Cloudflare', cf ? (cf.tunnel_healthy !== false && cf.healthy !== false) : true, null);
+  push('Gateway', _gwStatus.up !== false, null);
+
+  familia('Delega', _delega.map(d => ({ ...d, __lbl: d.label })),
+          d => !!d.up, d => d.open_tasks ?? null);
+  familia('Assist.', _lari.map(l => ({ ...l, __lbl: l.user || '?' })),
+          l => !!(l.up && l.connected !== false), () => null);
+  // "teste" é instância de desenvolvimento — não é serviço de ninguém.
+  familia('Gastos', _pixbot.filter(x => !/teste/i.test(x.label || ''))
+                           .map(x => ({ ...x, __lbl: x.label })),
+          x => !!x.up, () => null);
+  if (_credito) push('Driver Cred', !!_credito.up, null);
+
+  // Processos que existem no pm2 e não apareciam em lugar nenhum da parede.
+  const proc = (nome, rotulo) => {
+    const p = _processes.find(x => x.name === nome);
+    if (p) push(rotulo, p.status === 'online', null);
+  };
+  proc('assinador', 'Assinador');
+  proc('gwm-bridge', 'GWM');
+  if (_appHealth.clockin?.up != null)
+    push('Clockin', _appHealth.clockin.up === true && _appHealth.clockin.healthy !== false, null);
+  // Resto do pm2 num rolo só: o que interessa é "algum caiu?", não o nome de
+  // cada um. Os já listados acima saem da conta pra não contar duas vezes.
+  const jaListados = new Set(['bridge', 'assinador', 'gwm-bridge', 'ellevar-clockin',
+    'ecotrip-gateway', 'credito', 'delega', 'delega-deivid',
+    'pixbot-renan', 'pixbot-rafael', 'pixbot-teste']);
+  const resto = _processes.filter(p => !jaListados.has(p.name));
+  if (resto.length) {
+    const on = resto.filter(p => p.status === 'online').length;
+    push('Outros (pm2)', on === resto.length, `${on}/${resto.length}`);
+  }
+
+  // ── nós do desenho: VEREDITO, não estado ────────────────────────────────────
+  // "CARRO: dormindo" era tecnicamente certo (_carIsAwake significa EM USO —
+  // ignição/marcha; recarga de propósito não conta) e mesmo assim enganava: o
+  // Haval estava carregando a 6,2 kW e publicando em tempo real, e quem lia de
+  // longe entendia "sem comunicação". Cada nó passa a responder "tem problema
+  // aqui?" — e o que cada coisa está fazendo vai no detalhe, onde cabe.
+  const idadeMin = (ts) => ts ? Math.round((now - ts) / 60000) : null;
+  const quando = (ts) => { const m = idadeMin(ts);
+    return m == null ? 'sem registro' : m < 1 ? 'agora' : `há ${m} min`; };
+  const nodeDe = (re, det) => {
+    const fs = firing.filter(f => re.test(f.id));
+    const pior = fs.find(f => f.sev === 'crit') || fs[0];
+    return { txt: pior ? pior.title : 'ok',
+             sev: pior ? pior.sev : 'ok', n: fs.length, det };
+  };
+  // O mapa tem que ser EXAUSTIVO: com 5 nós, 22 alertas (starlink, disk, ssd,
+  // mem, rss, restarts, backup, icloud) não caíam em nenhum — um problema neles
+  // contava no veredito do hub e não acendia nada no desenho, que é justamente
+  // onde se olha primeiro. SÍTIO saiu de dentro de CASA (misturava as duas
+  // pontas) e MAC entrou pro host, que é onde tudo roda.
+  const bat1 = (k) => batArr.find(b => b.key === k);
+  const linhaBat = (b) => !b ? null : `${b.label} · ${b.pct == null ? '—' : b.pct + '%'} · ` +
+    (!b.reachable ? 'sem comunicação' : b.offgrid === true ? 'na bateria'
+     : b.grid_w > 0 ? `${b.grid_w} W da rede` : 'em espera');
+  const pctDe = (u, t) => (u && t) ? Math.round(u / t * 100) + '%' : '—';
+  const m = _macStats || {};
+  const nodes = {
+    carro: nodeDe(/^(car|apk)_/, carsArr.map(c =>
+      `${c.label} · ${c.soc == null ? '—' : c.soc + '%'} · ` +
+      (c.charging ? `carregando ${c.power_kw.toFixed(1).replace(".", ",")} kW`
+                  : c.awake === true ? 'em uso' : 'parado') +
+      ` · leitura ${quando(c.ts)}`)),
+    solar: nodeDe(/^(solar|solis|fan)_/, plantsArr.map(p =>
+      `${p.label} · ${p.kw == null ? 'sem leitura' : p.kw + ' kW'}` +
+      (p.kwh != null ? ` · ${p.kwh} kWh hoje` : '') +
+      (p.partial ? ` · parcial (${p.partial[0]}/${p.partial[1]} inv)` : ''))),
+    casa: nodeDe(/^(bluetti_casa|ha_down)/, [
+      linhaBat(bat1('casa')),
+      `Home Assistant · ${_haStatus.up ? 'no ar' : 'fora'}`,
+    ].filter(Boolean)),
+    sitio: nodeDe(/^(starlink|bluetti_sitio)/, (() => {
+      const st = starlink.status(), sn = starlink.snapshot();
+      return [
+        linhaBat(bat1('sitio')),
+        !st.configured ? 'Starlink · não configurado'
+          : `Starlink · ${sn.ok ? 'respondendo' : 'sem resposta'}` +
+            (st.stale_s != null ? ` · leitura há ${Math.round(st.stale_s / 60)} min` : ''),
+      ].filter(Boolean);
+    })()),
+    mac: nodeDe(/^(disk|ssd|mem_|rss|restarts|backup|icloud)/, [
+      m.disk ? `Disco · ${pctDe(m.disk.total_gb - m.disk.avail_gb, m.disk.total_gb)} · ${Math.round(m.disk.avail_gb)} GB livres` : null,
+      m.disk_ext ? `SSD 1TB · ${m.disk_ext.mounted ? pctDe(m.disk_ext.total_gb - m.disk_ext.avail_gb, m.disk_ext.total_gb) : 'NÃO MONTADO'}` : null,
+      m.mem ? `Memória · ${pctDe(m.mem.total_gb - m.mem.avail_gb, m.mem.total_gb)}` : null,
+      `Backups · ${(_backups || []).filter(b => b.ok !== false).length}/${(_backups || []).length} em dia`,
+      m.uptime_sec ? `No ar há ${Math.floor(m.uptime_sec / 86400)}d` : null,
+    ].filter(Boolean)),
+    apps: nodeDe(/^(delega|lari|pixbot|credito|apns)/,
+      // Ancorado: /Assist/ solto casava com 'Home Assistant'.
+      svc.filter(x => /^(Delega|Assist\.|Gastos|Driver Cred|Clockin)/.test(x.nome))
+         .map(x => `${x.nome} · ${x.ok ? 'no ar' : 'FORA'}${x.det ? ' · ' + x.det : ''}`)),
+    rede: nodeDe(/^(mqtt|cf|dns|funnel|gw_|ts_|local_|ext_monitor|broker|cert)/,
+      svc.filter(x => /Home Assistant|MQTT|Cloudflare|Gateway/.test(x.nome))
+         .map(x => `${x.nome} · ${x.ok ? 'ok' : 'FORA'}`)),
+  };
+
+  res.json({
+    ts: now,
+    state: crit ? 'crit' : firing.length ? 'warn' : 'ok',
+    crit, warn: firing.length - crit,
+    alerts: firing.slice(0, 4),
+    plants: plantsArr,
+    car: { awake: _carIsAwake(),
+           soc: state.soc_pct != null ? +state.soc_pct : null,
+           charging: state.charging_state === 'Carregando',
+           power_kw: state.charge_power_kw != null ? +state.charge_power_kw : null,
+           apk_ms: state.last_apk_live_ms || state.last_apk_ms || null,
+           gwm_ms: state.last_gwm_ms || null },
+    cars: carsArr,
+    bat: batArr,
+    nodes,
+    // Curva de hoje por usina: 1 amostra por hora, que é o que _solarHistory já
+    // guarda. Não é gráfico de precisão — é pra enxergar a forma do dia de longe.
+    // Curva de hoje: POTÊNCIA (linha) e ENERGIA DA HORA (barras) juntas.
+    //
+    // Só a potência não bastava: `snaps[h]` é UMA amostra, tirada no começo da
+    // hora. Uma nuvem às 11:00 em ponto derruba a barra da hora inteira e parece
+    // queda de geração. E só a energia também engana: a hora corrente está pela
+    // metade e sempre aparece menor que a anterior — foi o que se viu às 11:15.
+    //
+    // Energia DA hora h = acumulado no início de h+1 menos o do início de h. Na
+    // hora corrente não existe "próxima", então usa o total de agora e marca
+    // `parcial` — quem desenha tem que dizer que ela ainda não fechou.
+    spark: (() => {
+      const hoje = _todayDateStr(), porHora = {};
+      for (const k of ['catalao', 'ivonei', 'palmeiras']) {
+        const dia = (_solarHistory[k] || []).find(d => d.date === hoje);
+        for (const [hs, sn] of Object.entries(dia?.snaps || {})) {
+          const h = +hs;
+          if (!porHora[h]) porHora[h] = { kw: 0, cum: 0 };
+          porHora[h].kw  += (sn.p || 0) / 1000;
+          porHora[h].cum += (sn.kwh || 0);
+        }
+      }
+      const totalAgora = plantsArr.reduce((a, p) => a + (p.kwh || 0), 0);
+      const kwAgora    = plantsArr.reduce((a, p) => a + (p.kw  || 0), 0);
+      const hs = Object.keys(porHora).map(Number).sort((a, b) => a - b);
+      return hs.map((h, i) => {
+        const ultima = i === hs.length - 1;
+        const prox = ultima ? totalAgora : porHora[hs[i + 1]].cum;
+        return { h,
+                 // Na hora corrente a potência do início já é velha: vale a de agora.
+                 kw: +(ultima ? kwAgora : porHora[h].kw).toFixed(2),
+                 kwh: Math.max(0, +(prox - porHora[h].cum).toFixed(2)),
+                 parcial: ultima };
+      });
+    })(),
+    // Últimos 14 dias, somando as 3 usinas por data. O "121% do normal" de hoje
+    // só quer dizer algo contra a série — e um dia ruim isolado vira nuvem, três
+    // seguidos viram problema. Dia sem registro de alguma usina soma o que há.
+    daily: (() => {
+      const acc = {};
+      for (const k of ['catalao', 'ivonei', 'palmeiras'])
+        for (const dia of (_solarHistory[k] || []).slice(-31))
+          acc[dia.date] = (acc[dia.date] || 0) + (dia.kwh || 0);
+      return Object.keys(acc).sort().slice(-30)
+               .map(date => ({ date, kwh: +acc[date].toFixed(1) }));
+    })(),
+    // O Mac Mini é onde TUDO roda e não aparecia em lugar nenhum da parede. Disco
+    // interno em 89% não dispara alerta ainda, mas é exatamente o tipo de coisa
+    // que só se nota tarde — um painel ambiente existe pra isso.
+    host: {
+      uptime_sec: _macStats?.uptime_sec ?? null,
+      mem:      _macStats?.mem      ? { usado: +(_macStats.mem.total_gb - _macStats.mem.avail_gb).toFixed(1),
+                                        total: _macStats.mem.total_gb } : null,
+      disco:    _macStats?.disk     ? { usado: +(_macStats.disk.total_gb - _macStats.disk.avail_gb).toFixed(0),
+                                        total: _macStats.disk.total_gb } : null,
+      ssd:      _macStats?.disk_ext?.mounted
+                  ? { usado: +(_macStats.disk_ext.total_gb - _macStats.disk_ext.avail_gb).toFixed(0),
+                      total: _macStats.disk_ext.total_gb } : null,
+      rx_kbps:  _netBw?.rx_kbps ?? null,
+      tx_kbps:  _netBw?.tx_kbps ?? null,
+      link:     _netBw?.link_type ?? null,
+      cert_dias: _certStatus?.days_left ?? null,
+    },
+    // Backup é a falha mais silenciosa que existe: some e ninguém percebe até
+    // precisar. Cada um tem o próprio prazo (`max_age_h`), então a régua é essa,
+    // não um número fixo.
+    backups: (_backups || []).map(b => ({
+      nome: b.name, ok: b.ok !== false,
+      horas: b.age_hours != null ? +b.age_hours.toFixed(1) : null,
+      limite: b.max_age_h ?? null,
+    })),
+    // Ritmo do dia. Comparar o dia PELA METADE com a mediana do dia INTEIRO dá
+    // ~40% às 11h e assusta à toa — o dia não acabou. A comparação honesta é
+    // contra a mediana ACUMULADA NESTA MESMA HORA nos dias anteriores, que é
+    // exatamente o que `snaps[h].kwh` guarda. null com menos de 3 amostras.
+    pace: (() => {
+      const h = new Date().getHours(), hoje = _todayDateStr(), porDia = {};
+      for (const k of ['catalao', 'ivonei', 'palmeiras'])
+        for (const d of (_solarHistory[k] || []).slice(-31)) {
+          const sn = d.snaps && d.snaps[h];
+          if (sn && sn.kwh > 0) porDia[d.date] = (porDia[d.date] || 0) + sn.kwh;
+        }
+      const passados = Object.entries(porDia).filter(([dt]) => dt !== hoje)
+                         .map(([, v]) => v).sort((a, b) => a - b);
+      if (passados.length < 3) return null;
+      return { hour: h, samples: passados.length,
+               median_kwh: +passados[Math.floor(passados.length / 2)].toFixed(1) };
+    })(),
+    // O que deu trabalho na SEMANA. Um painel de estado atual responde "está
+    // tudo bem agora?"; isto responde "o que anda quebrando?", que é outra
+    // pergunta e não aparece em lugar nenhum hoje. Recuperações e restarts ficam
+    // de fora: o que interessa é quantas vezes o problema ACONTECEU.
+    top7d: (() => {
+      const cut = now - 7 * 86400_000, c = {}, titulo = {};
+      for (const e of _healthEvents) {
+        if (e.ts < cut) continue;
+        if (e.type === 'restart' || /_recovery$/.test(e.type)) continue;
+        c[e.type] = (c[e.type] || 0) + 1;
+        // O evento é gravado como `title + ': ' + body`, então o texto legível
+        // (com emoji) está no próprio msg. `_alertState` só tem título enquanto
+        // o alerta existe, e estes aqui já recuperaram — por isso vinha a chave
+        // crua ("solar_plant_offline") em vez do nome.
+        // Tira o parêntese de data do fim ("... (04/09/2026, 02:31)"): ele não
+        // cabe na coluna e era cortado no meio, virando lixo visual.
+        // Enxuga pro que cabe numa linha estreita: parênteses (cidade, data,
+        // "(ainda)") e o prefixo do fabricante não dizem O QUE houve, que é a
+        // única coisa que essa lista precisa responder.
+        const t = String(e.msg || '').split(':')[0]
+                    .replace(/\s*\([^)]*\)?/g, '')
+                    .replace(/^(☀️|🌱|🏠)?\s*(Solar|SAJ)\s+/, '$1 ')
+                    .replace(/\s+/g, ' ').trim();
+        if (t && t.length <= 46) titulo[e.type] = t;
+      }
+      const arr = Object.entries(c).sort((a, b) => b[1] - a[1]).slice(0, 6);
+      const max = arr.length ? arr[0][1] : 0;
+      return arr.map(([type, n]) => ({
+        label: titulo[type] || type,
+        n, pct: max ? Math.round(n / max * 100) : 0,
+      }));
+    })(),
+    // O que aconteceu enquanto ninguém olhava. Um alerta que subiu e desceu não
+    // aparece em `alerts` (já não está firing) mas é exatamente o que responde
+    // "estava tudo bem de manhã?".
+    events: (() => {
+      const out = [];
+      // Repetição consecutiva do mesmo tipo vira UMA linha com contagem: sete
+      // "Bridge iniciado" seguidos enchiam o card e diziam uma coisa só.
+      for (const e of _healthEvents.slice().reverse()) {
+        const last = out[out.length - 1];
+        if (last && last.type === e.type) { last.n++; continue; }
+        if (out.length >= 7) break;
+        out.push({ ts: e.ts, type: e.type, n: 1,
+          kind: e.type === 'restart' ? 'restart'
+              : /_recovery$/.test(e.type) ? 'recovery' : 'alert',
+          msg: String(e.msg || '').split('\n')[0].slice(0, 90) });
+      }
+      return out;
+    })(),
+    // Só timestamps: quem decide se houve pulso é o cliente, comparando com o que
+    // viu no ciclo anterior.
+    pulse_ms: [state.last_apk_live_ms, state.last_gwm_ms].filter(Boolean),
+    services: svc,
+    bridge: { uptime_sec: Math.round(process.uptime()), checks: svc.length },
   });
 });
 
@@ -7840,6 +8445,32 @@ async function _pollAppHealth() {
 _pollAppHealth();
 setInterval(_pollAppHealth, 5_000);
 
+function _evalLariAlerts() {
+  // Diferente do pixbot: lá as 3 instâncias dividem UMA conexão e o alerta é do
+  // grupo. Aqui cada assistente tem o SEU número (deivid 556292499830, rafael
+  // 5562910006818), então o alerta é POR instância — uma caída é problema mesmo
+  // com a outra de pé. Copiar a lógica do pixbot esconderia exatamente este caso.
+  for (const l of _lari) {
+    const nome = l.user || new URL(l.url).port;
+    const kd = `lari_${nome}_down`;
+    _alert(kd, _sustained(kd, true, !l.up, LARI_SUSTAIN_MS),
+      `🤖 Assistente ${nome} fora do ar`,
+      `Sem resposta em ${l.url} há ${_sustainedFor(kd)}min` + (l.error ? ` (${l.error})` : '') + '.',
+      'high', ['bubble.left.and.bubble.right'], { repeatEvery: 6 * 3600_000 });
+    // O que importa: processo vivo e WhatsApp caído. O app responde, o dono acha
+    // que está tudo certo, e mensagem nenhuma entra ou sai. Só afirmo com o HTTP
+    // no ar — se está fora, o alerta de cima já cobre e este não tem base.
+    const kw = `lari_${nome}_wa_off`;
+    _alert(kw, _sustained(kw, !!l.up, l.up && l.connected === false, LARI_SUSTAIN_MS),
+      `🤖 Assistente ${nome} sem WhatsApp`,
+      `O processo responde mas a sessão do WhatsApp está desconectada há `
+      + `${_sustainedFor(kw)}min` + (l.me ? ` (número ${l.me})` : '') + '. '
+      + (l.qr_pending ? 'Há QR pendente: precisa parear de novo pelo painel.'
+                      : 'Sem QR pendente — costuma religar sozinho; se insistir, refazer o pareamento.'),
+      'high', ['exclamationmark.bubble'], { repeatEvery: 12 * 3600_000 });
+  }
+}
+
 // ── Delega (app de tarefas): 2 instâncias, uma por pessoa ────────────────────
 // /api/health devolve { ok, seq, apns, open_tasks }. `seq` NÃO serve de sinal de
 // vida: só anda quando alguém escreve, então dia quieto o deixa parado — quem
@@ -8031,6 +8662,7 @@ async function _pollLari() {
     });
   }
   _lari = arr;
+  _evalLariAlerts();
 }
 _pollLari();
 setInterval(_pollLari, 5_000);
@@ -23928,7 +24560,52 @@ function applyMqttMessage(key, value, isRetained = false) {
               + `(${perdeu.energy_kwh}kWh ${perdeu.soc_start}→${perdeu.soc_end}%, corrob=${_corrob(perdeu)}) `
               + `— mantida ts=${mantidas[i].timestamp_ms} (${mantidas[i].energy_kwh}kWh, corrob=${_corrob(mantidas[i])})`);
           }
-          chargesArr = mantidas;
+          // ── Registro PARCIAL da mesma sessão ────────────────────────────────
+          // O filtro acima exige o MESMO par de SOC (fim com folga de 2). Não pega o
+          // caso em que a sessão é fechada cedo e o registro completo chega depois:
+          // 14/09 saíram 39→78% (12,04 kWh) e 39→90% (17,34 kWh) do mesmo plug-in.
+          //
+          // Aqui as janelas também não ajudam — os caminhos discordam do que é
+          // `timestamp_ms`: um grava o INÍCIO da sessão (08:31) e o outro o momento
+          // do REGISTRO (11:28). Por isso a adjacência de 5 min falhou com 2h57 de
+          // diferença. A identidade que resta é a do dono: mesmo SOC inicial e mesmo
+          // local, com o parcial cabendo dentro do tempo do completo.
+          //
+          // O parcial é sempre um PREFIXO: menos SOC final, menos energia, menos
+          // tempo. Exigir as três coisas evita casar duas cargas de verdade que por
+          // acaso comecem no mesmo SOC (sair, descarregar e voltar no mesmo ponto —
+          // aí a distância no tempo estoura o tamanho da sessão).
+          const _mesmoLocal = (a, b) => {
+            const na = (a.location_name || '').trim(), nb = (b.location_name || '').trim();
+            if (na && nb) return na === nb;
+            if (a.location_lat && b.location_lat)
+              return haversineM(a.location_lat, a.location_lng, b.location_lat, b.location_lng) < 200;
+            return false;   // sem local nos dois lados, não afirmo que é o mesmo
+          };
+          const _parcialDe = (parc, comp) => {
+            if (Math.abs((+parc.soc_start || 0) - (+comp.soc_start || 0)) > 1) return false;
+            if ((+parc.soc_end || 0) >= (+comp.soc_end || 0) - 2) return false;   // o outro filtro já cobre
+            if (!((+parc.energy_kwh || 0)   <  (+comp.energy_kwh || 0)))  return false;
+            if (!((+parc.duration_sec || 0) <= (+comp.duration_sec || 0))) return false;
+            if (!_mesmoLocal(parc, comp)) return false;
+            const dist = Math.abs((+parc.timestamp_ms || 0) - (+comp.timestamp_ms || 0));
+            return dist <= (+comp.duration_sec || 0) * 1000 + 30 * 60_000;
+          };
+          const semParciais = [];
+          for (const c of [...mantidas].sort((a, b) => (+b.soc_end || 0) - (+a.soc_end || 0))) {
+            const comp = semParciais.find(m => _parcialDe(c, m));
+            if (!comp) { semParciais.push(c); continue; }
+            // O completo vence por ter visto a sessão inteira, mas o parcial pode
+            // carregar o que só ele tem (custo lançado, medidor, temperatura).
+            for (const k of ['charger_kwh', 'cost_override', 'avg_temp_c', 'location_name']) {
+              if (comp[k] == null && c[k] != null) comp[k] = c[k];
+            }
+            markDeleted('charges', c.timestamp_ms);
+            console.warn(`⚠ [charge] registro parcial descartado ts=${c.timestamp_ms} `
+              + `(${c.energy_kwh}kWh ${c.soc_start}→${c.soc_end}%) — mesma sessão de `
+              + `ts=${comp.timestamp_ms} (${comp.energy_kwh}kWh ${comp.soc_start}→${comp.soc_end}%)`);
+          }
+          chargesArr = semParciais.sort((a, b) => (+b.timestamp_ms || 0) - (+a.timestamp_ms || 0));
           // Fragmento novo pode fechar contiguidade com o anterior (APK perdeu o
           // fio no meio da carga). Roda antes do broadcast pra que a PWA já receba
           // o registro consolidado, não os dois pedaços.
