@@ -24531,7 +24531,12 @@ function applyMqttMessage(key, value, isRetained = false) {
           /** Mesma sessão: par de SOC idêntico E janelas sobrepostas ou encostadas
            *  (menos de 5 min entre o fim de uma e o início da outra). */
           const _mesmaSessao = (a, b) => {
-            if ((+a.soc_start || 0) !== (+b.soc_start || 0)) return false;
+            // Folga de 2 pontos no INÍCIO também, simétrica com a do fim. Exigir
+            // igualdade exata deixou passar 30/08: 54→69% (sem local, sem nada) e
+            // 52→69% (Recanto da Paz, com temperatura) separadas por 2 min. Duas
+            // entradas cujo fim é o mesmo e cujo início difere por ruído de sensor
+            // não são duas cargas — o SOC não cai de 69% pra 52% em 2 minutos.
+            if (Math.abs((+a.soc_start || 0) - (+b.soc_start || 0)) > 2) return false;
             // Folga de 2 pontos no fim: em 11/08 as duas entradas da mesma carga
             // fecharam em 80 e 79 (uma viu um sample de SOC a mais que a outra).
             // Exigir igualdade exata deixava esse caso passar.
