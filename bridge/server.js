@@ -14000,8 +14000,55 @@ app.get('/api/perf', requireAuth, (_req, res) => {
 //    `setDataLimit` manual carimba o ciclo como tratado e o automático não
 //    encosta mais até a próxima virada.
 const UPLINK_LIMITE_BASE_MB = parseInt(process.env.UPLINK_LIMITE_BASE_MB || '250', 10);
-const UPLINK_REENVIO_MS = 15 * 60_000;
-let _uplinkLimiteEnvioMs = 0;
+
+// ── Limite de dados: mandar não é aplicar ────────────────────────────────────
+// `cmd/uplink` sai QoS1 SEM retain, e o APK conecta com `isCleanSession = true`
+// (MqttManager.kt) — então enquanto o carro dorme o broker NÃO enfileira nada: o
+// comando é descartado e não chega nem quando o carro liga. Foi o que aconteceu
+// em 14/09, o dono ajustou com o carro dormindo e não pegou.
+//
+// E com o carro acordado também falha de vez em quando: no mesmo minuto, um
+// `setDataLimit` ficou 30s sem qualquer resposta e o seguinte, idêntico, aplicou
+// na hora. Em vez de perseguir a causa (publish silencioso, blip de rede), trato o
+// sintoma, que é o mesmo nos dois casos: guardo o valor pedido e reenvio até o
+// carro CONFIRMAR em `uplink.limiteMb`. Só tenta com o APK vivo — mandar pra um
+// carro dormindo é jogar fora.
+let _limitePend = null;   // { mb, desdeMs, ultimaMs, tentativas, origem }
+const LIMITE_RETRY_MS  = 20_000;
+const LIMITE_DESISTE_MS = 24 * 3600_000;
+
+function _pedeLimiteDados(mb, origem) {
+  _limitePend = { mb, desdeMs: Date.now(), ultimaMs: 0, tentativas: 0, origem };
+  state.uplink_limite_pendente = { mb, origem, desdeMs: _limitePend.desdeMs };
+  _tentaLimiteDados();
+}
+
+function _tentaLimiteDados() {
+  const p = _limitePend;
+  if (!p) return;
+  const atual = +state.uplink?.limiteMb || 0;
+  if (atual === p.mb) {
+    console.log(`[uplink-limite] confirmado ${p.mb}MB pelo carro (${p.origem}, `
+      + `${p.tentativas} envio(s), ${Math.round((Date.now() - p.desdeMs) / 1000)}s)`);
+    _limitePend = null; delete state.uplink_limite_pendente; scheduleStateSave();
+    return;
+  }
+  if (Date.now() - p.desdeMs > LIMITE_DESISTE_MS) {
+    console.warn(`[uplink-limite] desistindo de ${p.mb}MB após 24h sem confirmação (carro segue em ${atual}MB)`);
+    _limitePend = null; delete state.uplink_limite_pendente; scheduleStateSave();
+    return;
+  }
+  const apkVivo = state.last_apk_ms > 0 && Date.now() - state.last_apk_ms < 90_000;
+  if (!apkVivo || !mqttClient?.connected) return;
+  if (Date.now() - p.ultimaMs < LIMITE_RETRY_MS) return;
+  p.ultimaMs = Date.now(); p.tentativas++;
+  try {
+    mqttClient.publish(`${MQTT_PREFIX}/cmd/uplink`,
+      JSON.stringify({ metodo: 'setDataLimit', mb: p.mb }), { qos: 1, retain: false });
+    console.log(`[uplink-limite] envio #${p.tentativas} de ${p.mb}MB (${p.origem}) — carro em ${atual}MB`);
+  } catch (e) { console.warn('[uplink-limite] publish falhou:', e.message); }
+}
+setInterval(_tentaLimiteDados, 10_000).unref?.();
 
 /** Rótulo do ciclo de faturamento corrente ("2026-09"). Antes do dia de virada
  *  ainda estamos no ciclo que começou no mês anterior. */
@@ -14037,17 +14084,9 @@ function _reporLimiteDoCiclo() {
   if (atual > 0 && atual <= UPLINK_LIMITE_BASE_MB) {
     return _carimbaCicloUplink(`já estava em ${atual}MB`);
   }
-  if (!mqttClient?.connected) return;
-  const agora = Date.now();
-  if (agora - _uplinkLimiteEnvioMs < UPLINK_REENVIO_MS) return;
-  _uplinkLimiteEnvioMs = agora;
-  try {
-    mqttClient.publish(`${MQTT_PREFIX}/cmd/uplink`,
-      JSON.stringify({ metodo: 'setDataLimit', mb: UPLINK_LIMITE_BASE_MB }),
-      { qos: 1, retain: false });
-    console.log(`[uplink-limite] ciclo virou para ${ciclo} — pedindo ${UPLINK_LIMITE_BASE_MB}MB `
-      + `(estava ${atual}MB). Sem retain: insisto a cada ${UPLINK_REENVIO_MS / 60000}min até confirmar.`);
-  } catch (e) { console.warn('[uplink-limite] publish falhou:', e.message); }
+  if (_limitePend?.mb === UPLINK_LIMITE_BASE_MB) return;   // já insistindo
+  console.log(`[uplink-limite] ciclo virou para ${ciclo} (estava ${atual}MB)`);
+  _pedeLimiteDados(UPLINK_LIMITE_BASE_MB, `virada do ciclo ${ciclo}`);
 }
 setInterval(_reporLimiteDoCiclo, 5 * 60_000).unref?.();
 // Uma passada no arranque, depois que o retained do uplink já chegou: sem isto a
@@ -14097,7 +14136,17 @@ app.post('/api/uplink/cmd', requireAuth, (req, res) => {
     mqttClient.publish(`${MQTT_PREFIX}/cmd/uplink`, JSON.stringify(msg), { qos: 1, retain: false });
   } catch (e) { return res.status(502).json({ error: e.message }); }
   // Ajuste manual do dono vence o automático até a próxima virada.
-  if (metodo === 'setDataLimit') _carimbaCicloUplink('limite ajustado na mão');
+  if (metodo === 'setDataLimit') {
+    _carimbaCicloUplink('limite ajustado na mão');
+    // Registra como pendente pra INSISTIR até o carro confirmar. O publish acima
+    // conta como a primeira tentativa — sem isto, um comando perdido (carro
+    // dormindo, blip) sumia em silêncio e o app mostrava sucesso.
+    const mbPedido = msg.mb !== undefined ? msg.mb : (msg.gb || 0) * 1024;
+    if (mbPedido > 0) {
+      _pedeLimiteDados(mbPedido, 'app');
+      if (_limitePend) { _limitePend.ultimaMs = Date.now(); _limitePend.tentativas = 1; }
+    }
+  }
   if (metodo === 'setWifiEnabled' && msg.valor === false) {
     console.warn('[uplink] ⚠️ DESLIGANDO o WiFi do carro — se ele não tiver 4G, o acesso remoto cai aqui');
   }
@@ -16870,6 +16919,8 @@ mqttClient.on('message', (topic, payload, packet) => {
       // ("algo brigando", 04/08). Mesmo vício do frescor: recebimento ≠ medição.
       const retido = !!(packet && packet.retain);
       state.uplink_cmd = { ...o, ts: Date.now(), retido };
+      // Confirma na hora em vez de esperar o tick de 10s.
+      if (!retido) { try { _tentaLimiteDados(); } catch (_) {} }
       if (o.ok === false) console.warn(`[uplink] comando ${o.metodo} falhou: ${o.erro || '?'}`);
       broadcast('update', state); scheduleStateSave();
     } catch (_) {}
@@ -16877,6 +16928,10 @@ mqttClient.on('message', (topic, payload, packet) => {
   }
   if (topic === MQTT_PREFIX + '/uplink/status') {
     if (!String(value).trim()) { state.uplink = null; return; }   // limpeza do retained, não erro
+    // `limiteMb` mora AQUI (o uplink/result traz outra cópia), então é neste ponto
+    // que a insistência do setDataLimit sabe que pode parar. Agendado pro fim do
+    // handler, depois de state.uplink ser reescrito.
+    setImmediate(() => { try { _tentaLimiteDados(); } catch (_) {} });
     try {
       const o = JSON.parse(value);
       const antes = state.uplink && state.uplink.displayText;
