@@ -155,9 +155,11 @@ object CabinRecorder {
             conn.setRequestProperty("Content-Type", "audio/wav")
             conn.setRequestProperty("X-Rec-Token", token)
             conn.setFixedLengthStreamingMode(f.length())
-            f.inputStream().use { input -> conn.outputStream.use { input.copyTo(it, 64 * 1024) } }
-            val code = conn.responseCode
-            if (code in 200..299) "ok:$safe (${f.length()} bytes)" else "error: bridge HTTP $code"
+            try {
+                f.inputStream().use { input -> conn.outputStream.use { input.copyTo(it, 64 * 1024) } }
+                val code = conn.responseCode
+                if (code in 200..299) "ok:$safe (${f.length()} bytes)" else "error: bridge HTTP $code"
+            } finally { conn.disconnect() }
         } catch (e: Exception) {
             "error: ${e.message}"
         }

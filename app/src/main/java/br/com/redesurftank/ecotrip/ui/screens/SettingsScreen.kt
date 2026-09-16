@@ -441,6 +441,10 @@ fun SettingsScreen(
 
         // ── Inicialização ─────────────────────────────────────────────────────
         var bootMinimized by remember { mutableStateOf(CarTelemetryService.isBootMinimizedPref(ctx)) }
+        var controlesAtivo by remember { mutableStateOf(tripManager.isControlesAtivo()) }
+        var botaoFlutuante by remember {
+            mutableStateOf(br.com.redesurftank.ecotrip.services.DestinoOverlayService.habilitado(ctx))
+        }
         SectionCard("Inicialização") {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -464,6 +468,72 @@ fun SettingsScreen(
                     onCheckedChange = {
                         bootMinimized = it
                         CarTelemetryService.setBootMinimized(ctx, it)
+                    },
+                )
+            }
+
+            // ── Tela Controles + gesto de 2 dedos ─────────────────────────────
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        if (controlesAtivo) "Tela Controles ligada" else "Tela Controles desligada",
+                        fontSize = 13.sp,
+                        color = if (controlesAtivo) NeonLime else TextSecondary,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        "Ligado: dois dedos arrastados na horizontal abrem a tela Controles. " +
+                        "Desligado: a tela não é criada e o gesto não é escutado — libera o " +
+                        "multitoque para atalhos de outros apps. Reabra o app após mudar.",
+                        fontSize = 11.sp, color = TextSecondary,
+                    )
+                }
+                Switch(
+                    checked = controlesAtivo,
+                    onCheckedChange = {
+                        controlesAtivo = it
+                        tripManager.setControlesAtivo(it)
+                    },
+                )
+            }
+
+            // ── Botão flutuante de destino ────────────────────────────────────
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        if (botaoFlutuante) "Botão flutuante ligado" else "Botão flutuante desligado",
+                        fontSize = 13.sp,
+                        color = if (botaoFlutuante) NeonLime else TextSecondary,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        "Atalho de destino que flutua por cima de outros apps. Mudar aqui " +
+                        "vale também no app do iPhone — o estado é o mesmo dos dois lados.",
+                        fontSize = 11.sp, color = TextSecondary,
+                    )
+                }
+                Switch(
+                    checked = botaoFlutuante,
+                    onCheckedChange = {
+                        botaoFlutuante = it
+                        val prefs = ctx.getSharedPreferences(
+                            br.com.redesurftank.ecotrip.models.SharedPreferencesKeys.PREFS_NAME,
+                            android.content.Context.MODE_PRIVATE)
+                        prefs.edit().putString(
+                            br.com.redesurftank.ecotrip.models.SharedPreferencesKeys.OVERLAY_DESTINO,
+                            if (it) "1" else "0").apply()
+                        if (it) br.com.redesurftank.ecotrip.services.DestinoOverlayService.ligar(ctx)
+                        else    br.com.redesurftank.ecotrip.services.DestinoOverlayService.desligar(ctx)
+                        // Avisa o bridge: ele publica `cmd/overlay` RETIDO, e sem isso o
+                        // valor antigo do celular voltaria a valer na próxima reconexão
+                        // do APK, desfazendo a escolha feita aqui.
+                        mqttManager.publicarOverlayEstado(it)
                     },
                 )
             }

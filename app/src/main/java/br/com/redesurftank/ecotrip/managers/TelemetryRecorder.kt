@@ -31,6 +31,12 @@ data class TelemetrySample(
     val lng:  Double,  // longitude
     val spd:  Float,   // velocidade do veículo em km/h
     val rpm:  Int,     // rotação do motor ICE (0 = modo 100% elétrico)
+    // rpm=0 é ambíguo: pode ser "ICE desligado" ou "ainda não li o CAN". Sem
+    // separar os dois, todo início de viagem conta como elétrico e um trajeto
+    // híbrido vira quase-100%-EV — é o bug que o Haval-H6-3D corrigiu em 14/09.
+    // Só viaja no JSON quando FALSO (raro, início de viagem), pra não engordar
+    // cada amostra com um campo que quase sempre é true.
+    val rpmOk: Boolean = true,
     val evKw: Float,   // potência elétrica em kW (+ consumindo, − regenerando)
     val pwr:  Int = 0, // % potência bateria: −100=regen máx, +100=consumo máx
     val soc:  Int = 0, // SOC% da bateria de tração (0–100)
@@ -150,6 +156,9 @@ class TelemetryRecorder(private val context: Context) {
     // ── Valores dos sensores (atualizados por TripManager.onDataChanged) ──────
     @Volatile var latestSpeedKmh:        Float = 0f
     @Volatile var latestEngineRpm:       Int   = 0
+    /** Já chegou UMA leitura de rpm do CAN? Antes disso, `latestEngineRpm` é o
+     *  default 0 e não significa "motor desligado" — significa "não sei". */
+    @Volatile var rpmConhecido: Boolean = false
     /** kW do motor elétrico — exclusivamente car.ev_info.Instant_energy_consumption. */
     @Volatile var latestMotorPowerKw:    Float = 0f
     /** % da potência da bateria (−100=regen máx, +100=consumo máx). */
@@ -191,6 +200,8 @@ class TelemetryRecorder(private val context: Context) {
             if (ts == 0L || System.currentTimeMillis() - ts > SENSOR_MAX_AGE_MS) return
             if (latestSpeedKmh     == 0f) latestSpeedKmh     = p.getFloat(SENSOR_KEY_SPD,  0f)
             if (latestEngineRpm    == 0)  latestEngineRpm    = p.getInt  (SENSOR_KEY_RPM,  0)
+            // Valor restaurado do disco é leitura real de antes — vale como conhecido.
+            if (p.contains(SENSOR_KEY_RPM)) rpmConhecido = true
             if (latestMotorPowerKw == 0f) latestMotorPowerKw = p.getFloat(SENSOR_KEY_EVKW, 0f)
             if (latestBattPowerPct == 0)  latestBattPowerPct = p.getInt  (SENSOR_KEY_PWR,  0)
             if (latestSocPct       == 0)  latestSocPct       = p.getInt  (SENSOR_KEY_SOC,  0)
@@ -274,6 +285,7 @@ class TelemetryRecorder(private val context: Context) {
                             lng  = latestLng,
                             spd  = spd,
                             rpm  = latestEngineRpm,
+                            rpmOk = rpmConhecido,
                             evKw = evKw,
                             pwr  = pwr,
                             soc  = soc,
@@ -400,6 +412,7 @@ class TelemetryRecorder(private val context: Context) {
                         put("lng",  s.lng)
                         put("spd",  s.spd.toDouble())
                         put("rpm",  s.rpm)
+                        if (!s.rpmOk) put("rpmOk", false)
                         put("evKw", s.evKw.toDouble())
                         put("pwr",  s.pwr)
                         if (s.soc > 0) put("soc", s.soc)

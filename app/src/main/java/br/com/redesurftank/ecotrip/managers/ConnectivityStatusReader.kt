@@ -88,6 +88,23 @@ object ConnectivityStatusReader {
                     o.put("mobileControlEnabled", int0("mobileControlEnabled"))
                     o.put("mobile4gOn", int0("mobile4gOn"))
                     o.put("mobileBlockReason", str("mobileBlockReason") ?: JSONObject.NULL)
+                    // vc7260: prioridade automática de WiFi e a rede em que a TELA está.
+                    o.put("wifiPriorityEnabled", int0("wifiPriorityEnabled"))
+                    o.put("headUnitWifiSsid", str("headUnitWifiSsid") ?: JSONObject.NULL)
+                    // TODAS as colunas restantes, pelo tipo que o cursor declara. O
+                    // Impulse vai acrescentar as 5 regras de corte + mobileUsedMb na
+                    // query (vc7267) e copiar assim evita um patch aqui a cada campo
+                    // novo — a mesma disciplina que já uso no Bundle do call().
+                    for (i in 0 until c.columnCount) {
+                        val nome = c.getColumnName(i) ?: continue
+                        if (o.has(nome)) continue
+                        if (c.isNull(i)) { o.put(nome, JSONObject.NULL); continue }
+                        when (c.getType(i)) {
+                            android.database.Cursor.FIELD_TYPE_INTEGER -> o.put(nome, c.getLong(i))
+                            android.database.Cursor.FIELD_TYPE_FLOAT   -> o.put(nome, c.getDouble(i))
+                            else -> o.put(nome, c.getString(i) ?: "")
+                        }
+                    }
                 }
             } ?: o.put("ok", false).put("erro", "provider ausente")
         } catch (e: SecurityException) {
@@ -101,16 +118,80 @@ object ConnectivityStatusReader {
         } catch (e: Exception) {
             o.put("ok", false).put("erro", e.javaClass.simpleName + ": " + (e.message ?: ""))
         }
+        // Compara SEM o instante da medição: com ele no meio, todo ciclo pareceria
+        // mudança e o log encheria o buffer de 300 com a mesma linha.
+        val comparavel = o.toString()
+        // Quando o carro mediu. O bridge não consegue derivar isso: retained é
+        // reentregue em cada reconexão dele, então "quando recebi" dizia que dado de
+        // uma hora atrás era novo. O relógio do head unit é sincronizado por rede.
+        o.put("medidoMs", System.currentTimeMillis())
         val json = o.toString()
         // Publica SEMPRE, mesmo sem mudança. Guardar "já publiquei isso" só em
         // memória deixa o tópico órfão: se o retained for limpo no broker (restart,
         // limpeza manual), o carro nunca republica e o bridge fica sem estado pra
         // sempre. Uma mensagem por minuto é irrelevante; estado órfão não é.
         // O log é que fica gateado por mudança, pra não encher o buffer de 300.
-        val mudou = json != ultimoJson
-        ultimoJson = json
+        val mudou = comparavel != ultimoJson
+        ultimoJson = comparavel
         if (mudou) AppLogger.i(TAG, "uplink ($origem): $json")
         MqttManager.getInstance().publicarUplinkStatus(json)
+    }
+
+    /// Manda o Impulse aplicar uma mudança (4G, prioridade de WiFi, trocar de rede).
+    ///
+    /// Vai pelo MESMO provider que já é lido, via `call()` — o guard é por pacote, e
+    /// o EcoTrip está na lista. Roda fora da main thread porque o Impulse pode mexer
+    /// em shell/WiFi por baixo.
+    ///
+    /// Depois de aplicar, RE-CONSULTA em vez de assumir que o pedido virou verdade:
+    /// `setMobileBlock(false)` só limpa o bloqueio manual, e outras regras (consumo,
+    /// WiFi, AA/CarPlay) podem seguir cortando o 4G. Quem manda é o estado lido.
+    fun comandar(metodo: String, valor: Boolean? = null, ssid: String? = null,
+                 extraInts: Map<String, Int>? = null, senha: String? = null,
+                 aoTerminar: ((JSONObject) -> Unit)? = null) {
+        val ctx = appCtx ?: return
+        exec.execute {
+            val res = JSONObject().put("metodo", metodo)
+            try {
+                val extras = android.os.Bundle().apply {
+                    valor?.let { putBoolean("value", it) }
+                    senha?.let { putString("password", it) }
+                    // addWifi quer o ssid nos extras; os outros usam o `arg`.
+                    if (metodo == "addWifi") ssid?.let { putString("ssid", it) }
+                    extraInts?.forEach { (k, v) -> putInt(k, v) }
+                }
+                val out = ctx.contentResolver.call(Uri.parse(URI_STR), metodo,
+                    if (metodo == "addWifi") null else ssid, extras)
+                if (out == null) { res.put("ok", false).put("erro", "provider não respondeu") }
+                else {
+                    // Copia o Bundle INTEIRO pelo tipo de cada chave, em vez de listar
+                    // campo por campo: a resposta traz um snapshot completo do estado
+                    // (mobileBlocked, mobileLimitMb, wifiPriorityEnabled, …) e o
+                    // Impulse pode acrescentar campos. Listar à mão significaria um
+                    // patch aqui a cada mudança do outro lado.
+                    for (k in out.keySet()) {
+                        when (val v = out.get(k)) {
+                            null -> res.put(k, JSONObject.NULL)
+                            is Boolean -> res.put(k, v)
+                            is Int -> res.put(k, v)
+                            is Long -> res.put(k, v)
+                            is String -> res.put(k, v)
+                            is ArrayList<*> -> res.put(k, org.json.JSONArray(v.map { it.toString() }))
+                            else -> res.put(k, v.toString())
+                        }
+                    }
+                    if (!out.containsKey("ok")) res.put("ok", false)
+                    // O handoff usa `error`; padroniza pra `erro` sem perder o original.
+                    out.getString("error")?.let { res.put("erro", it) }
+                }
+            } catch (e: Exception) {
+                res.put("ok", false).put("erro", e.javaClass.simpleName + ": " + (e.message ?: ""))
+            }
+            AppLogger.i(TAG, "comando $metodo → ${res.toString().take(300)}")
+            MqttManager.getInstance().publicarUplinkResultado(res.toString())
+            aoTerminar?.invoke(res)
+            consultarEPublicar("pos-comando")
+        }
     }
 
     /// SHA-256 curto do certificado de assinatura de um pacote. Serve pra provar se

@@ -71,9 +71,11 @@ class BackupManager private constructor() {
         conn.connectTimeout = 15_000
         conn.readTimeout    = 15_000
         conn.doOutput       = true
-        conn.outputStream.use { it.write(json.toByteArray(Charsets.UTF_8)) }
-        val code = conn.responseCode
-        if (code !in 200..299) throw Exception("HA retornou HTTP $code")
+        try {
+            conn.outputStream.use { it.write(json.toByteArray(Charsets.UTF_8)) }
+            val code = conn.responseCode
+            if (code !in 200..299) throw Exception("HA retornou HTTP $code")
+        } finally { conn.disconnect() }
         return ts
     }
 
@@ -83,7 +85,9 @@ class BackupManager private constructor() {
         conn.connectTimeout = 15_000
         conn.readTimeout    = 30_000
         conn.setRequestProperty("User-Agent", "EcotripImpulse/${BuildConfig.VERSION_NAME}")
-        val json = conn.inputStream.bufferedReader().readText()
+        val json = try {
+            conn.inputStream.bufferedReader().use { it.readText() }
+        } finally { conn.disconnect() }
         return applyBackupJson(json)
     }
 

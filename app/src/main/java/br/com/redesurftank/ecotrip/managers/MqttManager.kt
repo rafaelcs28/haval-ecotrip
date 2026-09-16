@@ -321,6 +321,12 @@ class MqttManager private constructor() {
     /// `@Volatile var` lido direto, e misturar os dois padrões só confunde.
     @Volatile var onNavResult: ((String, String) -> Unit)? = null
 
+    /// Segundo slot, pro overlay. A tela Compose e o overlay flutuante escutam os
+    /// MESMOS tópicos e um slot só fazia o último a registrar apagar o outro — o
+    /// comentário abaixo já avisava disso. Dois slots explícitos em vez de uma lista
+    /// de listeners porque são exatamente dois consumidores e nenhum é dinâmico.
+    @Volatile var onNavResultOverlay: ((String, String) -> Unit)? = null
+
     /// Último payload de favoritos, guardado além do callback: o overlay e a tela
     /// Compose precisam da mesma lista, e se os dois disputassem onNavResult um
     /// sobrescreveria o outro. Como o tópico é retido, isto chega preenchido na
@@ -342,6 +348,93 @@ class MqttManager private constructor() {
     /// o dumplog.
     /// Estado de conectividade lido do Impulse. Retido: o bridge sobe já sabendo por
     /// onde o carro roteia, sem esperar mudança.
+    /// Resultado de um comando ao Impulse (retido: o app iOS abre a tela já sabendo
+    /// como terminou o último).
+    fun publicarUplinkResultado(json: String) {
+        executor.submit {
+            val c = client ?: return@submit
+            try { c.publish("$prefix/uplink/result", json.toByteArray(), 1, true) }
+            catch (e: Exception) { AppLogger.w(TAG, "uplink/result falhou: ${e.message}") }
+        }
+    }
+
+    /// Amostra de CPU/RAM do medidor. QoS 0 e sem retain: é fluxo de medição, perder
+    /// uma amostra não importa e retained deixaria a última pendurada pra sempre.
+    fun publicarPerf(json: String) {
+        executor.submit {
+            val c = client ?: return@submit
+            if (!c.isConnected) return@submit
+            runCatching { c.publish("$prefix/perf/sample", json.toByteArray(), 0, false) }
+        }
+    }
+
+    /// Tabela por processo (chega ~1x/30s). QoS 0: perder uma amostra de tendência
+    /// não importa, e retained deixaria uma foto velha pendurada.
+    /// Estado do botão flutuante escolhido NO CARRO. O bridge reescreve o retained
+    /// `cmd/overlay` com este valor — sem isso, a escolha feita no carro seria desfeita
+    /// pelo retained antigo do celular na próxima reconexão.
+    fun publicarOverlayEstado(on: Boolean) {
+        executor.submit {
+            val c = client ?: return@submit
+            if (!c.isConnected) return@submit
+            runCatching {
+                c.publish("$prefix/overlay/estado", (if (on) "1" else "0").toByteArray(), 1, false)
+            }
+        }
+    }
+
+    /// Resposta do dono ao popup de sugestão. QoS 1 sem retained: é evento de decisão,
+    /// e retido reentregaria a mesma resposta em cada reconexão.
+    fun publicarSugestaoResposta(id: String, aceito: Boolean, expirou: Boolean = false) {
+        executor.submit {
+            val c = client ?: return@submit
+            if (!c.isConnected) return@submit
+            val json = org.json.JSONObject().apply {
+                put("id", id); put("aceito", aceito); put("expirou", expirou)
+            }.toString()
+            runCatching { c.publish("$prefix/sugestao/resposta", json.toByteArray(), 1, false) }
+        }
+    }
+
+    /// Mídia tocando (via Impulse). QoS 0 sem retained: é sinal vivo, e um retained
+    /// deixaria a faixa de ontem pendurada pra ser servida como "tocando agora".
+    fun publicarMidia(json: String) {
+        executor.submit {
+            val c = client ?: return@submit
+            if (!c.isConnected) return@submit
+            runCatching { c.publish("$prefix/media/now_playing", json.toByteArray(), 0, false) }
+        }
+    }
+
+    /// Navegação do Android Auto (via Impulse). QoS 0 e SEM retained de propósito: ETA
+    /// é sinal vivo, e um retained deixaria a chegada de uma rota antiga pendurada no
+    /// broker pra ser servida como atual depois de um restart.
+    fun publicarNav(json: String) {
+        executor.submit {
+            val c = client ?: return@submit
+            if (!c.isConnected) return@submit
+            runCatching { c.publish("$prefix/nav/directions", json.toByteArray(), 0, false) }
+        }
+    }
+
+    /// Evento de automação (inclui as BARRADAS, com o motivo). Sem isso, regra que
+    /// não dispara é invisível — só o disparo gerava registro.
+    fun publicarAutomacaoEvento(json: String) {
+        executor.submit {
+            val c = client ?: return@submit
+            if (!c.isConnected) return@submit
+            runCatching { c.publish("$prefix/automation/event", json.toByteArray(), 0, false) }
+        }
+    }
+
+    fun publicarPerfProcs(json: String) {
+        executor.submit {
+            val c = client ?: return@submit
+            if (!c.isConnected) return@submit
+            runCatching { c.publish("$prefix/perf/procs", json.toByteArray(), 0, false) }
+        }
+    }
+
     fun publicarUplinkStatus(json: String) {
         executor.submit {
             val c = client ?: return@submit
@@ -382,15 +475,38 @@ class MqttManager private constructor() {
         }
     }
 
-    fun publishNavTo(lat: Double, lng: Double, name: String, app: String) {
+    /// Manda o destino escolhido. `aoTerminar(true)` só quando o broker CONFIRMOU
+    /// (QoS 1 no client síncrono bloqueia até o PUBACK).
+    ///
+    /// Antes isto fazia `if (!c.isConnected) return` e descartava a publicação SEM
+    /// log e SEM avisar a UI — o overlay mostrava "✓" e o destino nunca saía. Era o
+    /// motivo de precisar tocar duas vezes: o primeiro toque morria em silêncio e o
+    /// segundo pegava a conexão já refeita (05/08: 'Casa' às 11:43 registrou UMA vez
+    /// no bridge, e o dono tinha tocado duas).
+    fun publishNavTo(lat: Double, lng: Double, name: String, app: String,
+                     aoTerminar: ((Boolean) -> Unit)? = null) {
         executor.submit {
-            val c = client ?: return@submit
-            if (!c.isConnected) return@submit
             val payload = org.json.JSONObject()
                 .put("lat", lat).put("lng", lng).put("name", name)
                 .put("app", app).put("ts", System.currentTimeMillis()).toString()
-            try { c.publish("$prefix/nav_to", payload.toByteArray(), 1, false) }
-            catch (e: Exception) { AppLogger.w(TAG, "publishNavTo falhou: ${e.message}") }
+            val c = client
+            if (c == null || !c.isConnected) {
+                AppLogger.w(TAG, "publishNavTo: MQTT desconectado — pedindo reconexão e reportando falha")
+                rebuildClientAgora("destino com MQTT fora")
+                aoTerminar?.invoke(false)
+                return@submit
+            }
+            val ok = try {
+                c.publish("$prefix/nav_to", payload.toByteArray(), 1, false)
+                true
+            } catch (e: Exception) {
+                // QoS 1 síncrono lança quando não vem PUBACK — inclui socket
+                // meio-aberto, que é indistinguível de conectado pelo isConnected.
+                AppLogger.w(TAG, "publishNavTo falhou: ${e.message}")
+                rebuildClientAgora("destino sem PUBACK")
+                false
+            }
+            aoTerminar?.invoke(ok)
         }
     }
 
@@ -535,6 +651,17 @@ class MqttManager private constructor() {
     // Driving ready (ignição) — usado pra derivar engine_state (carro on/off) sem oscilação
     // do motor a combustão (HEV liga/desliga o ICE várias vezes por minuto).
     var latestDrivingReadyState: Int = 0
+    /// Quando o CAN informou o driving_ready pela última vez. 0 = NUNCA leu.
+    /// Existe porque o default de `latestDrivingReadyState` é 0, que é o mesmo
+    /// valor de "carro apagado" — e quem decide instalar OTA precisa distinguir
+    /// "medi e o carro está apagado" de "acabei de subir e não sei nada".
+    @Volatile var latestDrivingReadyMs: Long = 0L
+
+    /// Até quando o bridge pediu pra NÃO instalar OTA. O carro ligado remotamente
+    /// (pré-clima) parece a janela ideal daqui — motor ligado, marcha em P — mas é
+    /// justamente quando o dono está pra entrar e sair. Só o bridge sabe que a
+    /// partida foi remota; daqui os dois casos são idênticos.
+    @Volatile var otaHoldUntilMs: Long = 0L
     // Valores crus pra debug — facilita inspeção via MQTT pra confirmar semântica do barramento
     var latestDoorStatusRaw:   String = ""
     var latestWindowStatusRaw: String = ""
@@ -682,6 +809,15 @@ class MqttManager private constructor() {
     // do broker); (2) faz a métrica per-second do bridge refletir UPTIME REAL,
     // não o intervalo natural entre snapshots.
     @Volatile private var heartbeatFuture: java.util.concurrent.ScheduledFuture<*>? = null
+    /// Sonda de conexão viva — tarefa própria, ver comentário no start.
+    @Volatile private var sondaFuture: java.util.concurrent.ScheduledFuture<*>? = null
+    /// Executor DEDICADO à sonda. Ela publica em QoS 1, que BLOQUEIA até o PUBACK —
+    /// e em socket meio-aberto fica presa até o timeout. No `fastExecutor`, que é
+    /// single-thread e carrega o heartbeat, isso paralisava o heartbeat junto: a
+    /// correção virava a causa do travamento (08/08). Thread própria isola o bloqueio.
+    private val sondaExecutor = java.util.concurrent.Executors.newSingleThreadScheduledExecutor { r ->
+        Thread(r, "mqtt-sonda").apply { isDaemon = true }
+    }
     @Volatile private var autotripSyncFuture: java.util.concurrent.ScheduledFuture<*>? = null
 
     fun init(context: Context) {
@@ -822,6 +958,7 @@ class MqttManager private constructor() {
                     val state = value.trim().toIntOrNull()
                     if (state != null) {
                         latestDrivingReadyState = state
+                        latestDrivingReadyMs = System.currentTimeMillis()
                         tripManager.onDrivingReady(state)
                     }
                 }
@@ -1854,10 +1991,75 @@ class MqttManager private constructor() {
                     // Áudio (fone→carro) é binário PCM — não passa por toString().
                     if (topic == "$prefix/audio/p2c") { CarAudioRelay.onIncomingFrame(message.payload); return }
                     // Busca/favoritos vão pra UI, não pro dispatcher de comandos.
+                    // Comando de conectividade vindo do celular (bridge → carro).
+                    // {metodo, valor?, ssid?}
+                    // Liga/desliga o medidor de CPU/RAM (payload "1"/"0").
+                    if (topic.endsWith("/cmd/perf")) {
+                        val on = message.toString().trim() == "1"
+                        if (on) PerfProbe.ligar() else PerfProbe.desligar()
+                        return
+                    }
+                    // Mostra/esconde o botão flutuante de destino ("1"/"0"). Persiste,
+                    // então sobrevive a reinício do app — o MainActivity lê no arranque.
+                    if (topic.endsWith("/cmd/overlay")) {
+                        val on = message.toString().trim() == "1"
+                        appContext?.let { c ->
+                            c.getSharedPreferences(
+                                br.com.redesurftank.ecotrip.models.SharedPreferencesKeys.PREFS_NAME,
+                                android.content.Context.MODE_PRIVATE)
+                                .edit()
+                                .putString(br.com.redesurftank.ecotrip.models.SharedPreferencesKeys.OVERLAY_DESTINO,
+                                           if (on) "1" else "0")
+                                .apply()
+                            if (on) br.com.redesurftank.ecotrip.services.DestinoOverlayService.ligar(c)
+                            else    br.com.redesurftank.ecotrip.services.DestinoOverlayService.desligar(c)
+                        }
+                        AppLogger.i(TAG, "botão flutuante ${if (on) "mostrado" else "escondido"} por comando")
+                        return
+                    }
+                    // Sugestão de destino a partir do próximo compromisso. Abre popup
+                    // OVERLAY (não Activity) pra não roubar a tela da projeção do AA.
+                    if (topic.endsWith("/cmd/sugestao_destino")) {
+                        runCatching {
+                            val o = org.json.JSONObject(message.toString())
+                            appContext?.let { c ->
+                                br.com.redesurftank.ecotrip.services.SugestaoOverlayService.mostrar(
+                                    c, o.optString("id"), o.optString("nome"), o.optString("hhmm"))
+                            }
+                        }.onFailure { AppLogger.w(TAG, "sugestao_destino inválida: ${it.message}") }
+                        return
+                    }
+                    if (topic.endsWith("/cmd/uplink")) {
+                        val body = message.toString()
+                        if (body.isNotBlank()) runCatching {
+                            val o = org.json.JSONObject(body)
+                            val ints = mutableMapOf<String, Int>()
+                            for (k in listOf("mb", "gb", "day")) {
+                                if (o.has(k)) ints[k] = o.optInt(k)
+                            }
+                            ConnectivityStatusReader.comandar(
+                                o.optString("metodo"),
+                                if (o.has("valor")) o.optBoolean("valor") else null,
+                                if (o.has("ssid")) o.optString("ssid") else null,
+                                if (ints.isEmpty()) null else ints,
+                                if (o.has("senha")) o.optString("senha") else null)
+                        }.onFailure { AppLogger.w(TAG, "cmd/uplink inválido: ${it.message}") }
+                        return
+                    }
+                    if (topic.endsWith("/ota_hold")) {
+                        val body = message.toString()
+                        otaHoldUntilMs = if (body.isBlank()) 0L else runCatching {
+                            org.json.JSONObject(body).optLong("untilMs", 0L)
+                        }.getOrDefault(0L)
+                        AppLogger.i(TAG, "ota_hold até $otaHoldUntilMs")
+                        return
+                    }
                     if (topic.endsWith("/place_search/result") || topic.endsWith("/nav_favorites/result")) {
                         val body = message.toString()
                         if (topic.endsWith("/nav_favorites/result")) navFavoritosJson = body
-                        onNavResult?.invoke(topic, body); return
+                        onNavResult?.invoke(topic, body)
+                        onNavResultOverlay?.invoke(topic, body)
+                        return
                     }
                     handleIncomingCommand(topic, message.toString())
                 }
@@ -1889,6 +2091,11 @@ class MqttManager private constructor() {
             c.subscribe("$prefix/cmd/#", 1)
             // Resultados de busca/favoritos ficam FORA de cmd/ (cmd/ é
             // bridge→carro; pedido do carro em cmd/ voltaria como eco).
+            c.subscribe("$prefix/cmd/perf", 1)
+            c.subscribe("$prefix/cmd/overlay", 1)
+            c.subscribe("$prefix/cmd/sugestao_destino", 1)
+            c.subscribe("$prefix/cmd/uplink", 1)
+            c.subscribe("$prefix/ota_hold", 1)
             c.subscribe("$prefix/place_search/result", 1)
             c.subscribe("$prefix/nav_favorites/result", 1)
             c.subscribe("$prefix/audio/p2c", 0)   // áudio do fone (escuta ao vivo) — QoS0, sem fila
@@ -1938,11 +2145,49 @@ class MqttManager private constructor() {
                     val cur = client
                     if (cur != null && cur.isConnected) {
                         cur.publish("$prefix/heartbeat", System.currentTimeMillis().toString().toByteArray(), 0, false)
+                        // A cada 6 ticks (~30s) manda um heartbeat QoS 1 e espera o
+                        // PUBACK. É o que detecta socket MEIO-ABERTO: numa troca de
+                        // rede (Galaxy → Starlink → Galaxy, 05/08) o broker descarta a
+                        // sessão e manda o LWT, mas o Paho continua com isConnected=true
+                        // — então `connectionLost` nunca dispara e a máquina de
+                        // reconexão não roda. O app parecia vivo e não publicava nada;
+                        // só voltava reiniciando na mão.
+                        //
+                        // QoS 0 não serve de sonda: ele nunca falha, é fire-and-forget.
+
                     }
                 } catch (e: Exception) {
                     AppLogger.w(TAG, "heartbeat falhou: ${e.message}")
                 }
             }, 5, 5, java.util.concurrent.TimeUnit.SECONDS)
+
+            // ── Sonda de socket meio-aberto, em tarefa SEPARADA ─────────────────
+            // Estava dentro do heartbeat e nunca rodava quando importava: o publish
+            // QoS 0 acima lança em socket meio-aberto, o catch externo engolia, e a
+            // sonda (que vinha depois) era pulada — exatamente no caso que ela existe
+            // pra detectar. Travou de novo em 08/08 na troca de WiFi por isso.
+            //
+            // Aqui é independente: cadência própria de 30s, sem depender do `driving`
+            // nem de o heartbeat ter sobrevivido. QoS 1 no cliente SÍNCRONO bloqueia
+            // até o PUBACK e lança se não vier — é o que prova que o broker ainda nos
+            // reconhece, coisa que `isConnected` não prova.
+            sondaFuture?.cancel(false)
+            sondaFuture = sondaExecutor.scheduleAtFixedRate({
+                val cur = client
+                if (cur == null || !cur.isConnected) return@scheduleAtFixedRate
+                try {
+                    // timeToWait limita a espera do PUBACK. Sem teto, o publish fica
+                    // preso o tempo do keepAlive e a sonda só reage minutos depois —
+                    // tarde demais numa viagem.
+                    val msg = org.eclipse.paho.client.mqttv3.MqttMessage(
+                        System.currentTimeMillis().toString().toByteArray()).apply { qos = 1 }
+                    cur.timeToWait = 8_000L
+                    cur.publish("$prefix/heartbeat_ack", msg)
+                } catch (e: Exception) {
+                    AppLogger.w(TAG, "sonda QoS1 sem PUBACK (${e.message}) — socket meio-aberto, recriando o client")
+                    rebuildClientAgora("sonda sem PUBACK")
+                }
+            }, 20, 30, java.util.concurrent.TimeUnit.SECONDS)
             // Retry periódico do sync de auto-trips por MQTT (a cada 5 min).
             // Retained + idempotente: se alguma viagem não subiu pelo HTTP/Funnel
             // (rede bloqueando o caminho HTTPS), o bridge a ingere por aqui.
@@ -2588,6 +2833,21 @@ class MqttManager private constructor() {
     @Volatile private var reconnectBurstStartMs = 0L
     private val STUCK_CLIENT_AFTER_MS = 3 * 60_000L   // 3min sem conectar = client suspeito
     @Volatile private var lastForcedRebuildMs = 0L
+
+    /// Derruba e recria o client agora. O `scheduleReconnect` só é acionado por
+    /// `connectionLost`, que NÃO dispara em socket meio-aberto — daí precisar de um
+    /// caminho direto quando a sonda QoS 1 falha.
+    private fun rebuildClientAgora(motivo: String) {
+        executor.submit {
+            runCatching {
+                AppLogger.w(TAG, "rebuild forçado do MQTT: $motivo")
+                runCatching { client?.disconnectForcibly(1_000, 1_000) }
+                runCatching { client?.close(true) }
+                client = null
+            }
+            scheduleReconnect()
+        }
+    }
 
     private fun scheduleReconnect() {
         if (!enabled || isReconnecting.getAndSet(true)) return

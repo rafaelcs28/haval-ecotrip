@@ -207,5 +207,18 @@ class MediaControllerHelper(private val context: Context) {
     }
 }
 
-/** Necessário p/ getActiveSessions. Pode ficar vazio — o que importa é a permissão. */
-class MediaNotificationListenerService : NotificationListenerService()
+/** Necessário p/ getActiveSessions — o que importa é a permissão.
+ *
+ * Também serve de gancho de ressurreição: o Android religa
+ * NotificationListenerService sozinho, mesmo depois do processo morrer sem boot em
+ * seguida. Quando ele sobe, o processo do app sobe junto — e aproveitamos pra
+ * garantir a telemetria de pé. Sem isso o app podia ficar horas fora do ar (01/08:
+ * morreu às 19:34 e só voltou às 23:06, perdendo o começo de uma viagem). */
+class MediaNotificationListenerService : NotificationListenerService() {
+    override fun onListenerConnected() {
+        super.onListenerConnected()
+        runCatching {
+            br.com.redesurftank.ecotrip.services.CarTelemetryService.start(applicationContext)
+        }
+    }
+}

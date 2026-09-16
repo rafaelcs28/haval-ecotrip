@@ -118,7 +118,11 @@ class MainActivity : ComponentActivity() {
             ),
         )
         br.com.redesurftank.ecotrip.ui.screens.HomeTeslaWebHost.attach(root)
-        br.com.redesurftank.ecotrip.ui.screens.ControlesWebHost.attach(root)
+        // Tela Controles só entra na árvore se habilitada nas configurações. Desligada,
+        // o WebView nem é criado — não custa memória nem risco de render preto.
+        if (TripManager.getInstance().isControlesAtivo()) {
+            br.com.redesurftank.ecotrip.ui.screens.ControlesWebHost.attach(root)
+        }
         setContentView(root)
 
         // Iniciado pelo boot: envia o app para segundo plano se a pref BOOT_MINIMIZED
@@ -134,6 +138,9 @@ class MainActivity : ComponentActivity() {
 
         // ── Player de mídia (tela Veículo): lê a sessão de mídia ativa e empurra
         // o estado pro WebView (window.applyMedia). Requer "Acesso a notificações". ──
+        // O player só serve à tela Controles. Desligada, nem instancia — e assim o app
+        // para de pedir "Acesso a notificações", que existia só por causa dele.
+        if (TripManager.getInstance().isControlesAtivo())
         media = br.com.redesurftank.ecotrip.managers.MediaControllerHelper(applicationContext).also { h ->
             br.com.redesurftank.ecotrip.ui.screens.ControlesWebHost.media = h
             h.onChanged = { br.com.redesurftank.ecotrip.ui.screens.ControlesWebHost.feedMediaFromHelper() }
@@ -154,6 +161,9 @@ class MainActivity : ComponentActivity() {
     private var twoDownX = 0f
     private var twoLastX = 0f
     override fun dispatchTouchEvent(ev: android.view.MotionEvent): Boolean {
+        // Gesto desligado = nem observa. O dono usa multitoque como atalho em outros
+        // apps do carro, e ficar lendo o evento aqui só criaria disputa.
+        if (!TripManager.getInstance().isControlesAtivo()) return super.dispatchTouchEvent(ev)
         when (ev.actionMasked) {
             android.view.MotionEvent.ACTION_POINTER_DOWN -> if (ev.pointerCount == 2) {
                 twoActive = true; twoDownX = (ev.getX(0) + ev.getX(1)) / 2f; twoLastX = twoDownX

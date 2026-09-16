@@ -159,7 +159,24 @@ object AutomationManager {
                 // repetível (cruzar 8 km/h) re-disparava a cada vez dentro da janela
                 // "visited". Regras SEM condições não são afetadas (gatilho já é borda).
                 val hasConds = r.conditions?.items?.isNotEmpty() == true
+                // `shade_level` NÃO chega pelo CAN listener — exige leitura ativa. Antes
+                // isso só acontecia no checkInterval, então regra com gatilho `state`
+                // (ex: "cortina abre na 1a ignição", engine_state==1) avaliava a condição
+                // contra um valor que nunca foi lido e NUNCA disparava (06/08).
+                //
+                // TRAVA (fail-closed): se a regra depende do nível e a leitura falha,
+                // a regra não dispara. Nunca assumir um valor — chutar aqui acionaria a
+                // cortina na hora errada, que é pior que não acionar.
+                if (hasConds && !injetarShadeSePreciso(r)) {
+                    firedThisWindow[r.id] = false
+                    reportarBarrada(r, "leitura de shade_level falhou")
+                    continue
+                }
                 val condNow = conditionsPass(r.conditions, now)
+                // Diagnóstico: hoje só o DISPARO gera evento, então regra que não
+                // dispara é invisível — passei duas manhãs sem saber o que barrava a
+                // cortina. Reporta o motivo, com anti-spam por regra.
+                if (hasConds && !condNow) reportarBarrada(r, "condições não passaram")
                 if (hasConds && !condNow) firedThisWindow[r.id] = false   // re-arma
                 val fire = when (r.trigger.type) {
                     "geofence" -> if (geoGps) checkGeofence(r, lat, lng) else false
@@ -449,6 +466,27 @@ object AutomationManager {
     // Se a regra usa `shade`, faz leitura ATIVA do nível atual da cortina via
     // VehicleControlManager (a chave não vem pelo CAN listener) e injeta em `state`
     // como `shade_level` pra o conditionsPass ter dado fresco.
+    /// Injeta o nível atual da cortina em `state` quando a regra depende dele.
+    /// Devolve false SÓ quando precisava e não conseguiu ler — o chamador então não
+    /// dispara. Regra que não usa `shade_level` devolve true sem fazer nada.
+    private fun injetarShadeSePreciso(r: Rule): Boolean {
+        val usa = r.conditions?.items?.any { it.type == "compare" && it.field == "shade_level" } == true
+        if (!usa) return true
+        return try {
+            val lvl = VehicleControlManager.getShadeScreensLevel()
+            if (lvl == null) {
+                AppLogger.w(TAG, "regra ${r.id} depende de shade_level e a leitura falhou — não dispara")
+                false
+            } else {
+                synchronized(lock) { state["shade_level"] = lvl.toString() }
+                true
+            }
+        } catch (e: Exception) {
+            AppLogger.w(TAG, "leitura shade falhou (${e.message}) — regra ${r.id} não dispara")
+            false
+        }
+    }
+
     private fun checkInterval(r: Rule, now: Long): Boolean {
         val cal = java.util.Calendar.getInstance()
         val minuteOfDay = cal.get(java.util.Calendar.HOUR_OF_DAY) * 60 + cal.get(java.util.Calendar.MINUTE)
@@ -460,14 +498,9 @@ object AutomationManager {
         val everyMs = maxOf(1, r.trigger.everyMin) * 60_000L
         val lastMs = intervalLastMs[r.id] ?: 0L
         if (now - lastMs < everyMs) return false
-        // Leitura ativa do shade se a regra depende dele (só chave que não chega no CAN).
-        try {
-            val usesShade = r.conditions?.items?.any { it.type == "compare" && it.field == "shade_level" } == true
-            if (usesShade) {
-                val lvl = VehicleControlManager.getShadeScreensLevel()
-                if (lvl != null) synchronized(lock) { state["shade_level"] = lvl.toString() }
-            }
-        } catch (e: Exception) { AppLogger.w(TAG, "interval: leitura shade falhou: ${e.message}") }
+        // Leitura ativa do shade — mesma função usada pelos outros gatilhos, pra não
+        // existirem dois caminhos que podem divergir.
+        if (!injetarShadeSePreciso(r)) return false
         intervalLastMs[r.id] = now
         return true
     }
@@ -477,6 +510,30 @@ object AutomationManager {
     private val stateTrigSatisfied = HashMap<String, Boolean>()
     private val stateTrigSince = HashMap<String, Long>()    // quando o predicado virou verdadeiro (p/ stable_s)
     private val stateTrigFired = HashMap<String, Boolean>() // já disparou nesta subida (p/ stable_s)
+    /// Campos cujo valor oscila no CAN enquanto o head unit acorda. Gatilho neles
+    /// ganha estabilidade mínima automática — ver checkStateEdge.
+    private val CAMPOS_VOLATEIS = listOf("engine_state", "driving_ready", "gear_status")
+
+    /// Último report de barrada por regra — sem isso o tick encheria o bridge.
+    private val barradaUltimoMs = HashMap<String, Long>()
+
+    /// Conta ao bridge por que a regra NÃO disparou. Só 1x a cada 5min por regra.
+    private fun reportarBarrada(r: Rule, motivo: String) {
+        val agora = System.currentTimeMillis()
+        if (agora - (barradaUltimoMs[r.id] ?: 0L) < 5 * 60_000L) return
+        barradaUltimoMs[r.id] = agora
+        runCatching {
+            val o = JSONObject()
+                .put("ts", agora).put("rule_id", r.id).put("name", r.name)
+                .put("phase", "barrada").put("motivo", motivo)
+                .put("trigger_field", r.trigger.field)
+                .put("engine_state", state["car.basic.engine_state"] ?: "?")
+                .put("shade_level", state["shade_level"] ?: "(nao lido)")
+                .put("trig_prev", (stateTrigSatisfied[r.id] ?: false))
+            MqttManager.getInstance().publicarAutomacaoEvento(o.toString())
+        }
+    }
+
     private fun checkStateEdge(r: Rule, now: Long): Boolean {
         val cur = compareField(r.trigger.field, r.trigger.cmp, r.trigger.value)
         val prev = stateTrigSatisfied[r.id] ?: false
@@ -487,12 +544,22 @@ object AutomationManager {
             stateTrigSatisfied[r.id] = cur; saveTrigState()
             if (cur) { stateTrigSince[r.id] = now; stateTrigFired[r.id] = false }
         }
-        if (r.stableS <= 0) return cur && !prev   // sem estabilidade: borda simples (comportamento original)
+        // TRAVA anti-transiente: campos de ignição OSCILAM no CAN enquanto o head unit
+        // acorda — em 06/08 o barramento fez 0→1→0 em 5 segundos. Uma borda simples
+        // nesses campos abriria a cortina num pico que não é partida de verdade.
+        //
+        // Piso de 8s quando a regra não define `stable_s`: o dono não tem como saber
+        // que precisava configurar isso, e o custo de esperar 8s pra abrir a cortina é
+        // nenhum. Regra que define `stable_s` explicitamente manda (inclusive menor).
+        val estavelS = if (r.stableS > 0) r.stableS
+                       else if (CAMPOS_VOLATEIS.any { r.trigger.field.contains(it) }) 8
+                       else 0
+        if (estavelS <= 0) return cur && !prev   // sem estabilidade: borda simples
         // Com estabilidade: dispara uma vez por subida, só depois do predicado ficar
         // verdadeiro por stable_s contínuos (filtra picos momentâneos).
         if (!cur) return false
         if (stateTrigFired[r.id] == true) return false
-        if (now - (stateTrigSince[r.id] ?: now) < r.stableS * 1000L) return false
+        if (now - (stateTrigSince[r.id] ?: now) < estavelS * 1000L) return false
         stateTrigFired[r.id] = true
         return true
     }

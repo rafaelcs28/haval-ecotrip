@@ -42,6 +42,9 @@ class UpdateManager private constructor() {
 
     private var appContext: Context? = null
 
+    /// Quando ESTE processo começou. Base da carência de arranque acima.
+    private val processoIniciouMs = System.currentTimeMillis()
+
     fun init(context: Context) {
         appContext = context.applicationContext
     }
@@ -194,16 +197,67 @@ class UpdateManager private constructor() {
         val tm = TripManager.getInstance()
         val gear  = MqttManager.getInstance().latestGear
         val ready = MqttManager.getInstance().latestDrivingReadyState
-        // ready==1 e gear != "P" → carro pronto pra andar (D/R/N). Adia.
-        // ready==0 → carro apagado (pode instalar mesmo sem gear conhecido).
-        // gear vazio (nunca populou) + ready==1 → adia por segurança.
-        val gearBlocks = ready == 1 && gear != "P"
-        if (gearBlocks) {
-            AppLogger.i(TAG, "OTA adiado: gear=$gear ready=$ready — só instala em P (ou carro apagado)")
+        // CARÊNCIA DE ARRANQUE: nada é instalado nos primeiros 2 min de vida do
+        // processo. Todos os guards abaixo consultam estado do CAN, e no arranque
+        // esses valores ainda são o default — `latestChargingState` = -1,
+        // `latestDrivingReadyState` = 0, `latestGear` = "". O guard responde "pode
+        // instalar" sobre um estado que ninguém leu ainda.
+        //
+        // Já custou duas vezes: em 04/08 instalou com o carro em D (driving_ready
+        // ainda no default) e em 05/08 no meio de uma recarga (charging_state ainda
+        // -1), partindo a sessão em dois registros. Esperar 2 min é grátis: o APK
+        // fica em cache pro próximo tick.
+        val vidaMs = System.currentTimeMillis() - processoIniciouMs
+        if (vidaMs < 2 * 60_000) {
+            AppLogger.i(TAG, "OTA adiado: app subiu há ${vidaMs / 1000}s — CAN ainda não estabilizou")
+            return
+        }
+        // Instalar exige PROVA POSITIVA de carro parado. O critério antigo era
+        // `ready == 1 && gear != "P"`, que só bloqueia quando ready vale 1 — e
+        // `latestDrivingReadyState` nasce 0, o mesmo valor de "carro apagado".
+        // Pior: este CAN não parece publicar CAR_BASIC_DRIVING_READY_STATE (o bridge
+        // nunca viu a chave), então ready fica 0 PARA SEMPRE, mesmo em trânsito. Em
+        // 01/08 o OTA instalou com o carro em D, a 10 min de viagem, por isso.
+        //
+        // `gear` esse sim chega do CAN. Então a prova é ele: instala só em P. Quando
+        // o carro está apagado o app costuma nem estar de pé; se estiver e o gear já
+        // tiver sido lido como P, também vale.
+        val holdAte = MqttManager.getInstance().otaHoldUntilMs
+        if (holdAte > System.currentTimeMillis()) {
+            AppLogger.i(TAG, "OTA adiado: bridge pediu hold por mais "
+                + "${(holdAte - System.currentTimeMillis()) / 60_000}min (partida remota/pré-clima)")
+            return
+        }
+        val lidoMs = MqttManager.getInstance().latestDrivingReadyMs
+        val readyConfiavel = lidoMs > 0 && (System.currentTimeMillis() - lidoMs) < 2 * 60_000
+        val paradoPorGear  = gear == "P"
+        val paradoPorReady = readyConfiavel && ready == 0
+        if (!paradoPorGear && !paradoPorReady) {
+            AppLogger.i(TAG, "OTA adiado: sem prova de carro parado "
+                + "(gear='$gear' ready=$ready readyConfiavel=$readyConfiavel)")
             return
         }
         if (tm.isAutoTripActive()) {
             AppLogger.i(TAG, "OTA adiado: viagem automática ativa — não instalar mid-trip")
+            return
+        }
+        // Recarga em andamento também bloqueia. O Shizuku mata o processo pra
+        // instalar, e a sessão de carga só é GRAVADA quando termina: reinstalar no
+        // meio zera o contador e a recarga inteira desaparece. Aconteceu em 03/08 —
+        // uma sessão de 44%→79% (12 kWh, 2h20) foi perdida porque o OTA entrou no
+        // meio dela, e o guard só olhava viagem e marcha.
+        //
+        // `chargingActiveNow()` e não o enum cru: em carga AC o CAN às vezes não
+        // reporta 1, e a corrente entrando é a prova que sobra.
+        if (MqttManager.getInstance().chargingActiveNow()) {
+            AppLogger.i(TAG, "OTA adiado: carregando — não instalar durante a recarga")
+            return
+        }
+        // Estado de carga DESCONHECIDO também adia. `latestChargingState = -1` é o
+        // default de "nunca li", e tratá-lo como "não está carregando" foi o que
+        // deixou o OTA entrar no meio da recarga de 05/08.
+        if (MqttManager.getInstance().latestChargingState < 0) {
+            AppLogger.i(TAG, "OTA adiado: estado de carga desconhecido (nunca lido)")
             return
         }
         executor.submit {
@@ -367,11 +421,16 @@ class UpdateManager private constructor() {
         conn.readTimeout    = 10_000
         conn.setRequestProperty("Accept", "application/vnd.github+json")
         conn.setRequestProperty("User-Agent", "EcotripImpulse/${BuildConfig.VERSION_NAME}")
-        if (conn.responseCode != 200) {
-            AppLogger.w(TAG, "GitHub API returned ${conn.responseCode}")
-            return null
-        }
-        val body = conn.inputStream.bufferedReader().readText()
+        // `disconnect()` no finally: sem ele a resposta gzip da API deixa um Inflater
+        // pendurado, e o CloseGuard cobra `end()` no proximo GC ("A resource failed to
+        // call end." no logcat). O caminho do `return null` vazava do mesmo jeito.
+        val body = try {
+            if (conn.responseCode != 200) {
+                AppLogger.w(TAG, "GitHub API returned ${conn.responseCode}")
+                return null
+            }
+            conn.inputStream.bufferedReader().use { it.readText() }
+        } finally { conn.disconnect() }
         val arr = org.json.JSONArray(body)
         // Considera SÓ releases do carro: tag "vX.Y". Ignora "cluster-vX.Y" (tablet)
         // e qualquer outra. Pega a de maior versão.

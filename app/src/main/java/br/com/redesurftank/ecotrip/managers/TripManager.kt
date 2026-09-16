@@ -210,6 +210,12 @@ data class AutoTripEntry(
     // do fato, e foi isso que custou caro ao investigar a viagem fantasma de
     // 366 km e o salto de 60 km no acumulado.
     val odoJumps:     Int     = 0,
+    // Distância INTEGRADA por velocidade na viagem, ao lado da de registro
+    // (`distKm`, que é o odômetro, ou a integrada quando ele travou). Guardar as
+    // duas é o que permite conferir uma contra a outra DEPOIS do fato — com um
+    // número só, discordância vira suspeita sem prova. Também do Haval-H6-3D,
+    // que mantém `km` e `kmIntegrated` lado a lado.
+    val distIntegKm:  Float   = 0f,
 )
 
 /**
@@ -461,6 +467,7 @@ class TripManager private constructor() {
     /** Anomalias do odômetro na sessão; a viagem guarda o delta desde o início dela. */
     private var odoAnomalias: Int = 0
     private var autoTripStartOdoAnomalias: Int = 0
+    private var autoTripStartSpeedInteg: Float = 0f
     private var latestEngineRpm:    Int    = 0
     private var latestBattPowerPct: Int    = 0  // % potência bateria (−100=regen, +100=consumo)
     private var latestOutsideTempC:    Float? = null  // null = sem leitura ainda
@@ -800,6 +807,7 @@ class TripManager private constructor() {
             // outras baselines: a viagem continuada é UMA viagem, e o contador dela
             // não pode zerar no meio.
             autoTripStartOdoAnomalias = odoAnomalias - last.odoJumps
+            autoTripStartSpeedInteg   = speedIntegDistKm - last.distIntegKm
             autoTripMaxSpeed    = last.maxSpeedKmh
             autoTripMaxPowerPct = last.maxPowerPct
             // Preserva a posição original da viagem — endTrip vai usar isso em
@@ -1751,6 +1759,7 @@ class TripManager private constructor() {
         autoTripStartElevGain = telemetryRecorder?.elevGainM ?: 0.0
         autoTripStartElevLoss = telemetryRecorder?.elevLossM ?: 0.0
         autoTripStartOdoAnomalias = odoAnomalias
+        autoTripStartSpeedInteg   = speedIntegDistKm
         autoTripEngineOffMs   = 0L
         // Nova viagem (não-resume): zera o override de posição original
         autoTripResumedStartLat = 0.0
@@ -1842,6 +1851,7 @@ class TripManager private constructor() {
             elevLossM    = ((telemetryRecorder?.elevLossM ?: 0.0) - autoTripStartElevLoss).coerceAtLeast(0.0).toFloat(),
             segments     = tripSegments,
             odoJumps     = (odoAnomalias - autoTripStartOdoAnomalias).coerceAtLeast(0),
+            distIntegKm  = (speedIntegDistKm - autoTripStartSpeedInteg).coerceAtLeast(0f),
         )
         // Descarta trip lixo: ≥60s mas sem deslocamento nem combustível (motor ligado
         // parado). Não persiste no histórico — só limpa a baseline e sai.
@@ -2016,6 +2026,7 @@ class TripManager private constructor() {
                 CarConstants.CAR_BASIC_ENGINE_SPEED.value -> {
                     latestEngineRpm = value.toInt()
                     telemetryRecorder?.latestEngineRpm = value.toInt()
+                    telemetryRecorder?.rpmConhecido = true
                 }
                 CarConstants.CAR_EV_INFO_ENERGY_OUTPUT_PERCENTAGE.value -> {
                     // % potência motor elétrico em tempo real (car.ev_info.energy_output_percentage)

@@ -169,4 +169,14 @@ object SharedPreferencesKeys {
     const val V8_SHIFT_UP_PCT  = "v8_shift_up_pct"     // fração do redline p/ upshift (0.70..0.95)
     const val V8_KICKDOWN      = "v8_kickdown"         // habilita downshift agressivo em WOT (1/0)
     const val V8_PRESET        = "v8_preset"           // nome do preset selecionado
+    /** Botão flutuante de destino por cima de outros apps. Default LIGADO — o
+     *  comportamento histórico. Desligar esconde o botão sem mexer na permissão de
+     *  overlay do sistema, então religar não pede permissão de novo. */
+    const val OVERLAY_DESTINO  = "overlay_destino"     // "1"/"0" (ausente = ligado)
+
+    /** Tela Controles (carrossel por gesto de 2 dedos) + o próprio gesto.
+     *  Default DESLIGADO: o dono não usa, e o gesto de 2 dedos disputava com atalhos
+     *  multitoque de outros apps do carro. Desligado não desenha a tela nem escuta o
+     *  gesto; ligado devolve os dois. */
+    const val CONTROLES_ATIVO  = "controles_ativo"      // "1"/"0" (ausente = desligado)
 }

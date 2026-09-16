@@ -3028,18 +3028,29 @@ function maybeSaveLifetimeSnapshot() {
 // Retorna {hybridTimeSec: 0, hybridDistKm: 0} para viagens 100% elétricas.
 function _calcHybrid(samples = []) {
   if (!samples.length) return {};   // sem amostras → campos ficam undefined (= "sem dados")
-  let hybridTimeSec = 0, hybridDistKm = 0;
+  let hybridTimeSec = 0, hybridDistKm = 0, conhecidaKm = 0;
   for (let i = 1; i < samples.length; i++) {
     const a = samples[i - 1], b = samples[i];
     const dt = (b.t || 0) - (a.t || 0);
-    if (dt > 0 && dt < 30 && (a.rpm || 0) > 50) {
-      hybridTimeSec += dt;
-      hybridDistKm  += ((a.spd || 0) + (b.spd || 0)) / 2 / 3600 * dt;
-    }
+    if (!(dt > 0 && dt < 30)) continue;
+    const trecho = ((a.spd || 0) + (b.spd || 0)) / 2 / 3600 * dt;
+    // `rpmOk === false` = o APK ainda não tinha lido o CAN; aquele rpm 0 é "não
+    // sei", não "motor desligado". Amostra antiga não tem o campo e entra como
+    // conhecida, que é o comportamento de sempre.
+    if (a.rpmOk !== false) conhecidaKm += trecho;
+    if ((a.rpm || 0) > 50) { hybridTimeSec += dt; hybridDistKm += trecho; }
   }
+  // Share EV comparando IGUAL COM IGUAL: híbrida e conhecida saem da mesma
+  // integração das mesmas amostras. Dividir a híbrida integrada pela distância do
+  // ODÔMETRO é o erro que o Haval-H6-3D corrigiu em 14/09 — uma viagem 100%
+  // elétrica marcava 99% porque os primeiros metros não tinham estado do motor.
+  const evSharePct = conhecidaKm >= RAZAO_MIN_KM
+    ? +Math.max(0, Math.min(100, (1 - hybridDistKm / conhecidaKm) * 100)).toFixed(1)
+    : null;
   return {
     hybridTimeSec: Math.round(hybridTimeSec),
     hybridDistKm:  parseFloat(hybridDistKm.toFixed(3)),
+    evSharePct,
   };
 }
 

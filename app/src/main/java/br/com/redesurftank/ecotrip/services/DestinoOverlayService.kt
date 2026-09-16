@@ -12,6 +12,7 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
+import androidx.compose.ui.graphics.toArgb
 import android.widget.TextView
 import br.com.redesurftank.ecotrip.MainActivity
 import br.com.redesurftank.ecotrip.managers.AppLogger
@@ -36,7 +37,33 @@ class DestinoOverlayService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        // Slot separado do da tela Compose: os dois escutam place_search/result e um
+        // slot único fazia o último a registrar apagar o outro.
+        MqttManager.getInstance().onNavResultOverlay = { topic, body ->
+            if (topic.endsWith("/place_search/result")) onResultadoBusca(body)
+        }
         tentar()
+    }
+
+    /// Resultado da busca chega na thread do MQTT; toda mexida em View tem que ir pra
+    /// main. Só redesenha se o painel de busca ainda estiver aberto — resultado
+    /// atrasado não deve reabrir um painel que o dono já fechou.
+    private fun onResultadoBusca(body: String) {
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            runCatching {
+                val o = org.json.JSONObject(body)
+                if (o.optBoolean("ok")) {
+                    val itens = o.optJSONArray("items")
+                    buscaItens = itens
+                    buscaMsg = if (itens == null || itens.length() == 0)
+                        "Nada encontrado para \"${o.optString("q")}\"." else null
+                } else {
+                    buscaItens = null
+                    buscaMsg = "Busca falhou: ${o.optString("error")}"
+                }
+                if (modoBusca && painel != null) rerender()
+            }.onFailure { AppLogger.w(TAG, "resultado de busca inválido: ${it.message}") }
+        }
     }
 
     /// cmd/overlay chama startService num serviço que já está rodando, e aí o
@@ -44,6 +71,15 @@ class DestinoOverlayService : Service() {
     /// retentativa não fazia absolutamente nada, e eu ficava lendo um retained
     /// antigo achando que era a tentativa nova.
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // Desligado nas configurações: derruba o que houver e NÃO pede recriação.
+        // START_NOT_STICKY aqui é essencial — com STICKY o Android reergueria o serviço
+        // e o botão voltaria sozinho na próxima partida.
+        if (!habilitado(this)) {
+            runCatching { botao?.let { wm?.removeView(it) } }
+            botao = null
+            stopSelf()
+            return START_NOT_STICKY
+        }
         if (botao == null) { tentar(); return START_STICKY }
         // Já no ar: RECRIA em vez de só relatar. "ja_no_ar" não dizia nada de útil —
         // e é justamente quando o botão existe mas não é visto que preciso da
@@ -95,15 +131,15 @@ class DestinoOverlayService : Service() {
             gravity = Gravity.CENTER
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
-                // ~70%. Antes eu somei dois efeitos (cor 66% × alpha 0.88 = 58%) e o
+                // ~38%. Antes eu somei dois efeitos (cor 66% × alpha 0.88 = 58%) e o
                 // botão sumia sobre fundo claro; 85% ficou forte demais. A borda
                 // escura é que garante o contorno visível em qualquer fundo.
-                setColor(Color.parseColor("#B300E5CC"))
+                setColor(Color.parseColor("#6200E5CC"))
                 setStroke(3, Color.parseColor("#99000000"))
             }
             // A medição no carro deu density=1.0, então dp==px: 64 virava 64px numa
             // tela de 1792 — 3,5% da largura. 100px é o alvo que se acerta dirigindo.
-            val d = (100 * resources.displayMetrics.density).toInt()
+            val d = (70 * resources.displayMetrics.density).toInt()
             minWidth = d; minHeight = d
         }
 
@@ -200,16 +236,65 @@ class DestinoOverlayService : Service() {
     /// Waze. Views nativas em vez de Compose porque aqui não há Activity nem
     /// ViewTree pra hospedar composição; a lista é curta, então não perde nada.
     ///
-    /// Só favoritos: buscar exige teclado, e pra digitar o overlay teria que
-    /// aceitar foco — o que rouba o teclado do app de baixo. Busca abre o app.
+    /// A busca também acontece AQUI. Antes ela mandava pro app, e como o Intent usa
+    /// REORDER_TO_FRONT o extra chegava em onNewIntent — que a tela não lia — então
+    /// o app abria na aba de sempre e o motorista tinha que procurar o botão de novo.
+    /// Pra digitar, a janela do painel troca de flags e aceita foco só enquanto a
+    /// busca está aberta; fora dela segue NOT_FOCUSABLE pra não roubar o teclado do
+    /// app de baixo.
     private var painel: View? = null
+    private var modoBusca = false
+    private var buscaTexto = ""
+    private var buscaItens: org.json.JSONArray? = null
+    private var buscaMsg: String? = null
+
+    /// Tamanho do painel. A tela do carro é 1792x720 com density=1.0 (dp = px), então
+    /// dá folga nos dois eixos: o painel inteiro fica em ~530px de altura contando
+    /// título, abas e o rodapé de busca. Item de ~54dp + 8 de margem = 62.
+    /// Paleta e escala do overlay. Antes eram literais espalhados: nove strings hex
+    /// e seis tamanhos ad-hoc. O teal já existia como `AuroraTeal` no Theme.kt e
+    /// estava redigitado aqui como "#00E5CC" — duas fontes de verdade pra mesma cor,
+    /// que divergem no primeiro ajuste de tema.
+    private object Cor {
+        val teal    = br.com.redesurftank.ecotrip.ui.theme.AuroraTeal.toArgb()
+        val texto   = Color.parseColor("#EEF4FF")
+        val apagado = Color.parseColor("#5B7394")
+        val fundo   = Color.parseColor("#F206080C")   // painel, com alpha
+        val item    = Color.parseColor("#141A24")
+        val sobreTeal = Color.parseColor("#06080C")   // texto sobre fundo teal
+        val ok      = Color.parseColor("#39FF88")
+    }
+    /// Piso de 14sp: o carro é lido de relance e em movimento.
+    private object Fonte {
+        const val TITULO = 19f
+        const val ITEM   = 17f
+        const val CORPO  = 16f
+        const val APOIO  = 15f
+        const val MICRO  = 14f
+    }
+    /// Mínimo do Material pra alvo de toque. As abas ficavam em ~34dp.
+    private val ALVO_MIN = 48
+
+    private val PAINEL_W = 400
+    private val ITEM_H = 62
+    private val LINHAS_VISIVEIS = 6
 
     /// Aba visível, lembrada entre aberturas: quem usa "Recentes" tende a usar de
     /// novo, e voltar sempre pra primeira aba obrigaria dois toques cada vez.
     private var abaAtiva = 0
 
+    /// Redesenha o painel mantendo o estado (aba, texto digitado). O painel é
+    /// recriado inteiro porque as flags da janela mudam entre modo lista e modo
+    /// busca, e isso exige removeView/addView.
+    private fun rerender() {
+        val estava = painel != null
+        fecharPainel()
+        if (estava) mostrarPainel()
+    }
+
     private fun mostrarPainel() {
         if (painel != null) { fecharPainel(); return }
+        if (modoBusca) { mostrarPainelBusca(); return }
         val abas = lerAbas()
         if (abaAtiva >= abas.size) abaAtiva = 0
         val favs = abas.getOrNull(abaAtiva)?.second ?: emptyList()
@@ -220,13 +305,13 @@ class DestinoOverlayService : Service() {
             setPadding(dp(14), dp(14), dp(14), dp(14))
             background = GradientDrawable().apply {
                 cornerRadius = dp(18).toFloat()
-                setColor(Color.parseColor("#F206080C"))
-                setStroke(dp(1), Color.parseColor("#00E5CC"))
+                setColor(Cor.fundo)
+                setStroke(dp(1), Cor.teal)
             }
         }
         col.addView(TextView(this).apply {
             text = "Para onde vamos?"
-            setTextColor(Color.parseColor("#EEF4FF")); textSize = 19f
+            setTextColor(Cor.texto); textSize = Fonte.TITULO
             setTypeface(null, android.graphics.Typeface.BOLD)
             setPadding(0, 0, 0, dp(10))
         })
@@ -240,26 +325,33 @@ class DestinoOverlayService : Service() {
                 linha.addView(TextView(this).apply {
                     // Contagem no rótulo: evita trocar de aba pra descobrir que está vazia.
                     text = "$titulo (${itens.size})"
-                    textSize = 14f
+                    textSize = Fonte.MICRO
                     setTypeface(null, android.graphics.Typeface.BOLD)
-                    setTextColor(Color.parseColor(if (i == abaAtiva) "#06080C" else "#5B7394"))
-                    setPadding(dp(10), dp(8), dp(10), dp(8))
+                    setTextColor(if (i == abaAtiva) Cor.sobreTeal else Cor.apagado)
+                    setPadding(dp(14), dp(8), dp(14), dp(8))
+                    gravity = Gravity.CENTER
                     background = GradientDrawable().apply {
                         cornerRadius = dp(10).toFloat()
-                        setColor(Color.parseColor(if (i == abaAtiva) "#00E5CC" else "#141A24"))
+                        setColor(if (i == abaAtiva) Cor.teal else Cor.item)
                     }
                     setOnClickListener { abaAtiva = i; fecharPainel(); mostrarPainel() }
                 }, android.widget.LinearLayout.LayoutParams(
                     android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
-                    android.widget.LinearLayout.LayoutParams.WRAP_CONTENT).apply { rightMargin = dp(6) })
+                    // 48dp: com padding de 8 a aba tinha ~34dp de altura. Trocar de aba
+                    // com o carro andando é toque de relance — abaixo do mínimo, erra.
+                    dp(ALVO_MIN)).apply { rightMargin = dp(6) })
             }
             col.addView(linha)
         }
 
         if (favs.isEmpty()) {
+            // "Meus locais" espelha a lista do iPhone. Se ela chega vazia, o motivo
+            // quase sempre é o celular ainda não ter sincronizado — dizer isso evita
+            // que a aba em branco pareça um lugar perdido.
             col.addView(TextView(this).apply {
-                text = "Nada nesta aba ainda."
-                setTextColor(Color.parseColor("#5B7394")); textSize = 15f
+                text = if (abaAtiva == 0) "Nenhum local do iPhone ainda.\nAbra a tela de destino no iPhone\npra sincronizar."
+                       else "Nada nesta aba ainda."
+                setTextColor(Cor.apagado); textSize = Fonte.APOIO
             })
         }
         // Rolagem: antes a lista era cortada em 6 itens sem aviso e o resto ficava
@@ -272,18 +364,30 @@ class DestinoOverlayService : Service() {
             listaCol.addView(TextView(this).apply {
                 val km = f.optDouble("distKm").let { if (it.isNaN()) "" else "   ${"%.1f".format(it)} km" }
                 text = f.optString("name") + km
-                setTextColor(Color.parseColor("#EEF4FF")); textSize = 17f
+                setTextColor(Cor.texto); textSize = Fonte.ITEM
                 setTypeface(null, android.graphics.Typeface.BOLD)
                 setPadding(dp(14), dp(14), dp(14), dp(14))
                 background = GradientDrawable().apply {
-                    cornerRadius = dp(12).toFloat(); setColor(Color.parseColor("#141A24"))
+                    cornerRadius = dp(12).toFloat(); setColor(Cor.item)
                 }
                 setOnClickListener {
+                    // "⏳" até o broker confirmar. O ✓ imediato era otimista: com o
+                    // MQTT fora, a publicação era descartada em silêncio e só o carro
+                    // não receber revelava — daí ter que tocar duas vezes (05/08).
+                    text = "⏳ " + f.optString("name")
+                    setTextColor(Cor.apagado)
                     MqttManager.getInstance().publishNavTo(
-                        f.optDouble("lat"), f.optDouble("lng"), f.optString("name"), "waze")
-                    text = "✓ " + f.optString("name")
-                    setTextColor(Color.parseColor("#39FF88"))
-                    postDelayed({ fecharPainel() }, 900)
+                        f.optDouble("lat"), f.optDouble("lng"), f.optString("name"), "waze") { ok ->
+                        post {
+                            if (ok) {
+                                text = "✓ " + f.optString("name"); setTextColor(Cor.ok)
+                                postDelayed({ fecharPainel() }, 900)
+                            } else {
+                                text = "✗ sem conexão — toque de novo"
+                                setTextColor(Color.parseColor("#FF6B6B"))
+                            }
+                        }
+                    }
                 }
             }, android.widget.LinearLayout.LayoutParams(
                 android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
@@ -291,7 +395,6 @@ class DestinoOverlayService : Service() {
                 bottomMargin = dp(8)
             })
         }
-        // ScrollView com altura de ~5 linhas (item ~54dp + margem 8dp).
         // Largura EXPLÍCITA na ScrollView e na lista interna. Com WRAP_CONTENT e sem
         // LayoutParams no filho, a largura degenerou e o popup virou uma faixa
         // vertical fina no meio da tela (visto no carro em 31/07) — ScrollView não
@@ -299,14 +402,14 @@ class DestinoOverlayService : Service() {
         col.addView(android.widget.ScrollView(this).apply {
             isVerticalScrollBarEnabled = true
             addView(listaCol, android.widget.FrameLayout.LayoutParams(
-                dp(330), android.widget.FrameLayout.LayoutParams.WRAP_CONTENT))
-        }, android.widget.LinearLayout.LayoutParams(dp(330), dp(5 * 62)))
+                dp(PAINEL_W), android.widget.FrameLayout.LayoutParams.WRAP_CONTENT))
+        }, android.widget.LinearLayout.LayoutParams(dp(PAINEL_W), dp(LINHAS_VISIVEIS * ITEM_H)))
 
         col.addView(TextView(this).apply {
             text = "🔍  Buscar outro lugar…"
-            setTextColor(Color.parseColor("#00E5CC")); textSize = 16f
+            setTextColor(Cor.teal); textSize = Fonte.CORPO
             setPadding(dp(14), dp(14), dp(14), dp(14))
-            setOnClickListener { fecharPainel(); abrirTelaDestino() }
+            setOnClickListener { modoBusca = true; buscaMsg = null; rerender() }
         })
 
         val lp = WindowManager.LayoutParams(
@@ -324,6 +427,156 @@ class DestinoOverlayService : Service() {
             wm?.addView(col, lp); painel = col
             MqttManager.getInstance().pedirFavoritos()   // atualiza pra próxima abertura
         }.onFailure { AppLogger.w(TAG, "painel falhou: ${it.message}") }
+    }
+
+    /// Painel de busca: campo de texto + resultados do Google (via bridge, que tem a
+    /// chave). Fica no overlay pra não interromper o Waze — sair do app de navegação
+    /// pra digitar um endereço é justamente o que este botão existe pra evitar.
+    private fun mostrarPainelBusca() {
+        val dp: (Int) -> Int = { v -> (v * resources.displayMetrics.density).toInt() }
+        val col = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding(dp(14), dp(14), dp(14), dp(14))
+            background = GradientDrawable().apply {
+                cornerRadius = dp(18).toFloat()
+                setColor(Cor.fundo)
+                setStroke(dp(1), Cor.teal)
+            }
+        }
+        col.addView(TextView(this).apply {
+            text = "Buscar lugar"
+            setTextColor(Cor.texto); textSize = Fonte.TITULO
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setPadding(0, 0, 0, dp(10))
+        })
+
+        val campo = android.widget.EditText(this).apply {
+            hint = "Ex: New Vikings, posto Shell…"
+            setHintTextColor(Cor.apagado)
+            setTextColor(Cor.texto); textSize = Fonte.ITEM
+            setPadding(dp(12), dp(12), dp(12), dp(12))
+            setSingleLine(true)
+            imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH
+            inputType = android.text.InputType.TYPE_CLASS_TEXT
+            background = GradientDrawable().apply {
+                cornerRadius = dp(12).toFloat(); setColor(Cor.item)
+            }
+            setText(buscaTexto)
+            setSelection(buscaTexto.length)
+            setOnEditorActionListener { _, _, _ -> disparaBusca(text.toString()); true }
+        }
+        col.addView(campo, android.widget.LinearLayout.LayoutParams(
+            dp(PAINEL_W), android.widget.LinearLayout.LayoutParams.WRAP_CONTENT))
+
+        val linha = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.HORIZONTAL
+            setPadding(0, dp(10), 0, dp(10))
+        }
+        fun botao(rotulo: String, fundo: String, fg: String, acao: () -> Unit) =
+            TextView(this).apply {
+                text = rotulo; textSize = Fonte.CORPO
+                setTypeface(null, android.graphics.Typeface.BOLD)
+                setTextColor(Color.parseColor(fg))
+                setPadding(dp(18), dp(10), dp(18), dp(10))
+                background = GradientDrawable().apply {
+                    cornerRadius = dp(10).toFloat(); setColor(Color.parseColor(fundo))
+                }
+                setOnClickListener { acao() }
+            }
+        linha.addView(botao("Buscar", "#00E5CC", "#06080C") { disparaBusca(campo.text.toString()) },
+            android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT).apply { rightMargin = dp(8) })
+        linha.addView(botao("Voltar", "#141A24", "#5B7394") {
+            modoBusca = false; buscaItens = null; buscaMsg = null; rerender()
+        })
+        col.addView(linha)
+
+        buscaMsg?.let {
+            col.addView(TextView(this).apply {
+                text = it
+                setTextColor(Cor.apagado); textSize = Fonte.APOIO
+                setPadding(0, 0, 0, dp(8))
+            })
+        }
+
+        val listaCol = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+        }
+        val itens = buscaItens
+        if (itens != null) for (i in 0 until itens.length()) {
+            val o = itens.optJSONObject(i) ?: continue
+            listaCol.addView(TextView(this).apply {
+                val km = o.optDouble("distKm").let { if (it.isNaN()) "" else "  ·  ${"%.1f".format(it)} km" }
+                val end = o.optString("address").let { if (it.isEmpty()) "" else "\n$it" }
+                text = o.optString("name") + km + end
+                setTextColor(Cor.texto); textSize = Fonte.CORPO
+                setPadding(dp(14), dp(12), dp(14), dp(12))
+                background = GradientDrawable().apply {
+                    cornerRadius = dp(12).toFloat(); setColor(Cor.item)
+                }
+                setOnClickListener {
+                    text = "⏳ " + o.optString("name")
+                    setTextColor(Cor.apagado)
+                    MqttManager.getInstance().publishNavTo(
+                        o.optDouble("lat"), o.optDouble("lng"), o.optString("name"), "waze") { ok ->
+                        post {
+                            if (ok) {
+                                text = "✓ " + o.optString("name"); setTextColor(Cor.ok)
+                                postDelayed({ modoBusca = false; buscaItens = null; fecharPainel() }, 900)
+                            } else {
+                                text = "✗ sem conexão — toque de novo"
+                                setTextColor(Color.parseColor("#FF6B6B"))
+                            }
+                        }
+                    }
+                }
+            }, android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(8) })
+        }
+        col.addView(android.widget.ScrollView(this).apply {
+            isVerticalScrollBarEnabled = true
+            addView(listaCol, android.widget.FrameLayout.LayoutParams(
+                dp(PAINEL_W), android.widget.FrameLayout.LayoutParams.WRAP_CONTENT))
+        }, android.widget.LinearLayout.LayoutParams(dp(PAINEL_W), dp(4 * ITEM_H)))
+
+        // SEM FLAG_NOT_FOCUSABLE: é o que permite digitar. Só nesta tela — o painel de
+        // lista continua não-focável pra não tirar o teclado de quem está embaixo.
+        val lp = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT,
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+            else @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_PHONE,
+            0,   // nenhuma flag = janela focável = o EditText recebe o teclado
+            android.graphics.PixelFormat.TRANSLUCENT,
+        ).apply {
+            gravity = Gravity.CENTER
+            softInputMode = WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE or
+                            WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
+        }
+
+        runCatching {
+            wm?.addView(col, lp); painel = col
+            campo.requestFocus()
+            // O IME não sobe junto com o addView — a janela precisa estar anexada
+            // primeiro. 250ms cobre a anexação no head unit sem piscar.
+            campo.postDelayed({
+                runCatching {
+                    (getSystemService(INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager)
+                        .showSoftInput(campo, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+                }
+            }, 250)
+        }.onFailure { AppLogger.w(TAG, "painel de busca falhou: ${it.message}") }
+    }
+
+    private fun disparaBusca(texto: String) {
+        buscaTexto = texto.trim()
+        if (buscaTexto.length < 3) { buscaMsg = "Digite ao menos 3 letras."; rerender(); return }
+        buscaMsg = "Buscando \"$buscaTexto\"…"
+        buscaItens = null
+        MqttManager.getInstance().buscarLugar(buscaTexto)
+        rerender()
     }
 
     private fun fecharPainel() {
@@ -363,6 +616,7 @@ class DestinoOverlayService : Service() {
     }
 
     override fun onDestroy() {
+        MqttManager.getInstance().onNavResultOverlay = null
         fecharPainel()
         runCatching { botao?.let { wm?.removeView(it) } }
         botao = null
@@ -379,7 +633,23 @@ class DestinoOverlayService : Service() {
         fun temPermissao(ctx: Context): Boolean =
             Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(ctx)
 
+        /// Botão habilitado nas configurações? Ausente = ligado (comportamento histórico).
+        ///
+        /// A checagem vive AQUI, e não só em quem chama, porque havia dois caminhos que
+        /// religavam o botão por fora do toggle: um `LaunchedEffect` na ConsumptionScreen
+        /// que subia o overlay ao ver a permissão concedida, e o `START_STICKY`, que faz o
+        /// Android reerguer o serviço sozinho e redesenhar o botão. Era isso que fazia ele
+        /// aparecer a cada partida e sumir em seguida (31/08).
+        fun habilitado(ctx: Context): Boolean =
+            ctx.getSharedPreferences(
+                br.com.redesurftank.ecotrip.models.SharedPreferencesKeys.PREFS_NAME,
+                Context.MODE_PRIVATE,
+            ).getString(
+                br.com.redesurftank.ecotrip.models.SharedPreferencesKeys.OVERLAY_DESTINO, "1",
+            ) != "0"
+
         fun ligar(ctx: Context) {
+            if (!habilitado(ctx)) { AppLogger.i(TAG, "botão desligado nas configurações — não sobe"); return }
             if (!temPermissao(ctx)) { AppLogger.w(TAG, "sem permissão de overlay"); return }
             runCatching { ctx.startService(Intent(ctx, DestinoOverlayService::class.java)) }
         }

@@ -108,7 +108,11 @@ fun ConsumptionScreen() {
     // Layout da home + estado do corpo do carro (pro carro interativo)
     var homeLayout by remember { mutableStateOf(tripManager.getHomeLayout()) }
     // Carrossel: false = tela favorita (homeLayout 0/1/2) · true = Controles (WebView)
-    var controlesOpen by remember { mutableStateOf(tripManager.getControlesOpen()) }
+    // Desligado nas configurações nunca abre, mesmo que a preferência tenha ficado
+    // `true` de antes — senão a tela apareceria sem o gesto pra sair dela.
+    var controlesOpen by remember {
+        mutableStateOf(tripManager.isControlesAtivo() && tripManager.getControlesOpen())
+    }
     // Gesto de 2 dedos na favorita (MainActivity) abre Controles; swipe no limite volta.
     DisposableEffect(Unit) {
         br.com.redesurftank.ecotrip.ui.screens.ControlesWebHost.onEnterRequest = {
@@ -806,6 +810,7 @@ fun ConsumptionScreen() {
         // precisar reabrir o app.
         LaunchedEffect(showDestino, anyOverlay) {
             val ok = br.com.redesurftank.ecotrip.services.DestinoOverlayService.temPermissao(ctxAct)
+                && br.com.redesurftank.ecotrip.services.DestinoOverlayService.habilitado(ctxAct)
             if (ok && semOverlay) {
                 semOverlay = false
                 br.com.redesurftank.ecotrip.services.DestinoOverlayService.ligar(ctxAct)

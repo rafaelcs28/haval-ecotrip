@@ -96,10 +96,18 @@ class CarTelemetryService : Service() {
         // app — então o overlay nunca subia sozinho. Aqui ele existe desde o boot,
         // que é o ponto: o atalho tem que estar lá quando o Waze está na frente.
         runCatching { DestinoOverlayService.ligar(this) }
+        // Rede de segurança: se este serviço morrer sem boot em seguida, o alarme
+        // periódico é o que o traz de volta (ver BootReceiver.agendarVigia).
+        runCatching { br.com.redesurftank.ecotrip.receivers.BootReceiver.agendarVigia(this) }
         // Conectividade vem do Impulse (ContentProvider), não recalculada aqui: o
         // cálculo pesado — shell do HotRouter via Shizuku, estado do 4G — já roda no
         // processo dele, e duplicar faria as duas telas poderem divergir.
         runCatching { br.com.redesurftank.ecotrip.managers.ConnectivityStatusReader.start(this) }
+        // Medidor de CPU/RAM: só registra o contexto. Fica desligado até o app iOS
+        // pedir — um medidor que roda sempre é ele mesmo um custo.
+        runCatching { br.com.redesurftank.ecotrip.managers.PerfProbe.start(this) }
+        runCatching { br.com.redesurftank.ecotrip.managers.NavProbe.start(this) }
+        runCatching { br.com.redesurftank.ecotrip.managers.MediaProbe.start(this) }
         super.onCreate()
         current = this
         createChannel()
@@ -109,6 +117,18 @@ class CarTelemetryService : Service() {
         // garantimos que estão "tocados" (init feito). Nenhum trabalho extra.
         try { MqttManager.getInstance() } catch (_: Exception) {}
         try { TripManager.getInstance() } catch (_: Exception) {}
+        // GPS: só a Activity ligava, então iniciar no boot sem abrir a tela deixava o
+        // carro sem trajeto. Aqui NÃO se pede permissão (isso exige Activity) — se ela
+        // ainda não foi concedida, o dono abre o app uma vez e a tela cuida disso.
+        if (androidx.core.content.ContextCompat.checkSelfPermission(
+                this, android.Manifest.permission.ACCESS_FINE_LOCATION) ==
+            android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            try { TripManager.getInstance().startGps() } catch (e: Exception) {
+                AppLogger.w(TAG, "startGps no serviço falhou: ${e.message}")
+            }
+        } else {
+            AppLogger.w(TAG, "sem permissão de localização — GPS começa quando o app for aberto")
+        }
         try { CarDataManager.getInstance() } catch (_: Exception) {}
         // Motor de automações local (geofence/horário/estado → vidro/teto/cortina…).
         try { br.com.redesurftank.ecotrip.managers.AutomationManager.init(this) } catch (_: Exception) {}
