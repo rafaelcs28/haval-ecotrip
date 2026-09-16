@@ -201,6 +201,15 @@ data class AutoTripEntry(
     // v6.69 — segmentos por modo de condução. Cada troca de one-pedal/regen/
     // estilo/powertrain fecha um segmento; default vazio = retrocompat Gson.
     val segments:     List<TripSegment> = emptyList(),
+    // Quantas vezes o odômetro se comportou mal nesta viagem (travou, voltou com
+    // salto de catch-up, ou andou mais do que o tempo permite). A distância já é
+    // curada por integração de velocidade; este contador existe pra a anomalia
+    // ficar VISÍVEL em vez de só corrigida em silêncio — ideia emprestada do
+    // Haval-H6-3D, que guarda `odoJumps` ao lado da distância. Sem ele, uma
+    // viagem com odômetro maluco é indistinguível de uma viagem normal depois
+    // do fato, e foi isso que custou caro ao investigar a viagem fantasma de
+    // 366 km e o salto de 60 km no acumulado.
+    val odoJumps:     Int     = 0,
 )
 
 /**
@@ -449,6 +458,9 @@ class TripManager private constructor() {
     // pra rebasear o salto de catch-up quando o odômetro voltar (evita contar 2x).
     private var speedDistAtLastOdoTick: Float = 0f
     private var odoWasStalled: Boolean = false
+    /** Anomalias do odômetro na sessão; a viagem guarda o delta desde o início dela. */
+    private var odoAnomalias: Int = 0
+    private var autoTripStartOdoAnomalias: Int = 0
     private var latestEngineRpm:    Int    = 0
     private var latestBattPowerPct: Int    = 0  // % potência bateria (−100=regen, +100=consumo)
     private var latestOutsideTempC:    Float? = null  // null = sem leitura ainda
@@ -536,6 +548,15 @@ class TripManager private constructor() {
                     // descontava uma perda que já está fora deste número.
                     val energyFromSoc = (socDelta / 100f) * 34f
                     val finalEnergyKwh = maxOf(chargeSessionEnergyKwh, energyFromSoc)
+                    // Registra SEMPRE as entradas da decisão. Em 11/08 uma sessão saiu
+                    // com 16,27 kWh para 15→79% (esperado 21,76): o `maxOf` deveria ter
+                    // pego o SOC, e a aritmética indica que o ΔSOC visto AQUI foi ~48
+                    // pontos, não 64 — mas sem log das entradas não deu pra provar qual
+                    // valor divergiu. Sem esta linha, o mesmo caso volta indecifrável.
+                    AppLogger.i(TAG, "Fecha recarga: startSoc=$chargeSessionStartSoc endSoc=$latestSocPct "
+                        + "socDelta=$socDelta pxt=${chargeSessionEnergyKwh}kWh soc=${energyFromSoc}kWh "
+                        + "escolhido=${finalEnergyKwh}kWh dur=${chargeSessionSec}s "
+                        + "amostras=${chargeSessionSamples.size}")
                     if (!startSocOk) {
                         AppLogger.w(TAG, "startSoc inválido (0) — fallback por SOC delta DESLIGADO nesta sessão; energia = P×t (${chargeSessionEnergyKwh}kWh)")
                     } else if (energyFromSoc > chargeSessionEnergyKwh * 1.5f) {
@@ -775,6 +796,10 @@ class TripManager private constructor() {
             autoTripStartEnergy = lifeEnergyKwh - last.energyKwh
             autoTripStartRegen  = lifeRegenKwh  - last.regenKwh
             autoTripStartFuelL  = lifeFuelL    - last.fuelL
+            // Retomada herda as anomalias do trecho anterior, no mesmo estilo das
+            // outras baselines: a viagem continuada é UMA viagem, e o contador dela
+            // não pode zerar no meio.
+            autoTripStartOdoAnomalias = odoAnomalias - last.odoJumps
             autoTripMaxSpeed    = last.maxSpeedKmh
             autoTripMaxPowerPct = last.maxPowerPct
             // Preserva a posição original da viagem — endTrip vai usar isso em
@@ -1253,7 +1278,21 @@ class TripManager private constructor() {
             prefs.edit().putInt(SharedPreferencesKeys.HOME_LAYOUT, v.coerceIn(0, 2)).apply()
     }
 
+    /** Tela Controles habilitada? Ausente = false (default desligado).
+     *  Guarda `isInitialized` como os vizinhos: este manager é singleton e pode ser
+     *  consultado antes do `prefs` existir. */
+    fun isControlesAtivo(): Boolean =
+        ::prefs.isInitialized && prefs.getString(SharedPreferencesKeys.CONTROLES_ATIVO, "0") == "1"
+
+    fun setControlesAtivo(v: Boolean) {
+        if (!::prefs.isInitialized) return
+        prefs.edit().putString(SharedPreferencesKeys.CONTROLES_ATIVO, if (v) "1" else "0").apply()
+        // Desligar fecha o carrossel: sem o gesto não haveria como sair da tela.
+        if (!v) setControlesOpen(false)
+    }
+
     /** Carrossel: tela Controles em foco (true) ou a favorita (false). */
+
     fun getControlesOpen(): Boolean =
         if (::prefs.isInitialized) prefs.getBoolean(SharedPreferencesKeys.CONTROLES_OPEN, false) else false
     fun setControlesOpen(v: Boolean) {
@@ -1654,7 +1693,21 @@ class TripManager private constructor() {
                     onAutoTripEnd()
                     saveGearTransitionCheckpoint()
                 }
-                // wasReady==isReady: estado repetido (ex: reconexão/restart) — sem ação
+                // Carro JÁ ligado e nenhuma viagem aberta: o app subiu no meio do
+                // trajeto (reinstalação por OTA, morte do processo, abertura manual).
+                // Antes isto caía em "estado repetido — sem ação" e a viagem nunca
+                // era aberta: o painel mostrava os números ao vivo, dando a impressão
+                // de que estava gravando, mas `autoTripStartMs` seguia 0.
+                //
+                // Duas consequências, as duas vistas em 01/08: o trajeto não era
+                // gravado, e `isAutoTripActive()` retornava false — desarmando o
+                // guard que impede o OTA de instalar no meio da viagem. O update
+                // entrou, matou o processo e o contador zerou na cara do motorista.
+                wasReady && isReady && autoTripStartMs == 0L -> {
+                    AppLogger.w(TAG, "Carro ligado sem viagem aberta (app subiu mid-trip) — abrindo agora")
+                    onAutoTripStart()
+                }
+                // wasReady==isReady com viagem já aberta: repetição de estado — sem ação
             }
         }
         // Guarda-estacionamento: arma ao desligar (1→0), desarma ao ligar (0→1).
@@ -1697,6 +1750,7 @@ class TripManager private constructor() {
         autoTripStartPausedMs = lifeTotalPausedMs + (if (lifeGearPauseStartMs > 0L) System.currentTimeMillis() - lifeGearPauseStartMs else 0L)
         autoTripStartElevGain = telemetryRecorder?.elevGainM ?: 0.0
         autoTripStartElevLoss = telemetryRecorder?.elevLossM ?: 0.0
+        autoTripStartOdoAnomalias = odoAnomalias
         autoTripEngineOffMs   = 0L
         // Nova viagem (não-resume): zera o override de posição original
         autoTripResumedStartLat = 0.0
@@ -1787,6 +1841,7 @@ class TripManager private constructor() {
             elevGainM    = ((telemetryRecorder?.elevGainM ?: 0.0) - autoTripStartElevGain).coerceAtLeast(0.0).toFloat(),
             elevLossM    = ((telemetryRecorder?.elevLossM ?: 0.0) - autoTripStartElevLoss).coerceAtLeast(0.0).toFloat(),
             segments     = tripSegments,
+            odoJumps     = (odoAnomalias - autoTripStartOdoAnomalias).coerceAtLeast(0),
         )
         // Descarta trip lixo: ≥60s mas sem deslocamento nem combustível (motor ligado
         // parado). Não persiste no histórico — só limpa a baseline e sai.
@@ -2107,15 +2162,31 @@ class TripManager private constructor() {
                     // Voltou após travada: NÃO conta o salto de catch-up (já contamos por
                     // velocidade durante a travada). Rebase abaixo zera o delta deste tick.
                     odoWasStalled = false
+                    odoAnomalias++
                     AppLogger.w(TAG, "Odômetro voltou — rebase do salto (já contado por velocidade)")
                     0f
-                } else dDistOdo
+                } else {
+                    // Salto que o TEMPO não justifica. O critério é independente da
+                    // velocidade de propósito: quando ela falta, `stallGap` fica 0 e
+                    // comparar com ela acusaria toda janela como anomalia. 200 km/h é
+                    // teto físico folgado; +0,5 km absorve a resolução grossa (~100 m)
+                    // e o jitter entre ticks. NÃO altera a distância — só marca, porque
+                    // aqui eu não sei qual das duas fontes mentiu.
+                    val janelaH = (now - lifeSessStartMs).coerceAtLeast(0L) / 3_600_000f
+                    if (dDistOdo > 200f * janelaH + 0.5f) {
+                        odoAnomalias++
+                        AppLogger.w(TAG, "Odômetro saltou ${"%.2f".format(dDistOdo)}km em "
+                            + "${"%.0f".format(janelaH * 3600f)}s — implausível, marcado (distância mantida)")
+                    }
+                    dDistOdo
+                }
             }
             // Sem degrau do odômetro, mas a velocidade já andou >300m desde o último tick:
             // travado de verdade → conta por integração de velocidade.
             stallGap > ODO_STALL_GAP_KM -> {
                 val dSpeed = if (!odoWasStalled) stallGap  // 1ª janela: recupera o gap desde o último tick
                              else max(0f, speedIntegDistKm - lifeSpeedSessStartDist)
+                if (!odoWasStalled) odoAnomalias++   // conta a ENTRADA em travada, não cada janela
                 odoWasStalled = true
                 AppLogger.w(TAG, "Odômetro travado — fallback velocidade: +${"%.3f".format(dSpeed)}km")
                 dSpeed

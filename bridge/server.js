@@ -22,6 +22,7 @@ const impulseHelp = require('./impulse-help');
 const carHelp     = require('./car-help');
 const bluettiCloud = require('./bluetti-cloud');
 const starlink     = require('./starlink-sitio');
+const sajCloud     = require('./saj-cloud');   // nuvem SAJ direta (Catalão), sem o HA no caminho
 
 // Sem isto, uma rejection/exception fora de rota (timer, callback MQTT, fetch em
 // background) derrubava o processo inteiro. Loga e segue — pm2 só reinicia em crash real.
@@ -954,18 +955,26 @@ function _alert(id, firing, title, body, priority = 'default', tags = [], opts =
     }
   } else if (firing && prev.firing && !prev.notified && (now - prev.firedAt) >= fireDelay) {
     // falha persistiu o tempo mínimo → primeira notificação
-    _alertState.set(id, { ...prev, lastNotifiedAt: now, notified: true });
+    _alertState.set(id, { ...prev, lastNotifiedAt: now, notified: true, title, priority });
     if (!opts.silent) _ntfy(title, body, priority, tags);
     _recordHealthEvent(id, title + ': ' + body);
   } else if (firing && prev.firing && prev.notified && (now - prev.lastNotifiedAt) > repeatEvery) {
     // repetição (ainda caído, cooldown passou). No silêncio noturno só marca o
     // tempo (pra reset do backoff) mas NÃO manda push — evita spammar de noite.
-    _alertState.set(id, { ...prev, lastNotifiedAt: now });
+    _alertState.set(id, { ...prev, lastNotifiedAt: now, title, priority });
     if (_inQuietHours()) {
       _recordHealthEvent(id, title + ' (ainda, silenciado noturno): ' + body);
     } else {
       if (!opts.silent) _ntfy(title + ' (ainda)', body, 'low', tags);
       _recordHealthEvent(id, title + ' (ainda): ' + body);
+    }
+  } else if (firing && prev.firing) {
+    // Nada a notificar neste ciclo, mas o TEXTO tem que acompanhar: ele era
+    // gravado só no disparo inicial e congelava. Efeito: mudar a redação de um
+    // alerta não valia enquanto ele estivesse ativo, e texto que carrega valor
+    // vivo (a causa vinda do HA, por exemplo) nunca aparecia. 15/09.
+    if (prev.title !== title || prev.priority !== priority) {
+      _alertState.set(id, { ...prev, title, priority });
     }
   } else if (!firing && prev.firing) {
     // recuperado — só notifica se tinha enviado alerta
@@ -1336,12 +1345,22 @@ function _checkAlerts() {
   }
 }
 
-// Aguarda 60s no boot antes de começar a checar (deixa os pollers inicializarem)
-setTimeout(() => {
-  _lastRestartCount = _healthEvents.filter(e => e.type === 'restart' && !e.planned && e.ts > Date.now() - 3600_000).length;
-  _checkAlerts();
-  setInterval(_checkAlerts, 60_000);
-}, 60_000);
+// Aguarda 60s no boot antes de começar a checar (deixa os pollers inicializarem).
+//
+// Armado de dentro do `server.listen`, NÃO no topo: `_checkAlerts` lê `mqttClient`,
+// que é `const` lá pelo fim do arquivo. Armando aqui em cima, existia uma janela
+// em que o timer disparava antes da linha do `const` ter sido avaliada — e `const`
+// em TDZ LANÇA em vez de devolver undefined, derrubando o processo com
+// "Cannot access 'mqttClient' before initialization" (14/09, 2 vezes seguidas).
+// O callback do listen só roda com o módulo inteiro avaliado, então a ordem
+// passa a ser garantida em vez de provável.
+function _armaChecagemDeAlertas() {
+  setTimeout(() => {
+    _lastRestartCount = _healthEvents.filter(e => e.type === 'restart' && !e.planned && e.ts > Date.now() - 3600_000).length;
+    _checkAlerts();
+    setInterval(_checkAlerts, 60_000);
+  }, 60_000);
+}
 
 // Registra o boot desta instância. `planned` = o processo anterior saiu por sinal
 // (pm2 restart/stop = ajuste/deploy) e deixou o marker; senão foi queda (crash).
@@ -1524,6 +1543,19 @@ const DRIVE_HISTORY_FILE  = path.join(DATA_DIR, 'drive_history.json');
 const BATTERY_CAPACITY_KWH = 34;
 const BATTERY_USEFUL_KWH   = +(BATTERY_CAPACITY_KWH * 0.88).toFixed(2);
 const TANK_CAPACITY_L      = 55;
+
+// ── Quando uma razão não significa nada ──────────────────────────────────────
+// Abaixo destes pisos, km/L e kWh/100km viram ruído: dividir por uma distância ou
+// um volume minúsculo transforma erro de arredondamento em número grande. O piso
+// vinha escolhido no olho em cada ponto (0,1 / 0,3 / 0,5 km; 0,01 L), e a mesma
+// viagem aparecia com razão numa tela e sem em outra.
+//
+// Ideia emprestada do Haval-H6-3D, que centraliza os pisos em constantes nomeadas
+// e devolve NaN. Aqui devolvemos `null`, que é como o resto do bridge já diz "sem
+// dado" — o importante é a regra: sem piso atingido, NÃO se inventa número. Zero
+// seria pior que null, porque 0 kWh/100km lê como eficiência perfeita.
+const RAZAO_MIN_KM = 0.1;    // 100 m
+const RAZAO_MIN_L  = 0.05;   // 50 mL — mesmo piso do 3D (MIN_FUEL_FOR_RATIO_L)
 // Aplica o offset de calibração manual ao valor bruto do sensor de combustível.
 function _fuelWithCalib(rawL) { return +Math.max(0, rawL + (state.fuel_calib_offset_l || 0)).toFixed(1); }
 const NOTIF_PREFS_FILE    = path.join(DATA_DIR, 'notif_prefs.json');
@@ -6294,11 +6326,60 @@ async function _fetchSolarStatus() {
       const t = Date.parse(plant.last_upload_iso);
       if (!isNaN(t)) stale_min = Math.round((Date.now() - t) / 60_000);
     }
-    return { plant, invs, stale_min, ts: Date.now() };
+    return { plant, invs, stale_min, ts: Date.now(), fonte: 'ha' };
   } catch (e) { return null; }
 }
+
+/**
+ * Catalão com a nuvem SAJ como fonte PRIMÁRIA e o HA como reserva.
+ *
+ * Existe porque em 15/09/2026 a usina ficou ~3h invisível sem ter nada de errado:
+ * a SAJ passou a bloquear o User-Agent do `requests` e a integração comunitária
+ * do HA parou inteira. Cada campo vem da melhor fonte disponível, e a falta de
+ * uma NÃO apaga a outra:
+ *   · potência / energia / online  → SAJ (direto, sem intermediário)
+ *   · temperatura e strings        → HA (a SAJ não expõe: `invTemp` vem vazio)
+ * Sem nenhuma das duas, o campo é null — nunca 0, que seria afirmar geração zero.
+ */
+async function _fetchSolarCombinado() {
+  const [ha, cloud] = await Promise.all([
+    _fetchSolarStatus(),
+    sajCloud.lePlanta().catch(() => null),
+  ]);
+  if (!cloud) return ha;                      // nuvem fora: segue como sempre foi
+  if (!ha) {
+    // Sem HA: serve o que a SAJ tem, e temperatura fica null (o desenho mostra
+    // "—", não zero). Melhor meia leitura verdadeira que nenhuma.
+    return {
+      plant: { online: cloud.online, pv_power: cloud.pv_power, energy_today: cloud.energy_today,
+               energy_month: cloud.energy_month, energy_total: cloud.energy_total, status: null,
+               inverter_status: null, last_upload_iso: null },
+      invs: cloud.invs.map((i, n) => ({ label: `Inv ${String.fromCharCode(65 + n)}`,
+        short: i.sn.slice(-5), power: i.power, temperature: null,
+        energy_today: i.energy_today, status: i.status, strings: [] })),
+      stale_min: null, ts: cloud.ts, fonte: 'saj-cloud',
+      invs_reporting: cloud.invs_reportando, invs_total: cloud.invs_total,
+    };
+  }
+  // As duas vivas: SAJ manda nos números, HA completa o que ela não dá. O casamento
+  // é pelo final do serial, que é o que os dois lados têm em comum.
+  const porSn = new Map(cloud.invs.map(i => [String(i.sn).slice(-5).toUpperCase(), i]));
+  const invs = ha.invs.map((h) => {
+    const c = porSn.get(String(h.short || '').toUpperCase());
+    return c ? { ...h, power: c.power, energy_today: c.energy_today, status: c.status ?? h.status } : h;
+  });
+  return {
+    ...ha,
+    plant: { ...ha.plant, online: cloud.online, pv_power: cloud.pv_power,
+             energy_today: cloud.energy_today, energy_month: cloud.energy_month,
+             energy_total: cloud.energy_total },
+    invs,
+    fonte: 'saj-cloud+ha',
+    invs_reporting: cloud.invs_reportando, invs_total: cloud.invs_total,
+  };
+}
 async function _solarTick() {
-  const d = await _fetchSolarStatus();
+  const d = await _fetchSolarCombinado();
   if (d) {
     const sun = await _fetchCatalaoSun();
     d.sunrise_ms = sun.sunrise_ms || null;
@@ -6308,7 +6389,10 @@ async function _solarTick() {
   }
   _evalSolarAlerts().catch(() => {});
 }
-setInterval(() => { _solarTick().catch(() => {}); }, 60_000);
+// 1 minuto. Explícito em env pra não ficar escondido num literal: é este tique
+// que fala com a nuvem SAJ desde 15/09/2026, não só com o HA.
+const SOLAR_POLL_MS = +(process.env.SOLAR_POLL_MS || 60_000);
+setInterval(() => { _solarTick().catch(() => {}); }, SOLAR_POLL_MS);
 setTimeout(() => { _solarTick().catch(() => {}); }, 7_000);
 
 // Alertas do solar. Prioriza clareza: planta offline > inversor alarm >
@@ -6376,9 +6460,18 @@ async function _evalSolarAlerts() {
   // 1) Planta offline (sem comm com cloud SAJ) — só na janela em que o
   // inversor DEVERIA estar reportando (sunrise+45min → sunset-30min). O
   // gate "daytime" simples dispara às 06:29 antes do inversor acordar.
+  // Só sonda quando há motivo: planta aparentemente offline em janela ativa.
+  if (p.online === false && invHours) await _sondaIntegracaoSolar();
+  // O título dizia "sem comunicação" e era lido como "a usina caiu" — com a
+  // usina gerando normal e o app da SAJ mostrando tudo certo (15/09). Quem fica
+  // sem comunicação é o CAMINHO até ela (integração no HA → nuvem SAJ), e o
+  // título tem que dizer isso. A causa exata vem do estado da entrada no HA,
+  // porque alerta sem diagnóstico só transfere o trabalho de investigar.
   _alert('solar_plant_offline', p.online === false && invHours,
-    '☀️ Solar Catalão — sem comunicação',
-    `SAJ Elekeeper cloud sem dados em janela ativa do inversor. Inversores podem estar operando OK, mas monitoramento cego.`,
+    '☀️ Catalão — sem dados da nuvem SAJ',
+    `Sem leitura em janela ativa do inversor. A usina pode estar gerando normalmente `
+    + `— confira no app SAJ. Quem está mudo é o caminho até ela.`
+    + (_haSolarEntry ? ` Integração no HA: ${_haSolarEntry}` : ''),
     'high', ['warning', 'sun.max']);
   // 2) Inverter status = alarm — só de dia. plant.status agora vem do sensor
   // da PLANTA (Normal/Offline/Alarm); o campo antigo do inversor (agora em
@@ -6462,7 +6555,7 @@ async function _evalSolarAlerts() {
 app.get('/api/solar-status', async (_req, res) => {
   const now = Date.now();
   if (!_solarCache.data || (now - _solarCache.ts) > 60_000) {
-    const d = await _fetchSolarStatus();
+    const d = await _fetchSolarCombinado();
     if (d) _solarCache = { data: d, ts: now };
   }
   if (!_solarCache.data) return res.status(502).json({ error: 'solar indisponível' });
@@ -6519,6 +6612,26 @@ function _dayStartMonthKwh(key) {
 // Grava snapshot HORÁRIO por sistema (potência atual + energia acumulada) na
 // primeira vez que passa aquela hora. Serve pra colorir "gerando agora" e
 // "hoje" no card comparando com mediana histórica da MESMA hora.
+// Estado da integração `saj_esolar_air` no HA. Só é consultado quando a planta
+// aparece offline (e no máximo 1x a cada 5min): serve pra o alerta dizer POR QUE
+// está cego — "403 da nuvem SAJ" é acionável, "sem comunicação" não é.
+let _haSolarEntry = null, _haSolarEntryAt = 0;
+async function _sondaIntegracaoSolar() {
+  if (Date.now() - _haSolarEntryAt < 5 * 60_000) return;
+  _haSolarEntryAt = Date.now();
+  try {
+    const r = await fetch(`${HA_URL}/api/config/config_entries/entry`, {
+      headers: { Authorization: `Bearer ${HA_TOKEN}` },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!r.ok) return;
+    const e = (await r.json()).find(x => x.domain === 'saj_esolar_air');
+    if (!e) return;
+    const motivo = String(e.reason || '').replace(/https?:\/\/\S+/, '(url)').slice(0, 120);
+    _haSolarEntry = e.state === 'loaded' && !motivo ? null : `${e.state}${motivo ? ' — ' + motivo : ''}`;
+  } catch (_) { /* sonda é auxiliar: falhar aqui não pode atrapalhar o alerta */ }
+}
+
 function _recordSolarSnap(key, powerW, genKwh) {
   const now = new Date(), h = now.getHours();
   if (h < 7 || h >= 19) return;               // só janela solar
@@ -7201,6 +7314,8 @@ app.get('/api/monitor-glance', requireAuth, (_req, res) => {
   });
 });
 
+let _spAddr = { key: null, txt: null };   // endereço da Song Pro, resolvido em background
+
 // ── GET /api/wall/detail — o número da parede, aberto ────────────────────────
 // A parede mostra UM número por coisa. Este endpoint responde "de onde saiu?":
 // devolve as leituras cruas que produziram aquele número, com unidade e idade.
@@ -7229,8 +7344,9 @@ app.get('/api/wall/detail', requireAuth, (req, res) => {
     add('Potência agora', (a.pv_power ?? a.ac_power_w) != null ? `${Math.round(a.pv_power ?? a.ac_power_w)} W` : null);
     add('Gerado hoje',  kwh(a.energy_today ?? a.gen_today_kwh),
         c.p.gen_today_src ? `fonte: ${c.p.gen_today_src}` : null);
-    add('Gerado no mês', kwh(a.gen_month_kwh));
-    add('Acumulado', kwh(a.gen_total_kwh, 0));
+    // Catalão (SAJ) chama de energy_month/energy_total; Solis, de gen_*_kwh.
+    add('Gerado no mês', kwh(a.energy_month ?? a.gen_month_kwh));
+    add('Acumulado', kwh(a.energy_total ?? a.gen_total_kwh, 0));
     const exp = c.p.expected;
     add('Esperado nesta hora', exp?.median_power != null ? `${exp.median_power} W` : null,
         exp ? `mediana de ${exp.samples} dias` : 'histórico insuficiente');
@@ -7276,6 +7392,9 @@ app.get('/api/wall/detail', requireAuth, (req, res) => {
         add('Falta', `${sp.remainingMin} min`);
       }
       if (sp.finished) add('Última recarga', `${sp.finishedKwh} kWh → ${sp.finishedSoc}%`, idade(sp.finishedAtMs));
+      const pt = _songProTrail[_songProTrail.length - 1];
+      add('Onde está', _spAddr.txt || (pt ? 'resolvendo endereço…' : null),
+          pt ? `${pt.lat.toFixed(5)}, ${pt.lng.toFixed(5)}` : null);
       add('Leitura de', idade(sp.updatedAtMs));
       return res.json({ title: 'BYD Song Pro (Grasi)', rows: R });
     }
@@ -7283,9 +7402,51 @@ app.get('/api/wall/detail', requireAuth, (req, res) => {
     add('Carregando', state.charging_state === 'Carregando' ? 'sim' : (state.charging_state || 'não'));
     add('Potência de recarga', state.charge_power_kw != null ? `${state.charge_power_kw} kW` : null);
     add('Acordado', _carIsAwake() ? 'sim' : 'não');
+    add('Onde está', String(state.current_address || '').replace(/,\s*\d{5}-?\d{3}\s*$/, '') || null,
+        (state.gps_lat != null && state.gps_lng != null)
+          ? `${(+state.gps_lat).toFixed(5)}, ${(+state.gps_lng).toFixed(5)}` : null);
     add('Última publicação do APK', idade(state.last_apk_ms));
     add('Última leitura da GWM', idade(state.last_gwm_ms));
     return res.json({ title: 'Haval H6 GT', rows: R });
+  }
+
+  if (tipo === 'ocorrencias') {
+    // "15x Catalão sem comunicação" só vira acionável com os HORÁRIOS: é o
+    // padrão (madrugada? sempre na mesma hora?) que diz o que investigar.
+    const corte = now - 7 * 86400_000;
+    const quais = _healthEvents.filter(e => e.type === alvo && e.ts >= corte).reverse();
+    for (const e of quais.slice(0, 60)) {
+      const d = new Date(e.ts);
+      add(d.toLocaleString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit',
+                                      hour: '2-digit', minute: '2-digit' }),
+          String(e.msg || '').split(':').slice(1).join(':').trim().slice(0, 110) || '—');
+    }
+    if (!quais.length) add('sem registro', 'nada nos últimos 7 dias');
+    const titulo = (_alertState.get(alvo)?.title) || alvo;
+    return res.json({ title: `${titulo} · ${quais.length}x em 7 dias`, rows: R });
+  }
+
+  if (tipo === 'eventos') {
+    // Log dos últimos 7 dias, agrupando repetição consecutiva do mesmo tipo.
+    // Só sob demanda: no payload do ciclo isto seriam dezenas de KB a cada 2s.
+    const corte = now - 7 * 86400_000;
+    const linhas = [];
+    for (const e of _healthEvents.slice().reverse()) {
+      if (e.ts < corte) break;
+      const ult = linhas[linhas.length - 1];
+      if (ult && ult.tipo === e.type) { ult.n++; continue; }
+      linhas.push({ tipo: e.type, ts: e.ts, n: 1,
+                    msg: String(e.msg || '').split('\n')[0].slice(0, 120) });
+      if (linhas.length >= 120) break;
+    }
+    for (const l of linhas) {
+      const d = new Date(l.ts);
+      add(d.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit',
+                                      hour: '2-digit', minute: '2-digit' }),
+          l.msg, l.n > 1 ? `${l.n}x` : null);
+    }
+    if (!linhas.length) add('sem eventos', 'nada registrado em 7 dias');
+    return res.json({ title: `Eventos · 7 dias (${linhas.length})`, rows: R });
   }
 
   if (tipo === 'host') {
@@ -7322,6 +7483,22 @@ app.get('/api/wall/detail', requireAuth, (req, res) => {
       for (const x of _pixbot) add(x.label, x.up ? 'no ar' : 'fora', x.url || null);
     } else if (/Driver Cred/.test(nome)) {
       add('Estado', _credito?.up ? 'no ar' : 'fora', _credito?.url || null);
+      const vg = _credito?.vigia, fl = vg && vg.fila;
+      if (vg?.erro) add('Resumo do vigia', 'indisponível', vg.erro);
+      if (fl) {
+        add('Fila de envio', `${fl.pendentes} pendente${fl.pendentes === 1 ? '' : 's'}`,
+            fl.ficam ? `${fl.ficam} não fecham hoje` : 'fecham hoje');
+        add('Espera do mais antigo', fl.espera_min != null
+          ? (fl.espera_min >= 60 ? `${Math.floor(fl.espera_min / 60)}h${String(fl.espera_min % 60).padStart(2, '0')}` : `${fl.espera_min} min`)
+          : null);
+        add('Enviadas hoje', `${fl.enviadas} de ${fl.teto}`, `ritmo ${fl.ritmo}/h`);
+        // A API oficial saiu de operação (banida); quem entrega é o canal
+        // alternativo, então é o estado dele que se mostra.
+        add('Canal de envio', fl.ligado ? 'alternativo, ligado' : 'alternativo DESLIGADO',
+            fl.silencio ? 'em janela de silêncio' : null);
+        if (fl.gargalo) add('Gargalo', fl.gargalo === 'teto' ? 'teto diário' : 'tempo até o silêncio');
+      }
+      for (const a of (vg?.achados || [])) add(a.urgente ? '⚠️ pendência' : 'pendência', a.titulo);
     } else if (/Home Assistant/.test(nome)) {
       add('Estado', _haStatus.up ? 'no ar' : 'fora', _haStatus.error || null);
       add('Latência', _haStatus.latency_ms != null ? `${_haStatus.latency_ms} ms` : null);
@@ -7413,6 +7590,25 @@ app.get('/api/wall', requireAuth, (_req, res) => {
              temp_state: tempState(temps.length ? Math.max(...temps) : null, marca) };
   };
 
+  // Endereço da Song Pro: a trilha dá lat/lng, mas o reverse-geocode é async e
+  // esta rota é síncrona. Resolve em segundo plano e serve o último conhecido —
+  // carro parado não muda de lugar, então o valor "velho" continua certo, e o
+  // `_familyGeoMem` evita bater no Nominatim a cada ciclo. O Haval não precisa
+  // disso: ele já publica `current_address` pronto.
+  const semCep = (a) => a ? String(a).replace(/,\s*\d{5}-?\d{3}\s*$/, '') : null;
+  const spEndereco = () => {
+    const pt = _songProTrail[_songProTrail.length - 1];
+    if (!pt || pt.lat == null || pt.lng == null) return null;
+    const k = `${pt.lat.toFixed(4)},${pt.lng.toFixed(4)}`;
+    if (k !== _spAddr.key) {
+      _spAddr.key = k;                    // mantém o texto anterior enquanto o novo vem
+      _reverseGeocodeFamily(pt.lat, pt.lng, null)
+        .then(g => { if (_spAddr.key === k) _spAddr.txt = g.label || null; })
+        .catch(() => {});
+    }
+    return _spAddr.txt;
+  };
+
   // Arrays fora do literal: os vereditos de cada nó do desenho derivam deles.
   const plantsArr = [plant(_solarState, 'Catalão', 'temperature', 'saj', 'catalao'),
                      plant(_solisState?.ivonei, 'Ivonei', 'temperature_c', 'solis', 'ivonei'),
@@ -7426,6 +7622,7 @@ app.get('/api/wall', requireAuth, (_req, res) => {
       charging: state.charging_state === 'Carregando',
       power_kw: +state.charge_power_kw || 0,
       awake: _carIsAwake(),
+      addr: semCep(state.current_address),
       ts: Math.max(state.last_apk_ms || 0, state.last_gwm_ms || 0) || null },
     (() => {
       const sp = songProStatus();          // BYD Song Pro (Grasi)
@@ -7433,7 +7630,7 @@ app.get('/api/wall', requireAuth, (_req, res) => {
       return { key: 'songpro', label: 'Song Pro',
                soc: sp.soc != null ? Math.round(sp.soc) : null,
                charging: !!sp.charging, power_kw: +sp.powerKw || 0,
-               awake: null, ts: sp.updatedAtMs || null };
+               awake: null, addr: spEndereco(), ts: sp.updatedAtMs || null };
     })(),
   ].filter(Boolean);
   // Percentual é grandeza LIMITADA (0-100) e vira arco. Autonomia só significa
@@ -7481,7 +7678,22 @@ app.get('/api/wall', requireAuth, (_req, res) => {
   familia('Gastos', _pixbot.filter(x => !/teste/i.test(x.label || ''))
                            .map(x => ({ ...x, __lbl: x.label })),
           x => !!x.up, () => null);
-  if (_credito) push('Driver Cred', !!_credito.up, null);
+  if (_credito) {
+    // O ponto continua sendo "está no ar?" — pendência de operação é outro eixo e
+    // não pode pintar o serviço de vermelho. Ela vai no detalhe da linha, onde
+    // "13 na fila" e "WA bloqueada" respondem o que o up/down não responde.
+    // Nada de alerta novo aqui: quem notifica é o próprio app (vigia-saude).
+    // `fila.bloqueado` (conta da API oficial da Meta) NÃO entra: a API foi
+    // abandonada depois do banimento, então o campo fica `true` pra sempre e
+    // avisar disso todo ciclo é ruído, não notícia. O canal em uso é o
+    // alternativo — é o estado DELE que vale espaço aqui.
+    const vg = _credito.vigia, fl = vg && vg.fila;
+    const partes = [];
+    if (fl && fl.ligado === false) partes.push('canal alt desligado');
+    if (fl?.pendentes)         partes.push(`${fl.pendentes} na fila`);
+    if (vg?.achados?.length)   partes.push(`${vg.achados.length} pendência${vg.achados.length > 1 ? 's' : ''}`);
+    push('Driver Cred', !!_credito.up, partes.join(' · ') || null);
+  }
 
   // Processos que existem no pm2 e não apareciam em lugar nenhum da parede.
   const proc = (nome, rotulo) => {
@@ -7530,11 +7742,13 @@ app.get('/api/wall', requireAuth, (_req, res) => {
   const pctDe = (u, t) => (u && t) ? Math.round(u / t * 100) + '%' : '—';
   const m = _macStats || {};
   const nodes = {
-    carro: nodeDe(/^(car|apk)_/, carsArr.map(c =>
+    carro: nodeDe(/^(car|apk)_/, carsArr.flatMap(c => [
       `${c.label} · ${c.soc == null ? '—' : c.soc + '%'} · ` +
       (c.charging ? `carregando ${c.power_kw.toFixed(1).replace(".", ",")} kW`
                   : c.awake === true ? 'em uso' : 'parado') +
-      ` · leitura ${quando(c.ts)}`)),
+      ` · leitura ${quando(c.ts)}`,
+      c.addr ? `↳ ${c.addr}` : null,
+    ].filter(Boolean))),
     solar: nodeDe(/^(solar|solis|fan)_/, plantsArr.map(p =>
       `${p.label} · ${p.kw == null ? 'sem leitura' : p.kw + ' kW'}` +
       (p.kwh != null ? ` · ${p.kwh} kWh hoje` : '') +
@@ -7602,40 +7816,53 @@ app.get('/api/wall', requireAuth, (_req, res) => {
     // Energia DA hora h = acumulado no início de h+1 menos o do início de h. Na
     // hora corrente não existe "próxima", então usa o total de agora e marca
     // `parcial` — quem desenha tem que dizer que ela ainda não fechou.
+    // Por usina E somado: a parede abre no total, e clicar numa usina no rodapé
+    // filtra os dois gráficos pra ela. Mesma função pros dois casos — série de
+    // uma usina é só a série de uma lista de uma usina só.
     spark: (() => {
-      const hoje = _todayDateStr(), porHora = {};
-      for (const k of ['catalao', 'ivonei', 'palmeiras']) {
-        const dia = (_solarHistory[k] || []).find(d => d.date === hoje);
-        for (const [hs, sn] of Object.entries(dia?.snaps || {})) {
-          const h = +hs;
-          if (!porHora[h]) porHora[h] = { kw: 0, cum: 0 };
-          porHora[h].kw  += (sn.p || 0) / 1000;
-          porHora[h].cum += (sn.kwh || 0);
+      const hoje = _todayDateStr();
+      const serie = (chaves) => {
+        const porHora = {};
+        for (const k of chaves) {
+          const dia = (_solarHistory[k] || []).find(d => d.date === hoje);
+          for (const [hs, sn] of Object.entries(dia?.snaps || {})) {
+            const h = +hs;
+            if (!porHora[h]) porHora[h] = { kw: 0, cum: 0 };
+            porHora[h].kw  += (sn.p || 0) / 1000;
+            porHora[h].cum += (sn.kwh || 0);
+          }
         }
-      }
-      const totalAgora = plantsArr.reduce((a, p) => a + (p.kwh || 0), 0);
-      const kwAgora    = plantsArr.reduce((a, p) => a + (p.kw  || 0), 0);
-      const hs = Object.keys(porHora).map(Number).sort((a, b) => a - b);
-      return hs.map((h, i) => {
-        const ultima = i === hs.length - 1;
-        const prox = ultima ? totalAgora : porHora[hs[i + 1]].cum;
-        return { h,
-                 // Na hora corrente a potência do início já é velha: vale a de agora.
-                 kw: +(ultima ? kwAgora : porHora[h].kw).toFixed(2),
-                 kwh: Math.max(0, +(prox - porHora[h].cum).toFixed(2)),
-                 parcial: ultima };
-      });
+        const alvo = plantsArr.filter(p => chaves.includes(p.key));
+        const totalAgora = alvo.reduce((a, p) => a + (p.kwh || 0), 0);
+        const kwAgora    = alvo.reduce((a, p) => a + (p.kw  || 0), 0);
+        const hs = Object.keys(porHora).map(Number).sort((a, b) => a - b);
+        return hs.map((h, i) => {
+          const ultima = i === hs.length - 1;
+          const prox = ultima ? totalAgora : porHora[hs[i + 1]].cum;
+          return { h,
+                   // Na hora corrente a potência do início já é velha: vale a de agora.
+                   kw: +(ultima ? kwAgora : porHora[h].kw).toFixed(2),
+                   kwh: Math.max(0, +(prox - porHora[h].cum).toFixed(2)),
+                   parcial: ultima };
+        });
+      };
+      const todas = ['catalao', 'ivonei', 'palmeiras'];
+      return Object.fromEntries([['total', serie(todas)], ...todas.map(k => [k, serie([k])])]);
     })(),
     // Últimos 14 dias, somando as 3 usinas por data. O "121% do normal" de hoje
     // só quer dizer algo contra a série — e um dia ruim isolado vira nuvem, três
     // seguidos viram problema. Dia sem registro de alguma usina soma o que há.
     daily: (() => {
-      const acc = {};
-      for (const k of ['catalao', 'ivonei', 'palmeiras'])
-        for (const dia of (_solarHistory[k] || []).slice(-31))
-          acc[dia.date] = (acc[dia.date] || 0) + (dia.kwh || 0);
-      return Object.keys(acc).sort().slice(-30)
-               .map(date => ({ date, kwh: +acc[date].toFixed(1) }));
+      const serie = (chaves) => {
+        const acc = {};
+        for (const k of chaves)
+          for (const dia of (_solarHistory[k] || []).slice(-31))
+            acc[dia.date] = (acc[dia.date] || 0) + (dia.kwh || 0);
+        return Object.keys(acc).sort().slice(-30)
+                 .map(date => ({ date, kwh: +acc[date].toFixed(1) }));
+      };
+      const todas = ['catalao', 'ivonei', 'palmeiras'];
+      return Object.fromEntries([['total', serie(todas)], ...todas.map(k => [k, serie([k])])]);
     })(),
     // O Mac Mini é onde TUDO roda e não aparecia em lugar nenhum da parede. Disco
     // interno em 89% não dispara alerta ainda, mas é exatamente o tipo de coisa
@@ -7707,7 +7934,7 @@ app.get('/api/wall', requireAuth, (_req, res) => {
       const arr = Object.entries(c).sort((a, b) => b[1] - a[1]).slice(0, 6);
       const max = arr.length ? arr[0][1] : 0;
       return arr.map(([type, n]) => ({
-        label: titulo[type] || type,
+        tipo: type, label: titulo[type] || type,
         n, pct: max ? Math.round(n / max * 100) : 0,
       }));
     })(),
@@ -7721,11 +7948,12 @@ app.get('/api/wall', requireAuth, (_req, res) => {
       for (const e of _healthEvents.slice().reverse()) {
         const last = out[out.length - 1];
         if (last && last.type === e.type) { last.n++; continue; }
-        if (out.length >= 7) break;
+        if (out.length >= 20) break;
         out.push({ ts: e.ts, type: e.type, n: 1,
           kind: e.type === 'restart' ? 'restart'
               : /_recovery$/.test(e.type) ? 'recovery' : 'alert',
-          msg: String(e.msg || '').split('\n')[0].slice(0, 90) });
+          // 160 pra o hover da linha ter o que mostrar além do que já cabe nela.
+          msg: String(e.msg || '').split('\n')[0].slice(0, 160) });
       }
       return out;
     })(),
@@ -8323,8 +8551,13 @@ const _home = require('os').homedir();
 const BACKUP_SOURCES = [
   { name: 'Lari (SQLite+Radicale)', dir: path.join(_home, 'whats-assistant', 'backups'), max_age_h: 30 },
   { name: 'Haval (tarball)', dir: path.join(_home, 'Library', 'Mobile Documents', 'com~apple~CloudDocs', '02. RAFAEL PESSOAL', 'Backup Haval EcoTrip', 'daily'), max_age_h: 30 },
-  { name: 'SSD físico (2x/dia)', dir: '/Volumes/SSD1TB/Backups/haval-ecotrip/daily', max_age_h: 16 },
-  { name: 'MQTT (broker)', dir: '/Volumes/SSD1TB/Backups/mosquitto/daily', max_age_h: 16 },
+  // 16h era a régua de quando o ssd-backup.sh rodava 2x/dia (01h e 13h). Em
+  // 15/09/2026 passou a rodar 1x (01h) — com RETENTION_DAILY=14, duas execuções
+  // guardavam só 7 dias de histórico. Mudar a cadência sem mudar a régua fez os
+  // dois alertarem todo fim de tarde por um backup que estava em dia. 30h é a
+  // mesma folga usada nos outros diários daqui.
+  { name: 'SSD físico (diário)', dir: '/Volumes/SSD1TB/Backups/haval-ecotrip/daily', max_age_h: 30 },
+  { name: 'MQTT (broker)', dir: '/Volumes/SSD1TB/Backups/mosquitto/daily', max_age_h: 30 },
   // bkp-OF-bkp: roda tarde (~17:39), a mais tardia do dia. Com cadência 24h e o
   // Mac podendo dormir/mirror atrasar, 30h dava alerta diário falso (só 6h de
   // folga). É cópia secundária — o primário + SSD físico + iCloud estão sempre
@@ -8594,15 +8827,21 @@ setInterval(() => { _pollDelega().catch(e => console.warn('[delega]', e.message)
 // O endpoint de verdade é `/health`.
 const PIXBOT_URLS  = (process.env.PIXBOT_HEALTH_URLS  || '').split(',').map(x => x.trim()).filter(Boolean);
 const CREDITO_URL  = process.env.CREDITO_HEALTH_URL   || '';
+// Resumo operacional (fila de envio + achados do vigia do próprio app). O
+// /api/health de lá só diz "no ar"; isto diz O QUE está pendente. Read-only e
+// cacheado 60s do lado de lá — o app continua sendo quem NOTIFICA, aqui só mostra.
+const CREDITO_VIGIA_URL   = process.env.CREDITO_VIGIA_URL   || '';
+const CREDITO_VIGIA_TOKEN = process.env.CREDITO_VIGIA_TOKEN || '';
 const MINIAPP_SUSTAIN_MS = +(process.env.MINIAPP_SUSTAIN_MIN || 3) * 60_000;
 let _pixbot = [];
 let _credito = null;
+let _creditoVigia = null;   // resumo operacional, atualizado fora do caminho do poller
 
-async function _getJson(url, ms = 5000) {
+async function _getJson(url, ms = 5000, headers = null) {
   const ctrl = new AbortController();
   const tm = setTimeout(() => ctrl.abort(), ms);
   try {
-    const r = await fetch(url, { signal: ctrl.signal });
+    const r = await fetch(url, { signal: ctrl.signal, ...(headers ? { headers } : {}) });
     const ct = (r.headers.get('content-type') || '');
     if (!r.ok) return { _err: 'HTTP ' + r.status };
     // Guarda contra o catch-all de SPA: HTML com 200 não é health.
@@ -8632,6 +8871,23 @@ async function _pollMiniApps() {
       ? { up: false, error: j._err, ts: Date.now() }
       : { up: true, ok: j.ok ?? null, chave_pix: j.chave_pix ?? null, pin: j.pin ?? null,
           latency_ms: Date.now() - t0, ts: Date.now() };
+    // Resumo operacional: falha aqui não derruba o `up` — o app pode estar no ar
+    // com o resumo indisponível, e dizer "fora" por causa disso seria mentira.
+    // Sem `await`: no cache miss o lado de lá roda uma checagem que bate na API
+    // do Inter e pode levar 12s. Esperar isso travaria o poller inteiro toda vez
+    // que o cache de 60s virasse. Atualiza quando chegar; até lá vale o anterior.
+    if (_credito.up && CREDITO_VIGIA_URL) {
+      const antes = _creditoVigia;
+      _getJson(CREDITO_VIGIA_URL, 20000,
+               CREDITO_VIGIA_TOKEN ? { 'X-Vigia-Token': CREDITO_VIGIA_TOKEN } : null)
+        .then(v => {
+          _creditoVigia = v._err
+            ? { ...(antes || {}), erro: v._err, ts: Date.now() }   // mantém o último bom
+            : { ok: v.ok, achados: v.achados || [], fila: v.fila || null, ts: Date.now() };
+        })
+        .catch(() => {});
+    }
+    _credito.vigia = _creditoVigia;
   }
   _evalMiniAppAlerts();
 }
@@ -8773,6 +9029,7 @@ app.get('/api/health', requireAuth, (_req, res) => {
     system:        { car_app_version: state.car_app_version || null },
     apk_executor:  _apkExecutorHealth(),
     mac:           _macStats,
+    saj_cloud:     sajCloud.status(),
     processes:     _processes,
     clockin:       _appHealth.clockin,
     lari:          _lari,
@@ -12399,7 +12656,7 @@ function ingestAutoTrip({ tripId, autoTrip, samples }, opts = {}) {
         const dur    = sec >= 3600
           ? `${Math.floor(sec / 3600)}h ${Math.floor((sec % 3600) / 60)}min`
           : `${Math.floor(sec / 60)}min`;
-        const kwh100 = distKm > 0.1 && netKwh > 0 ? (netKwh / distKm * 100).toFixed(1) : null;
+        const kwh100 = distKm > RAZAO_MIN_KM && netKwh > 0 ? (netKwh / distKm * 100).toFixed(1) : null;
         const kmL    = fuelL  > 0.01              ? (distKm / fuelL).toFixed(1)         : null;
         // Custo da viagem usa preços PONDERADOS pelo mix de combustível/recargas
         // do tanque/bateria, recalculados a cada refuel/charge. Sem isso, o
@@ -12939,7 +13196,10 @@ app.get('/api/stats/by-mode', (req, res) => {
     if (c.distKm < 0.5) continue;   // descarta amostras triviais
     const isHev  = c.powertrain === 0;   // motor a combustão é a fonte de energia
     const netPos = Math.max(0, c.netKwh);
-    const kwh100 = c.distKm > 0.1 ? (c.netKwh / c.distKm) * 100 : 0;
+    // O `continue` de distKm < 0.5 acima já garante o piso; o null é a resposta
+    // honesta caso alguém afrouxe aquele filtro depois. Zero aqui leria como
+    // "eficiência perfeita".
+    const kwh100 = c.distKm > RAZAO_MIN_KM ? (c.netKwh / c.distKm) * 100 : null;
     // km/L: em HEV o motor propulsiona; a economia real é km por litro sobre a
     // distância com motor ligado (engineDistKm) — não sobre a distância total,
     // que incluiria trechos EV. Fora de HEV, km/L só faz sentido se houve fuel.
@@ -22846,7 +23106,7 @@ app.get('/api/share/:token/state', (req, res) => {
     tripKmPerLeq: (() => {
       const km = +(tr.distKm || 0), kwh = +(tr.netKwh || 0), l = +(tr.fuelL || 0);
       const litrosEq = (kwh / 9.1) + l;
-      return (km > 0.3 && litrosEq > 0.01) ? +(km / litrosEq).toFixed(1) : null;
+      return (km > RAZAO_MIN_KM && litrosEq > RAZAO_MIN_L) ? +(km / litrosEq).toFixed(1) : null;
     })(),
     rangeEvKm: Math.round(+state.range_ev_km || 0),
     gear: (['P', 'R', 'N', 'D'].includes(String(state.gear || '').toUpperCase()) ? String(state.gear).toUpperCase() : '--'),
@@ -25063,6 +25323,7 @@ function applyMqttMessage(key, value, isRetained = false) {
 // Production) resolveu. Não há mais push periódico de "Live Activities ativadas".
 
 server.listen(PORT, () => {
+  _armaChecagemDeAlertas();
   const pkg = require('./package.json');
   console.log(`\n🚗  EcoTrip Bridge v${pkg.version}`);
   // [removido 2026-05-27] watchdog do APNs de produção: já resolvido (era a auth key
