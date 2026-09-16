@@ -2843,9 +2843,30 @@ function _scheduleChargeSelfSynthesis(sessionStartMs, socStart, socEnd) {
   const tempCapt     = _lastChargeAvgTemp;
   setTimeout(() => {
     try {
-      // O APK publicou? Se sim, chargesArr tem entry com timestamp_ms próximo do startMs.
-      const already = chargesArr.some(c => Math.abs((c.timestamp_ms||0) - startMs) < 5*60_000);
-      if (already) return;   // APK cumpriu, nada a fazer
+      // O APK publicou?
+      //
+      // A checagem antiga era `|timestamp_ms - startMs| < 5min`, e nunca casava: o
+      // `startMs` é o INÍCIO da sessão, enquanto o registro do APK carimba o momento
+      // em que ELE registrou, perto do fim. Em 16/09 isso deu 2h29 de diferença numa
+      // carga de 8935s — o registro real estava no ar desde 12:06:32 e a síntese
+      // disparou mesmo assim às 12:15:54, com push de "Recarga sintetizada" e um
+      // número pior que o verdadeiro. Foi a 4a vez; nenhuma das 4 sínteses sobreviveu
+      // no histórico, todas substituídas pelo registro real depois.
+      //
+      // É a MESMA ambiguidade de `timestamp_ms` que já tinha mordido no filtro de
+      // duplicata. A identidade que resiste é o PAR DE SOC — a bateria não repete o
+      // mesmo par no mesmo dia sem descarga no meio. Mantém a janela de tempo como
+      // segundo critério, pra cobrir sessão sem SOC confiável.
+      const perto = (a, b) => Math.abs((+a || 0) - (+b || 0)) <= 2;
+      const already = chargesArr.some(c =>
+        Math.abs((c.timestamp_ms || 0) - startMs) < 5 * 60_000
+        || (socEndCapt > socStartCapt
+            && perto(c.soc_start, socStartCapt) && perto(c.soc_end, socEndCapt)
+            && Math.abs((c.timestamp_ms || 0) - Date.now()) < 12 * 3600_000));
+      if (already) {
+        console.log(`[charge-synth] APK já publicou (SOC ${socStartCapt}→${socEndCapt}) — nada a sintetizar`);
+        return;
+      }
       if (!(socEndCapt > socStartCapt)) {
         console.log(`[charge-synth] pulando: SOC delta inválido (${socStartCapt}→${socEndCapt})`);
         return;
