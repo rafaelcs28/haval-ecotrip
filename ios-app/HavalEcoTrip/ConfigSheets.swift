@@ -5,6 +5,7 @@
 //
 
 import SwiftUI
+import UIKit
 import CoreLocation
 import MapKit
 
@@ -482,29 +483,58 @@ struct ChargeTargetSheet: View {
                     }
                     .padding(.top, 8)
 
-                    // Slider grande com tick neutro (track custom + Slider real invisível por cima)
-                    ZStack {
-                        GeometryReader { g in
-                            ZStack(alignment: .leading) {
-                                Capsule().fill(DS.panel3).frame(height: 10)
-                                Capsule().fill(DS.greenGrad)
-                                    .frame(width: max(10, g.size.width * CGFloat((target - 51) / 48)), height: 10)
-                                // tick neutro no ponto médio (75%)
-                                RoundedRectangle(cornerRadius: 1).fill(DS.text2.opacity(0.6))
-                                    .frame(width: 2, height: 14)
-                                    .offset(x: g.size.width * CGFloat((75.0 - 51) / 48) - 1)
-                                Circle().fill(.white)
-                                    .frame(width: 22, height: 22)
-                                    .overlay(Circle().stroke(DS.green, lineWidth: 3))
-                                    .offset(x: max(0, min(g.size.width - 22, g.size.width * CGFloat((target - 51) / 48) - 11)))
-                            }
-                            .frame(height: 22)
-                            .frame(maxHeight: .infinity)
+                    // Track desenhado à mão + gesto próprio.
+                    //
+                    // Antes havia um Slider nativo com opacity(0.02) por cima pra
+                    // "capturar o gesto". Não funciona: o Slider do SwiftUI só arrasta
+                    // pelo THUMB, e esse thumb é invisível — dava pra mover só acertando
+                    // às cegas um alvo que não se vê (relatado em 05/08: "não consigo
+                    // mover a barra"). A bolinha visível era decoração, sem gesto algum.
+                    //
+                    // Com DragGesture no track inteiro: arrasta de qualquer ponto e
+                    // toque simples também posiciona — o que o nativo não faz.
+                    GeometryReader { g in
+                        let frac = CGFloat((target - 51) / 48)
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(DS.panel3).frame(height: 10)
+                            Capsule().fill(DS.greenGrad)
+                                .frame(width: max(10, g.size.width * frac), height: 10)
+                            // tick neutro no ponto médio (75%)
+                            RoundedRectangle(cornerRadius: 1).fill(DS.text2.opacity(0.6))
+                                .frame(width: 2, height: 14)
+                                .offset(x: g.size.width * CGFloat((75.0 - 51) / 48) - 1)
+                            Circle().fill(.white)
+                                .frame(width: 22, height: 22)
+                                .overlay(Circle().stroke(DS.green, lineWidth: 3))
+                                .offset(x: max(0, min(g.size.width - 22, g.size.width * frac - 11)))
                         }
-                        // Controle real invisível captura o gesto
-                        Slider(value: $target, in: 51...99, step: 1).tint(.clear).opacity(0.02)
+                        // Uma única frame que ocupa TODA a faixa: com `.frame(height:22)`
+                        // seguido de `.frame(maxHeight:.infinity)` a área de toque ficava
+                        // ambígua, e só a tira central de 22pt respondia.
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .contentShape(Rectangle())
+                        // highPriorityGesture e NÃO gesture: dentro de um ScrollView, um
+                        // DragGesture comum PERDE a disputa assim que o dedo desvia na
+                        // vertical — daí "às vezes funciona, às vezes não" (05/08). Com
+                        // prioridade alta, o arraste horizontal é sempre nosso.
+                        .highPriorityGesture(
+                            DragGesture(minimumDistance: 0)
+                                .onChanged { v in
+                                    let x = min(max(0, v.location.x), g.size.width)
+                                    let novo = 51 + Double(x / max(1, g.size.width)) * 48
+                                    let arred = novo.rounded()
+                                    if arred != target {
+                                        target = min(99, max(51, arred))
+                                        // Um toque a cada 1% — dirigindo, você sente o
+                                        // valor mudando sem precisar olhar a tela.
+                                        UIImpactFeedbackGenerator(style: .light).impactOccurred(intensity: 0.5)
+                                    }
+                                }
+                        )
                     }
-                    .frame(height: 30)
+                    // 56pt: o dedo cobre ~45pt e ainda precisa de margem pra não exigir
+                    // precisão. O visual continua com 22pt — só a área cresce.
+                    .frame(height: 56)
 
                     // Presets
                     HStack(spacing: 8) {

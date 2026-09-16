@@ -1,0 +1,399 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>HAVAL H6 GT PHEV — Manual do Proprietário</title>
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100%; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: #0b0d10; color: #e6e8eb; line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 780px; margin: 0 auto; padding: 1.5rem 1.25rem 6rem; }
+  header { margin-bottom: 1.5rem; }
+  h1 { font-size: 1.5rem; margin: 0 0 .25rem; letter-spacing: -.01em; }
+  .sub { color: #8b93a1; font-size: .95rem; }
+  .meta { color: #6b7280; font-size: .8rem; margin-top: .5rem; }
+  .examples { display: flex; flex-wrap: wrap; gap: .5rem; margin: 1rem 0 1.25rem; }
+  .ex {
+    background: #1a1d23; border: 1px solid #2a2f3a; color: #cfd3db;
+    padding: .5rem .8rem; border-radius: 999px; font-size: .85rem; cursor: pointer;
+    transition: background .12s, border-color .12s;
+  }
+  .ex:hover { background: #22262e; border-color: #3a4150; }
+  .form {
+    display: flex; flex-direction: column; gap: .75rem;
+    background: #14171c; border: 1px solid #2a2f3a; border-radius: 14px; padding: 1rem;
+  }
+  textarea {
+    width: 100%; min-height: 90px; resize: vertical;
+    background: #0f1216; color: #e6e8eb;
+    border: 1px solid #2a2f3a; border-radius: 10px;
+    padding: .75rem .85rem; font-size: 1rem; font-family: inherit; outline: none;
+  }
+  textarea:focus { border-color: #4a90e2; }
+  .row { display: flex; gap: .5rem; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+  button.primary {
+    background: #4a90e2; color: #fff; border: 0; padding: .6rem 1.1rem;
+    border-radius: 10px; font-size: .95rem; font-weight: 600; cursor: pointer;
+    transition: background .12s, opacity .12s; min-width: 130px;
+  }
+  button.primary:hover { background: #5aa0f2; }
+  button.primary:disabled { opacity: .6; cursor: not-allowed; }
+  .hint { color: #6b7280; font-size: .8rem; }
+  .answer {
+    background: #14171c; border: 1px solid #2a2f3a; border-radius: 14px;
+    padding: 1.1rem 1.25rem; margin-top: 1rem;
+    white-space: pre-wrap; word-wrap: break-word; font-size: .98rem;
+  }
+  .answer.err { border-color: #7a2a2a; background: #2a1414; color: #f5aaaa; }
+  .answer.pending { border-color: #2a4060; background: #14181f; }
+  .answer .q { color: #8b93a1; font-size: .85rem; margin-bottom: .5rem; display: flex; justify-content: space-between; gap: .5rem; flex-wrap: wrap; }
+  .answer .tag {
+    display: inline-block; font-size: .72rem; padding: .1rem .5rem; border-radius: 999px;
+    font-weight: 600; letter-spacing: .02em; vertical-align: 1px;
+  }
+  .tag.cache { background: #14351a; color: #7bd08a; }
+  .tag.streaming { background: #1a2a4a; color: #8fb0ff; }
+  .tag.done { background: #22262e; color: #cfd3db; }
+  .tag.err { background: #3a1414; color: #f57a7a; }
+  .redo-btn {
+    background: transparent; color: #8b93a1; border: 1px solid #2a2f3a;
+    padding: .35rem .7rem; border-radius: 8px; font-size: .78rem;
+    cursor: pointer; margin-top: .5rem;
+  }
+  .redo-btn:hover { background: #1a1d23; color: #cfd3db; }
+  .redo-btn:disabled { opacity: .5; cursor: not-allowed; }
+  .cursor { display: inline-block; width: 8px; height: 1.1em; background: #4a90e2; vertical-align: -3px; margin-left: 2px; animation: blink 1s step-end infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+  .spinner {
+    display: inline-block; width: 13px; height: 13px;
+    border: 2px solid rgba(255,255,255,.35); border-top-color: #fff;
+    border-radius: 50%; animation: spin .8s linear infinite;
+    vertical-align: -2px; margin-right: .5rem;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  footer { color: #6b7280; font-size: .8rem; margin-top: 2rem; text-align: center; }
+  a { color: #4a90e2; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  @media (prefers-color-scheme: light) {
+    body { background: #f7f8fa; color: #14171c; }
+    .ex { background: #fff; border-color: #e2e5eb; color: #14171c; }
+    .ex:hover { background: #eef1f5; }
+    .form, .answer { background: #fff; border-color: #e2e5eb; }
+    .answer.pending { background: #f0f6ff; border-color: #b0c8e8; }
+    textarea { background: #fff; color: #14171c; border-color: #e2e5eb; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Manual do HAVAL H6 GT PHEV</h1>
+    <div class="sub">Pergunte qualquer coisa sobre o carro — respondo com base no manual oficial (330 páginas).</div>
+    <div class="meta" id="meta">carregando…</div>
+  </header>
+
+  <div class="examples">
+    <span class="ex">Como reboco o carro?</span>
+    <span class="ex">Qual a pressão correta dos pneus?</span>
+    <span class="ex">Como uso o modo EV puro?</span>
+    <span class="ex">Apareceu uma luz âmbar no painel, o que faço?</span>
+    <span class="ex">Como recarrego a bateria?</span>
+    <span class="ex">Qual óleo o motor usa?</span>
+  </div>
+
+  <form class="form" id="form">
+    <textarea id="q" placeholder="Escreve sua dúvida sobre o carro..." maxlength="1500" autofocus></textarea>
+    <div id="img-preview" style="display:none;position:relative;max-width:200px">
+      <img id="img-thumb" style="width:100%;border-radius:8px;border:1px solid #2a2f3a">
+      <button type="button" id="img-remove" style="position:absolute;top:4px;right:4px;background:rgba(0,0,0,.75);color:#fff;border:0;border-radius:50%;width:24px;height:24px;font-size:14px;line-height:22px;cursor:pointer">×</button>
+    </div>
+    <input type="file" id="img-input" accept="image/*" style="display:none">
+    <div class="row">
+      <div style="display:flex;gap:.5rem;align-items:center">
+        <button type="button" class="redo-btn" id="btn-attach" style="margin-top:0">📎 Anexar imagem</button>
+        <span class="hint" id="counter">0 / 1500</span>
+      </div>
+      <div style="display:flex;gap:.5rem;align-items:center">
+        <span class="hint" id="convo-info" style="display:none">turno <b id="convo-turn">1</b></span>
+        <button type="button" class="redo-btn" id="btn-new" style="display:none;margin-top:0">Nova conversa</button>
+        <button type="submit" class="primary" id="btn">Perguntar</button>
+      </div>
+    </div>
+  </form>
+
+  <div id="out"></div>
+
+  <footer>
+    Bridge · <a href="/impulse-help.html">Ajuda de instalação do IMPULSE</a>
+  </footer>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const q = $('q'), btn = $('btn'), out = $('out'), counter = $('counter');
+q.addEventListener('input', () => { counter.textContent = q.value.length + ' / 1500'; });
+
+// Histórico da conversa atual (client-side).
+// Cada item: { question, answer }. Últimos 6 turnos enviados a cada follow-up.
+let conversation = [];
+
+function refreshConvoUI() {
+  const info = $('convo-info');
+  const btnNew = $('btn-new');
+  if (conversation.length === 0) {
+    info.style.display = 'none';
+    btnNew.style.display = 'none';
+    q.placeholder = 'Escreve sua dúvida sobre o carro...';
+  } else {
+    info.style.display = '';
+    btnNew.style.display = '';
+    $('convo-turn').textContent = conversation.length + 1;
+    q.placeholder = 'Continue a conversa (ou pergunta algo novo)...';
+  }
+}
+
+$('btn-new').addEventListener('click', () => {
+  conversation = [];
+  out.innerHTML = '';
+  refreshConvoUI();
+  q.focus();
+});
+
+// Upload de imagem opcional
+let attachedImage = null; // File object
+
+$('btn-attach').addEventListener('click', () => $('img-input').click());
+$('img-input').addEventListener('change', ev => {
+  const f = ev.target.files?.[0];
+  if (!f) return;
+  if (f.size > 8 * 1024 * 1024) { alert('Imagem muito grande (máx 8MB)'); return; }
+  attachedImage = f;
+  const url = URL.createObjectURL(f);
+  $('img-thumb').src = url;
+  $('img-preview').style.display = '';
+  $('btn-attach').textContent = '📎 Trocar imagem';
+});
+$('img-remove').addEventListener('click', () => {
+  attachedImage = null;
+  $('img-input').value = '';
+  $('img-preview').style.display = 'none';
+  $('btn-attach').textContent = '📎 Anexar imagem';
+});
+document.querySelectorAll('.ex').forEach(e => {
+  e.addEventListener('click', () => { q.value = e.textContent; q.focus(); counter.textContent = q.value.length + ' / 1500'; });
+});
+
+async function loadStatus() {
+  try {
+    const r = await fetch('/api/car-help/status');
+    const d = await r.json();
+    const meta = $('meta');
+    if (d.manual_size > 0) {
+      const cacheTxt = d.cache_entries ? ` · ${d.cache_entries} pergunta${d.cache_entries === 1 ? '' : 's'} em cache` : '';
+      meta.textContent = `manual carregado · ${d.manual_size.toLocaleString('pt-BR')} caracteres${cacheTxt}`;
+    } else {
+      meta.textContent = 'manual não carregado';
+      btn.disabled = true;
+    }
+  } catch {
+    $('meta').textContent = 'não deu pra checar status';
+  }
+}
+loadStatus();
+
+function fmtSecs(ms) { return (ms / 1000).toFixed(1) + 's'; }
+
+function esc(s) { return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
+
+async function askQuestion(question, opts = {}) {
+  const { force = false, targetDiv = null } = opts;
+  btn.disabled = true;
+  const btnOrig = btn.textContent;
+  btn.innerHTML = '<span class="spinner"></span>Consultando...';
+  const imgForThisTurn = (!targetDiv && attachedImage) ? attachedImage : null;
+  const imgUrl = imgForThisTurn ? URL.createObjectURL(imgForThisTurn) : null;
+
+  // Reutiliza div se for refazer, senão cria novo bloco.
+  const startedAt = Date.now();
+  let div, qLine, tag, body, cursor;
+  if (targetDiv) {
+    div = targetDiv;
+    div.className = 'answer pending';
+    div.innerHTML = '';
+    qLine = document.createElement('div'); qLine.className = 'q';
+    const qText = document.createElement('span'); qText.textContent = 'Você: ' + question;
+    tag = document.createElement('span'); tag.className = 'tag streaming'; tag.textContent = '⏳ refazendo · 0s';
+    qLine.appendChild(qText); qLine.appendChild(tag);
+    body = document.createElement('div');
+    cursor = document.createElement('span'); cursor.className = 'cursor';
+    body.appendChild(cursor);
+    div.appendChild(qLine); div.appendChild(body);
+  } else {
+    div = document.createElement('div');
+    div.className = 'answer pending';
+    qLine = document.createElement('div'); qLine.className = 'q';
+    const qText = document.createElement('span'); qText.textContent = 'Você: ' + question;
+    tag = document.createElement('span'); tag.className = 'tag streaming'; tag.textContent = imgUrl ? '⏳ analisando imagem · 0s' : '⏳ pensando · 0s';
+    qLine.appendChild(qText); qLine.appendChild(tag);
+    div.appendChild(qLine);
+    if (imgUrl) {
+      const img = document.createElement('img');
+      img.src = imgUrl;
+      img.style.cssText = 'max-width:220px;max-height:180px;border-radius:8px;margin:.5rem 0;display:block;border:1px solid #2a2f3a';
+      div.appendChild(img);
+    }
+    body = document.createElement('div');
+    cursor = document.createElement('span'); cursor.className = 'cursor';
+    body.appendChild(cursor);
+    div.appendChild(body);
+    out.insertBefore(div, out.firstChild);
+  }
+
+  // timer que atualiza a tag enquanto espera 1º token
+  let ttfbReached = false;
+  const timer = setInterval(() => {
+    if (ttfbReached) return;
+    const s = Math.floor((Date.now() - startedAt) / 1000);
+    const label = imgUrl ? '⏳ analisando imagem' : (force ? '⏳ refazendo' : '⏳ lendo manual');
+    tag.textContent = `${label} · ${s}s`;
+  }, 500);
+
+  try {
+    const historyToSend = targetDiv
+      ? conversation.slice(0, -1)
+      : conversation.slice();
+
+    // Sempre usa FormData — servidor aceita multipart com ou sem imagem.
+    const fd = new FormData();
+    fd.append('question', question);
+    fd.append('force', force ? '1' : '0');
+    fd.append('history', JSON.stringify(historyToSend));
+    if (attachedImage && !targetDiv) fd.append('image', attachedImage);  // refazer não reusa imagem
+
+    const r = await fetch('/api/car-help/ask', { method: 'POST', body: fd });
+
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({ error: 'unknown' }));
+      clearInterval(timer);
+      div.className = 'answer err';
+      cursor.remove();
+      if (r.status === 429) {
+        tag.className = 'tag err'; tag.textContent = `⛔ limite ${err.window || ''}`;
+        body.textContent = err.hint || 'Limite de requests atingido. Tenta mais tarde.';
+      } else {
+        tag.className = 'tag err'; tag.textContent = 'erro';
+        body.textContent = 'Erro: ' + (err.error || 'desconhecido') + (err.hint ? ' — ' + err.hint : '');
+      }
+      return;
+    }
+
+    const reader  = r.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '', answer = '', cachedHit = false, doneOK = false;
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop();
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        let ev;
+        try { ev = JSON.parse(line); } catch { continue; }
+        if (ev.type === 'meta') {
+          cachedHit = !!ev.cached;
+          if (cachedHit) {
+            tag.className = 'tag cache';
+            tag.textContent = '⚡ cache · resposta salva';
+          } else {
+            tag.className = 'tag streaming';
+            tag.textContent = '⏳ lendo manual · 0s';
+          }
+        } else if (ev.type === 'chunk') {
+          if (!ttfbReached) {
+            ttfbReached = true;
+            clearInterval(timer);
+            if (!cachedHit) {
+              tag.className = 'tag streaming';
+              tag.textContent = '✍️ escrevendo resposta...';
+            }
+          }
+          answer += ev.text;
+          // insere texto antes do cursor
+          cursor.insertAdjacentText('beforebegin', ev.text);
+        } else if (ev.type === 'done') {
+          const elapsed = Date.now() - startedAt;
+          div.className = 'answer';
+          cursor.remove();
+          tag.className = 'tag done';
+          tag.textContent = cachedHit
+            ? `⚡ cache · ${fmtSecs(elapsed)}`
+            : `✓ ${fmtSecs(elapsed)}`;
+          doneOK = true;
+          // botão refazer (força bypass do cache)
+          const redoBtn = document.createElement('button');
+          redoBtn.className = 'redo-btn';
+          redoBtn.textContent = '↻ Refazer';
+          redoBtn.addEventListener('click', () => {
+            redoBtn.disabled = true;
+            askQuestion(question, { force: true, targetDiv: div });
+          });
+          div.appendChild(redoBtn);
+          if (!cachedHit) loadStatus();
+        } else if (ev.type === 'error') {
+          div.className = 'answer err';
+          cursor.remove();
+          tag.className = 'tag err'; tag.textContent = 'erro';
+          body.textContent = 'Erro: ' + (ev.message || 'desconhecido');
+        }
+      }
+    }
+    clearInterval(timer);
+    if (doneOK && answer) {
+      if (targetDiv) {
+        // Refazer: substitui o último turno pela nova resposta.
+        if (conversation.length && conversation[conversation.length - 1].question === question) {
+          conversation[conversation.length - 1] = { question, answer };
+        }
+      } else {
+        conversation.push({ question, answer });
+      }
+      refreshConvoUI();
+    }
+    if (!targetDiv) {
+      q.value = ''; counter.textContent = '0 / 1500';
+      // Limpa imagem depois de enviar com sucesso
+      if (doneOK) {
+        attachedImage = null;
+        $('img-input').value = '';
+        $('img-preview').style.display = 'none';
+        $('btn-attach').textContent = '📎 Anexar imagem';
+      }
+    }
+  } catch (e) {
+    clearInterval(timer);
+    div.className = 'answer err';
+    cursor.remove();
+    tag.className = 'tag err'; tag.textContent = 'erro';
+    body.textContent = 'Erro de rede: ' + e.message;
+  } finally {
+    btn.disabled = false; btn.textContent = btnOrig;
+  }
+}
+
+$('form').addEventListener('submit', ev => {
+  ev.preventDefault();
+  const question = q.value.trim();
+  if (!question) return;
+  askQuestion(question);
+});
+</script>
+</body>
+</html>

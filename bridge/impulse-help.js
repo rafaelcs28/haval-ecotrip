@@ -45,7 +45,7 @@ const upload = multer({
 // só pra verificar ID token). Aqui precisamos de client_id+secret com scope Drive.
 const CLIENT_ID     = process.env.IMPULSE_GOOGLE_CLIENT_ID     || process.env.GOOGLE_OAUTH_CLIENT_ID;
 const CLIENT_SECRET = process.env.IMPULSE_GOOGLE_CLIENT_SECRET || process.env.GOOGLE_OAUTH_CLIENT_SECRET;
-const PUBLIC_URL    = (process.env.BRIDGE_PUBLIC_URL || 'https://carro.malha.dev').replace(/\/+$/, '');
+const PUBLIC_URL    = (process.env.BRIDGE_PUBLIC_URL || 'https://bridge.malha.dev').replace(/\/+$/, '');
 const REDIRECT_URI  = `${PUBLIC_URL}/api/impulse-help/oauth/callback`;
 
 const DOC_ID        = process.env.IMPULSE_MANUAL_DOC_ID || '1itZW5qKSydbrvmj3imQovewRKLYU_nI93mVteE2QRIc';

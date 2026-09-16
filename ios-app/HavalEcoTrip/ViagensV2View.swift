@@ -569,6 +569,7 @@ struct TrajetoV2Sheet: View {
     let trip: Trip
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var loader = TripsLoader.shared
+    @ObservedObject private var car = CarStore.shared
     @State private var coords: [CLLocationCoordinate2D] = []
     @State private var samples: [TripSample] = []
     @State private var loading = true
@@ -583,11 +584,134 @@ struct TrajetoV2Sheet: View {
     private let replaySeconds = 20.0
     private let playTimer = Timer.publish(every: 0.05, on: .main, in: .common).autoconnect()
 
+    /// km/L equivalente pelo conteúdo energético da gasolina (~9,1 kWh/L). Responde
+    /// "se esse trajeto fosse a combustível, quanto faria por litro?" — comparável com
+    /// qualquer carro, ao contrário de kWh/100.
+    private static let kwhPorLitroGasolina = 9.1
+    private func eqKmLNum(_ km: Double, _ kwh: Double) -> Double {
+        kwh > 0.01 ? km / (kwh / Self.kwhPorLitroGasolina) : 0
+    }
+    private func eqKmL(_ km: Double, _ kwh: Double) -> String {
+        let v = eqKmLNum(km, kwh)
+        return v > 0 ? Fmt.dec1(v) : "—"
+    }
+
+    /// Grupo do trecho desta viagem (mesmas pontas), com as demais do histórico.
+    /// `minCount: 2` porque comparar com nada não diz nada — sem outra viagem no
+    /// mesmo percurso o bloco simplesmente não aparece.
+    private var grupoDoTrecho: RouteGroup? {
+        RouteGroup.build(from: loader.trips, minCount: 2)
+            .first { $0.trips.contains { $0.id == trip.id } }
+    }
+
+    @ViewBuilder private var resumoDoTrecho: some View {
+        if let g = grupoDoTrecho, g.n >= 2 {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text("ESTA VIAGEM VS MÉDIA (\(g.n)×)")
+                        .font(.system(size: 10.5, weight: .bold)).tracking(0.8)
+                        .foregroundStyle(DS.muted)
+                    Spacer()
+                    Text(g.name).font(.system(size: 10.5)).foregroundStyle(DS.muted)
+                        .lineLimit(1)
+                }
+                let cons = trip.consumo, aCons = g.avgCons
+                let tMin = trip.timeSec / 60, aMin = g.avgMin
+                HStack(spacing: 8) {
+                    vsTile("CONSUMO", Fmt.dec1(cons), "kWh/100", cons, aCons, menorEhMelhor: true)
+                    vsTile("TEMPO", "\(Int(tMin.rounded()))", "min", tMin, aMin, menorEhMelhor: true)
+                }
+                HStack(spacing: 8) {
+                    vsTile("ENERGIA", Fmt.dec1(trip.netKwh), "kWh", trip.netKwh, g.avgKwh, menorEhMelhor: true)
+                    vsTile("DISTÂNCIA", Fmt.km(trip.distKm), "km", trip.distKm, g.avgKm, menorEhMelhor: nil)
+                }
+                // Velocidade média: o que explica boa parte do consumo. Trânsito parado
+                // e estrada rápida gastam diferente, e sem isso o "+1,8% vs média" fica
+                // sem causa aparente.
+                let vMed = trip.timeSec > 0 ? trip.distKm / (trip.timeSec / 3600) : 0
+                let aVMed = g.avgMin > 0 ? g.avgKm / (g.avgMin / 60) : 0
+                HStack(spacing: 8) {
+                    vsTile("VEL. MÉDIA", Fmt.int(vMed), "km/h", vMed, aVMed, menorEhMelhor: nil)
+                    // km/L equivalente por ENERGIA: 1 L de gasolina ≈ 9,1 kWh de
+                    // conteúdo energético. É a conversão física — não o custo, que
+                    // depende de tarifa e já aparece no card de custo.
+                    vsTile("EQUIV.", eqKmL(trip.distKm, trip.netKwh), "km/L",
+                           eqKmLNum(trip.distKm, trip.netKwh),
+                           eqKmLNum(g.avgKm, g.avgKwh), menorEhMelhor: false)
+                }
+                if trip.elevGain > 0 || trip.harshAcc + trip.harshBrake > 0 {
+                    HStack(spacing: 8) {
+                        // Subida acumulada: explica consumo alto sem ser "culpa" de quem
+                        // dirige — por isso neutro.
+                        vsTile("SUBIDA", Fmt.int(trip.elevGain), "m", trip.elevGain,
+                               g.trips.reduce(0) { $0 + $1.elevGain } / Double(max(1, g.n)),
+                               menorEhMelhor: nil)
+                        let bruscos = Double(trip.harshAcc + trip.harshBrake)
+                        let aBruscos = g.trips.reduce(0.0) { $0 + Double($1.harshAcc + $1.harshBrake) } / Double(max(1, g.n))
+                        vsTile("BRUSCOS", Fmt.int(bruscos), "eventos", bruscos, aBruscos, menorEhMelhor: true)
+                    }
+                }
+                if trip.startSoc > 0 && trip.endSoc > 0 {
+                    HStack(spacing: 8) {
+                        let dSoc = trip.startSoc - trip.endSoc
+                        vsTile("SOC GASTO", Fmt.int(dSoc), "pontos", dSoc,
+                               g.trips.reduce(0.0) { $0 + max(0, $1.startSoc - $1.endSoc) } / Double(max(1, g.n)),
+                               menorEhMelhor: true)
+                        // Custo por km: o número que compara com qualquer outro carro.
+                        let ckm = trip.distKm > 0 ? trip.cost(car.priceKwh, car.priceGas) / trip.distKm : 0
+                        let aCkm = g.avgKm > 0 ? g.avgCost(car.priceKwh, car.priceGas) / g.avgKm : 0
+                        vsTile("CUSTO/KM", String(format: "%.2f", ckm), "R$", ckm, aCkm, menorEhMelhor: true)
+                    }
+                }
+            }
+            .modifier(V2Panel())
+        }
+    }
+
+    /// Tile com o valor e o desvio da média. `menorEhMelhor: nil` = neutro (distância
+    /// não é boa nem ruim; só contexto).
+    private func vsTile(_ titulo: String, _ valor: String, _ unidade: String,
+                        _ v: Double, _ media: Double, menorEhMelhor: Bool?) -> some View {
+        let pct = media > 0 ? (v - media) / media * 100 : 0
+        let cor: Color = {
+            guard let mel = menorEhMelhor, abs(pct) >= 1 else { return DS.muted }
+            let bom = mel ? pct < 0 : pct > 0
+            return bom ? DS.green : DS.orange
+        }()
+        return VStack(alignment: .leading, spacing: 3) {
+            Text(titulo).font(.system(size: 9.5, weight: .bold)).tracking(0.6)
+                .foregroundStyle(DS.muted)
+            HStack(alignment: .firstTextBaseline, spacing: 3) {
+                Text(valor).font(.system(size: 20, weight: .semibold)).monospacedDigit()
+                    .foregroundStyle(DS.text)
+                Text(unidade).font(.system(size: 10.5)).foregroundStyle(DS.muted)
+            }
+            if media > 0 {
+                HStack(spacing: 3) {
+                    if menorEhMelhor != nil && abs(pct) >= 1 {
+                        Image(systemName: pct < 0 ? "arrow.down" : "arrow.up")
+                            .font(.system(size: 8, weight: .bold))
+                    }
+                    Text(String(format: "%+.1f%% vs méd.", pct))
+                        .font(.system(size: 10))
+                }
+                .foregroundStyle(cor)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 12).padding(.vertical, 10)
+        .background(DS.panel2)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
     private var cur: TripSample? { samples.isEmpty ? nil : samples[min(samples.count - 1, max(0, Int(idx)))] }
     private var prog: Double { samples.count > 1 ? Double(min(samples.count - 1, max(0, Int(idx)))) / Double(samples.count - 1) : 0 }
     private static let hm: DateFormatter = { let f = DateFormatter(); f.dateFormat = "HH:mm"; return f }()
 
     var body: some View {
+        // ScrollView: o conteúdo passou da tela quando entrou o resumo do trecho.
+        // O mapa tem altura fixa, então não disputa o gesto vertical com a rolagem.
+        ScrollView {
         VStack(alignment: .leading, spacing: 14) {
             header
             mapView
@@ -598,6 +722,10 @@ struct TrajetoV2Sheet: View {
                 powerGraph
                 if hasIce { rpmGraph }
                 shareRow
+                // Resumo do trecho: mesma leitura da tela de comparação, aqui embaixo
+                // do mapa. Quem abre o trajeto quer saber se ESTA viagem foi boa ou
+                // ruim — e isso só existe comparando com as outras do mesmo percurso.
+                resumoDoTrecho
             } else if loading {
                 ProgressView().tint(DS.green).frame(maxWidth: .infinity).padding(.vertical, 40)
             } else {
@@ -606,7 +734,9 @@ struct TrajetoV2Sheet: View {
             }
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 18).padding(.top, 18).padding(.bottom, 10)
+        .padding(.horizontal, 18).padding(.top, 18).padding(.bottom, 24)
+        }
+        .scrollDismissesKeyboard(.interactively)
         .background(DS.bg.ignoresSafeArea())
         .presentationDragIndicator(.visible)
         // Map dentro de sheet ignora .environment(\.colorScheme) — força no sheet todo.

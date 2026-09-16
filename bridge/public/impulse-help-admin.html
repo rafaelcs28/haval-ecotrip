@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Impulse Help — admin</title>
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: #0b0d10; color: #e6e8eb; margin: 0; padding: 1.5rem 1.25rem 4rem;
+    line-height: 1.5;
+  }
+  .wrap { max-width: 720px; margin: 0 auto; }
+  h1 { font-size: 1.4rem; margin: 0 0 1.5rem; }
+  .card {
+    background: #14171c; border: 1px solid #2a2f3a; border-radius: 12px;
+    padding: 1rem 1.25rem; margin-bottom: 1rem;
+  }
+  .card h2 { font-size: 1rem; margin: 0 0 .5rem; color: #cfd3db; }
+  .kv { display: grid; grid-template-columns: 140px 1fr; gap: .3rem .75rem; font-size: .88rem; }
+  .kv b { color: #8b93a1; font-weight: 500; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .85em; background: #0f1216; padding: .1em .35em; border-radius: 4px; word-break: break-all; }
+  button {
+    background: #4a90e2; color: #fff; border: 0; padding: .55rem 1.05rem;
+    border-radius: 8px; font-size: .9rem; font-weight: 600; cursor: pointer;
+    margin: .25rem .35rem .25rem 0;
+  }
+  button:hover { background: #5aa0f2; }
+  button.ghost { background: transparent; color: #cfd3db; border: 1px solid #2a2f3a; }
+  button.ghost:hover { background: #1a1d23; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .status { padding: .4rem .7rem; border-radius: 999px; font-size: .8rem; font-weight: 600; }
+  .status.ok { background: #14351a; color: #7bd08a; }
+  .status.warn { background: #3a2010; color: #f0a058; }
+  .status.err { background: #3a1414; color: #f57a7a; }
+  pre.preview {
+    background: #0f1216; padding: .75rem; border-radius: 8px; max-height: 300px;
+    overflow: auto; font-size: .8rem; color: #cfd3db; white-space: pre-wrap;
+    word-wrap: break-word; margin: .75rem 0 0;
+  }
+  .log {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .8rem;
+    color: #8b93a1; margin-top: .5rem; min-height: 1.2em;
+  }
+  .log.ok { color: #7bd08a; }
+  .log.err { color: #f57a7a; }
+  a { color: #4a90e2; }
+  @media (prefers-color-scheme: light) {
+    body { background: #f7f8fa; color: #14171c; }
+    .card { background: #fff; border-color: #e2e5eb; }
+    code, pre.preview { background: #f0f2f5; color: #14171c; }
+    button.ghost { color: #14171c; border-color: #e2e5eb; }
+    button.ghost:hover { background: #eef1f5; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Impulse Help — admin</h1>
+
+  <div class="card">
+    <h2>Status</h2>
+    <div class="kv" id="kv">carregando…</div>
+    <div class="log" id="log-status"></div>
+  </div>
+
+  <div class="card">
+    <h2>Conexão Google Drive</h2>
+    <p style="color:#8b93a1;font-size:.9rem;margin:.25rem 0 .75rem">
+      Autoriza esta bridge a ler o Google Doc do manual. Refresh_token fica salvo
+      em <code>impulse-help-token.json</code>.
+    </p>
+    <button id="btn-connect">Conectar Google Drive</button>
+    <button id="btn-refresh" class="ghost">Recarregar manual do Drive</button>
+    <div class="log" id="log-conn"></div>
+  </div>
+
+  <div class="card">
+    <h2>Colar manual direto (fallback)</h2>
+    <p style="color:#8b93a1;font-size:.9rem;margin:.25rem 0 .75rem">
+      Se o Drive bloquear export (workspace restrito), abre o doc no browser,
+      seleciona tudo (Ctrl/Cmd+A), copia e cola aqui.
+    </p>
+    <textarea id="paste" placeholder="Cola o texto do manual aqui..." style="width:100%;min-height:180px;background:#0f1216;color:#e6e8eb;border:1px solid #2a2f3a;border-radius:8px;padding:.6rem .75rem;font-family:inherit;font-size:.9rem;resize:vertical"></textarea>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:.5rem">
+      <span class="log" id="paste-counter">0 caracteres</span>
+      <button id="btn-save-paste">Salvar manual</button>
+    </div>
+    <div class="log" id="log-paste"></div>
+  </div>
+
+  <div class="card">
+    <h2>Preview do manual</h2>
+    <pre class="preview" id="preview">—</pre>
+  </div>
+
+  <div class="card" style="font-size:.85rem;color:#8b93a1">
+    <b>Setup (uma vez só):</b>
+    <ol style="margin:.5rem 0 0;padding-left:1.2rem">
+      <li>Google Cloud Console → APIs & Services → <b>Enable Google Drive API</b>.</li>
+      <li>Credentials → Create OAuth Client ID → <b>Web application</b>.</li>
+      <li>Authorized redirect URI: <code id="redir">carregando…</code></li>
+      <li>Copia Client ID + Client Secret pro <code>.env</code> do bridge:
+        <br><code>GOOGLE_OAUTH_CLIENT_ID=...</code>
+        <br><code>GOOGLE_OAUTH_CLIENT_SECRET=...</code></li>
+      <li>Reinicia o bridge (<code>pm2 restart bridge</code>) e clica "Conectar Google Drive" acima.</li>
+    </ol>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+
+function getToken() {
+  let tk = localStorage.getItem('bridge_token');
+  if (!tk) { tk = prompt('Token do bridge:'); if (tk) localStorage.setItem('bridge_token', tk); }
+  return tk;
+}
+
+function esc(s) { return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
+
+function fmtDate(ms) {
+  if (!ms) return '—';
+  const d = new Date(ms);
+  return d.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+async function loadStatus() {
+  try {
+    const r = await fetch('/api/impulse-help/status');
+    const d = await r.json();
+    $('redir').textContent = d.redirect_uri;
+    const pillOAuth = d.oauth_enabled
+      ? '<span class="status ok">env configurado</span>'
+      : '<span class="status err">env ausente — falta CLIENT_ID/SECRET</span>';
+    const pillConn = d.connected
+      ? '<span class="status ok">conectado</span>'
+      : '<span class="status warn">não conectado</span>';
+    const pillManual = d.manual_size > 0
+      ? '<span class="status ok">' + d.manual_size.toLocaleString('pt-BR') + ' bytes</span>'
+      : '<span class="status err">não carregado</span>';
+    $('kv').innerHTML =
+      '<b>OAuth env:</b><div>' + pillOAuth + '</div>' +
+      '<b>Google conectado:</b><div>' + pillConn + '</div>' +
+      '<b>Manual:</b><div>' + pillManual + '</div>' +
+      '<b>Doc ID:</b><div><code>' + esc(d.doc_id) + '</code></div>' +
+      '<b>Atualizado em:</b><div>' + fmtDate(d.manual_updated_at) + '</div>' +
+      '<b>Redirect URI:</b><div><code>' + esc(d.redirect_uri) + '</code></div>';
+    $('preview').textContent = d.manual_preview || '—';
+  } catch (e) {
+    $('log-status').className = 'log err';
+    $('log-status').textContent = 'Erro carregando status: ' + e.message;
+  }
+}
+
+$('btn-connect').addEventListener('click', async () => {
+  const tk = getToken(); if (!tk) return;
+  $('log-conn').className = 'log';
+  $('log-conn').textContent = 'gerando URL de consent...';
+  try {
+    const r = await fetch('/api/impulse-help/oauth/start', {
+      headers: { Authorization: 'Bearer ' + tk },
+    });
+    if (r.status === 401) { localStorage.removeItem('bridge_token'); $('log-conn').className='log err'; $('log-conn').textContent='token inválido, recarrega a página'; return; }
+    const d = await r.json();
+    if (!r.ok) { $('log-conn').className='log err'; $('log-conn').textContent = d.error + (d.hint ? ' — ' + d.hint : ''); return; }
+    $('log-conn').className = 'log ok';
+    $('log-conn').textContent = 'abrindo Google...';
+    window.location.href = d.url;
+  } catch (e) {
+    $('log-conn').className = 'log err';
+    $('log-conn').textContent = 'erro: ' + e.message;
+  }
+});
+
+$('btn-refresh').addEventListener('click', async () => {
+  const tk = getToken(); if (!tk) return;
+  $('log-conn').className = 'log';
+  $('log-conn').textContent = 'baixando manual do Drive...';
+  try {
+    const r = await fetch('/api/impulse-help/refresh', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + tk },
+    });
+    const d = await r.json();
+    if (r.ok) {
+      $('log-conn').className = 'log ok';
+      $('log-conn').textContent = 'OK — ' + d.size.toLocaleString('pt-BR') + ' bytes baixados';
+      loadStatus();
+    } else {
+      $('log-conn').className = 'log err';
+      $('log-conn').textContent = 'erro: ' + d.error;
+    }
+  } catch (e) {
+    $('log-conn').className = 'log err';
+    $('log-conn').textContent = 'erro: ' + e.message;
+  }
+});
+
+$('paste').addEventListener('input', e => { $('paste-counter').textContent = e.target.value.length.toLocaleString('pt-BR') + ' caracteres'; });
+
+$('btn-save-paste').addEventListener('click', async () => {
+  const tk = getToken(); if (!tk) return;
+  const text = $('paste').value.trim();
+  if (!text) { $('log-paste').className = 'log err'; $('log-paste').textContent = 'textarea vazio'; return; }
+  $('log-paste').className = 'log'; $('log-paste').textContent = 'salvando...';
+  try {
+    const r = await fetch('/api/impulse-help/manual', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + tk },
+      body: JSON.stringify({ text }),
+    });
+    const d = await r.json();
+    if (r.ok) {
+      $('log-paste').className = 'log ok';
+      $('log-paste').textContent = 'OK — ' + d.size.toLocaleString('pt-BR') + ' caracteres salvos';
+      $('paste').value = '';
+      $('paste-counter').textContent = '0 caracteres';
+      loadStatus();
+    } else {
+      $('log-paste').className = 'log err';
+      $('log-paste').textContent = 'erro: ' + (d.error || 'desconhecido');
+    }
+  } catch (e) {
+    $('log-paste').className = 'log err';
+    $('log-paste').textContent = 'erro: ' + e.message;
+  }
+});
+
+loadStatus();
+</script>
+</body>
+</html>

@@ -30,6 +30,25 @@ enum Fmt {
 }
 
 enum DS {
+    /// Escala tipográfica. Existia um tamanho ad-hoc por chamada — 13 valores
+    /// distintos só no painel (8.5, 9.5, 10.5, 11, 12, 12.5, 13, 15, 22, 24, 30,
+    /// 74, 88) — e cada tela nova inventava mais um.
+    ///
+    /// `micro` é 11 e não menos: abaixo disso o texto some num carro em movimento, e
+    /// combinado com `minimumScaleFactor(0.7)` o sub dos mini-cards chegava a ~6pt.
+    /// Quem precisa encolher usa `.minimumScaleFactor(0.9)`, não um tamanho menor.
+    enum FontSize {
+        static let micro:  CGFloat = 11   // rótulos de card, chips, legendas
+        static let sub:    CGFloat = 12   // texto de apoio
+        static let body:   CGFloat = 13   // corpo
+        static let strong: CGFloat = 15   // destaque em card
+        static let title:  CGFloat = 22   // números grandes secundários
+        static let metric: CGFloat = 30   // número principal de um card
+    }
+    /// Piso de área de toque (Apple HIG). Alvo menor que isto vira erro de toque
+    /// com o carro andando.
+    static let hitTarget: CGFloat = 44
+
     // Paleta (igual ao :root do cluster.html)
     static let bg     = Color.black
     static let panel  = Color(red: 0.051, green: 0.051, blue: 0.059)   // #0d0d0f

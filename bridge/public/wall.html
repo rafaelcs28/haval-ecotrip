@@ -1,0 +1,1127 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#07080c">
+<title>Bridge · parede</title>
+<style>
+/* ============================================================================
+   Tela de parede do bridge. Protótipo: faixa de veredito + centro de fluxo.
+   Existe pra um trabalho que nem o widget nem o /health.html fazem — consciência
+   ambiente, notar DE LONGE quando muda.
+   Três distâncias no mesmo arquivo: TV a ~2,5m, monitor a ~1m, iPad na mão. Por
+   isso tudo em clamp()/vmin: nada de tamanho fixo em px.
+   ============================================================================ */
+:root{
+  color-scheme: dark;
+  --bg:#07080c; --panel:#0d0f16; --line:rgba(255,255,255,.08); --rule:rgba(255,255,255,.16);
+  --text:#eef1f7; --muted:#9aa3b8; --dim:#6b7488;
+  --ok:#3ddc84; --warn:#ffb02e; --crit:#ff4d4d; --flow:#4cc9f0;
+  --glow-ok:rgba(61,220,132,.35); --glow-warn:rgba(255,176,46,.35); --glow-crit:rgba(255,77,77,.4);
+  --acc:var(--ok); --glow:var(--glow-ok);
+}
+/* O estado pinta a tela inteira, não um badge no canto: de 2,5m você lê a cor da
+   sala antes de ler qualquer número. */
+body[data-state="warn"]{--acc:var(--warn); --glow:var(--glow-warn)}
+body[data-state="crit"]{--acc:var(--crit); --glow:var(--glow-crit)}
+*{box-sizing:border-box;margin:0}
+html,body{height:100%}
+body{
+  background:
+    radial-gradient(120vmax 80vmax at 50% -20%, color-mix(in srgb, var(--acc) 12%, transparent), transparent 60%),
+    var(--bg);
+  color:var(--text);
+  font-family:-apple-system,system-ui,"SF Pro Display",sans-serif;
+  font-variant-numeric:tabular-nums;
+  display:grid; grid-template-rows:auto 1fr auto;
+  /* `viewport-fit=cover` (no <meta>) faz a página passar POR BAIXO da barra de
+     status e da Dynamic Island — sem compensar com env(safe-area-*), o cabeçalho
+     some atrás do relógio do iPhone. Na TV e no monitor os insets são 0, então a
+     mesma regra serve pros três. */
+  --pad:clamp(12px,2.2vmin,28px);
+  padding:calc(var(--pad) + env(safe-area-inset-top,0px))
+          calc(var(--pad) + env(safe-area-inset-right,0px))
+          calc(var(--pad) + env(safe-area-inset-bottom,0px))
+          calc(var(--pad) + env(safe-area-inset-left,0px));
+  gap:clamp(10px,1.6vmin,20px);
+  overflow:hidden;
+}
+body[data-state="crit"]{animation:crit-breath 3s ease-in-out infinite}
+@keyframes crit-breath{50%{background-color:#140708}}
+@media (prefers-reduced-motion:reduce){body[data-state="crit"]{animation:none}}
+
+/* ---------- cabeçalho ---------- */
+.top{display:flex;align-items:baseline;gap:clamp(8px,1.4vmin,18px);flex-wrap:wrap}
+.brand{font-size:clamp(13px,1.7vmin,22px);font-weight:800;letter-spacing:.16em;text-transform:uppercase}
+.brand i{font-style:normal;color:var(--acc)}
+.sub{font-size:clamp(11px,1.4vmin,19px);letter-spacing:.14em;text-transform:uppercase;color:var(--dim)}
+.clock{margin-left:auto;font-size:clamp(13px,1.7vmin,22px);font-weight:700;color:var(--muted)}
+.stamp{font-size:clamp(9px,1vmin,13px);color:var(--dim);letter-spacing:.06em}
+
+/* ---------- miolo ---------- */
+.mid{display:grid;grid-template-columns:1fr minmax(0,1.3fr) 1fr;gap:clamp(8px,1.3vmin,18px);min-height:0}
+/* `overflow:hidden` na coluna: quando a lista de alertas aparece (só acontece
+   com problema, que é justamente quando ninguém testou), o conteúdo empurrava o
+   último card PRA FORA da tela em vez de recortar dentro dele. Só se viu no
+   cenário de demonstração. */
+.colL,.colC,.colR{display:flex;flex-direction:column;gap:clamp(8px,1.2vmin,16px);
+                  min-height:0;overflow:hidden}
+/* O núcleo preserva proporção, então num painel largo e alto sobra vazio em
+   volta do círculo. Com altura própria, o que sobra vai pro gráfico. */
+.colC .core{flex:none;height:clamp(200px,33vh,370px)}
+
+/* Card: o suficiente pra separar blocos, sem virar caixa dentro de caixa. A
+   referência (DashDB) usa neon em tudo; numa parede ligada o dia inteiro isso
+   cansa e, pior, se TUDO brilha nada se destaca — a cor aqui fica reservada
+   pra quem tem problema de verdade. */
+.card{background:var(--panel);border:1px solid var(--line);border-radius:clamp(6px,.9vmin,12px);
+      padding:clamp(8px,1.1vmin,16px);display:flex;flex-direction:column;
+      gap:clamp(6px,.9vmin,12px);min-height:0}
+.chead{font-size:clamp(10px,1.3vmin,17px);letter-spacing:.14em;text-transform:uppercase;color:var(--dim);
+       display:flex;align-items:baseline;gap:.6em;flex:none}
+.chead em{font-style:normal;margin-left:auto;color:var(--muted);letter-spacing:.04em;text-transform:none}
+
+/* Arco: só pra grandeza LIMITADA (0-100). Potência e kWh não têm teto, então
+   não viram arco — vira barra ou número. */
+.grow{display:flex;gap:clamp(4px,.8vmin,14px);justify-content:space-around;align-items:flex-start}
+.g{display:flex;flex-direction:column;align-items:center;gap:.15em;min-width:0;flex:1}
+.g svg{width:100%;max-width:clamp(54px,7.5vmin,96px);aspect-ratio:1}
+.gbg{fill:none;stroke:var(--line);stroke-width:7}
+.gfg{fill:none;stroke:var(--ok);stroke-width:7;stroke-linecap:round;transition:stroke-dashoffset .6s ease}
+.g[data-st="warn"] .gfg{stroke:var(--warn)} .g[data-st="crit"] .gfg{stroke:var(--crit)}
+.g[data-st="none"] .gfg{stroke:var(--line)}
+.g[data-st="car"] .gfg{stroke:var(--flow)}
+.gtxt{fill:var(--text);font-weight:800;text-anchor:middle;font-size:23px}
+.g b{font-size:clamp(10px,1.4vmin,18px);font-weight:600;color:var(--muted);letter-spacing:.1em;text-transform:uppercase}
+.g i{font-style:normal;font-size:clamp(9px,1.2vmin,16px);color:var(--dim);text-align:center}
+
+/* Barras por hora: a FORMA do dia. Não é gráfico de precisão — é pra bater o
+   olho e ver se a curva subiu como sempre sobe. */
+/* Dois painéis no mesmo card: a curva de HOJE (kW por hora) e a série de 30
+   DIAS (kWh por dia). Escalas e unidades diferentes de propósito — por isso cada
+   um tem eixo próprio e cor própria, e o divisor deixa claro que não se somam.
+   Juntos porque a pergunta é uma só: "como está a geração?". */
+.mixwrap{display:grid;grid-template-columns:1.15fr 1.85fr;gap:clamp(12px,1.6vmin,24px);
+         flex:1;min-height:0}
+.mixpane{display:flex;flex-direction:column;gap:.3em;min-width:0;min-height:0}
+.mixpane.sep{border-left:1px solid var(--line);padding-left:clamp(9px,1.3vmin,18px)}
+.mixpane svg{flex:1;width:100%;min-height:clamp(44px,8vmin,132px);display:block}
+.mixlbl{font-size:clamp(9px,1.1vmin,14px);letter-spacing:.1em;text-transform:uppercase;color:var(--dim)}
+.mixfoot{font-size:clamp(9px,1.15vmin,14px);color:var(--muted);
+          white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sparkwrap{flex:1;min-height:clamp(52px,10vmin,150px)}
+.spark{width:100%;height:100%;display:block}
+/* Barras = energia DA hora (kWh); linha = potência (kW). Duas grandezas, duas
+   escalas — de propósito: sozinha, a barra da hora corrente parece queda (está
+   pela metade) e a potência sozinha é uma amostra só por hora, que uma nuvem no
+   minuto errado estraga. A hora que ainda não fechou vai vazada. */
+.sbar{fill:color-mix(in srgb, var(--ok) 45%, transparent)}
+.sbar.hi{fill:color-mix(in srgb, var(--ok) 85%, transparent)}
+.sbar.parcial{fill:color-mix(in srgb, var(--ok) 14%, transparent);
+              stroke:var(--ok);stroke-width:1.5;stroke-dasharray:3 2;
+              vector-effect:non-scaling-stroke}
+.skw{fill:none;stroke:var(--warn);stroke-width:1.6;vector-effect:non-scaling-stroke;opacity:.9}
+.dbar.hi{fill:color-mix(in srgb, var(--flow) 85%, transparent)}
+.saxis{fill:var(--dim);font-size:9px;text-anchor:middle}
+/* Série de 14 dias: azul pra não se confundir com as barras da curva de hoje.
+   A barra de HOJE é contorno vazado, não preenchida — o dia não acabou, e
+   desenhá-la cheia a faria parecer o pior dia da série todo santo dia de manhã.
+   `non-scaling-stroke` porque o SVG estica na horizontal (preserveAspectRatio
+   none) e sem isso o traço e o tracejado deformam junto. */
+.dbar{fill:color-mix(in srgb, var(--flow) 40%, transparent)}
+.dbar.hoje{fill:color-mix(in srgb, var(--flow) 14%, transparent);
+           stroke:var(--flow);stroke-width:1.5;stroke-dasharray:3 2;
+           vector-effect:non-scaling-stroke}
+.dmed{stroke:var(--warn);stroke-width:1;stroke-dasharray:5 4;opacity:.55;
+      vector-effect:non-scaling-stroke}
+
+/* Barra de ocupação: disco e memória são grandezas limitadas mas com teto
+   grande demais pra arco — barra horizontal lê melhor e cabe na linha. Cor pela
+   MESMA régua dos alertas do bridge (>80 atenção, >90 crítico). */
+.brow{display:flex;align-items:center;gap:.7em;font-size:clamp(10px,1.4vmin,18px)}
+.brow b{font-weight:600;color:var(--muted);flex:none;min-width:6.5em}
+.brow em{font-style:normal;color:var(--dim);flex:none;font-size:.9em;min-width:5.2em;text-align:right}
+.bbar{flex:1;height:.5em;background:var(--line);border-radius:99px;overflow:hidden;min-width:0}
+.bbar span{display:block;height:100%;border-radius:99px;background:var(--ok)}
+.bbar[data-st="warn"] span{background:var(--warn)}
+.bbar[data-st="crit"] span{background:var(--crit)}
+.hostpe{font-size:clamp(9px,1.15vmin,14px);color:var(--dim)}
+
+/* Ranking da semana: barra de participação, como a tabela de "Aplicações" da
+   referência. Âmbar e não verde — é contagem de problema, não de saúde. */
+/* Compacto e ancorado no topo. Com `flex:1` + space-evenly, seis linhas se
+   espalhavam por uma coluna inteira: muito espaço pra pouca informação, e a
+   distância entre linhas fazia parecer que não tinham relação entre si. */
+.tlist{display:flex;flex-direction:column;gap:clamp(5px,.75vmin,10px);min-height:0;
+       overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--rule) transparent}
+.tlist::-webkit-scrollbar{width:6px}
+.tlist::-webkit-scrollbar-thumb{background:var(--rule);border-radius:3px}
+.trow[data-det]{cursor:pointer}
+.trow[data-det]:hover{background:color-mix(in srgb, var(--text) 6%, transparent)}
+.trow{display:flex;align-items:center;gap:.7em;font-size:clamp(11px,1.5vmin,20px);
+      padding-bottom:clamp(3px,.45vmin,7px);border-bottom:1px solid var(--line)}
+.trow:last-child{border-bottom:0;padding-bottom:0}
+.trow b{font-weight:600;color:var(--muted);flex:1;min-width:0;
+        white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.trow em{font-style:normal;color:var(--dim);flex:none;font-size:.92em}
+.tbar{flex:none;width:clamp(34px,5.5vmin,80px);height:.5em;background:var(--line);border-radius:99px;overflow:hidden}
+.tbar span{display:block;height:100%;border-radius:99px;
+           background:color-mix(in srgb, var(--warn) 65%, transparent)}
+
+/* Eventos: o que aconteceu enquanto ninguém olhava. */
+.evts{display:flex;flex-direction:column;gap:clamp(3px,.5vmin,7px);min-height:0;
+      overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--rule) transparent}
+.evts::-webkit-scrollbar{width:6px}
+.evts::-webkit-scrollbar-thumb{background:var(--rule);border-radius:3px}
+.ev[data-evi]{cursor:pointer}
+.ev[data-evi]:hover{background:color-mix(in srgb, var(--text) 6%, transparent)}
+.ev{display:flex;align-items:baseline;gap:.6em;font-size:clamp(10px,1.5vmin,19px);line-height:1.35}
+.ev time{color:var(--dim);flex:none;font-size:.92em}
+.ev span{color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ev::before{content:'';width:.5em;height:.5em;border-radius:50%;flex:none;background:var(--dim);
+            transform:translateY(-.15em)}
+.ev[data-k="alert"]::before{background:var(--warn)}
+.ev[data-k="recovery"]::before{background:var(--ok)}
+
+/* Retrato (iPad/iPhone em pé): o conteúdo NÃO cabe numa tela só. Numa TV a
+   altura é fixa e cortar seria mentir por omissão — aqui o aparelho está na mão,
+   então a página passa a rolar e os cards voltam a ter altura de conteúdo. Sem
+   isso, "Serviços" mostrava 3 de 11 e o card de geração sumia inteiro.
+   O overflow vai no html, não no body: no body ele trava o toque no iOS. */
+@media (max-aspect-ratio:1/1){
+  /* Em retrato a página ROLA, e a barra de status do iPhone é translúcida: só
+     empurrar o conteúdo com env(safe-area-*) resolve na posição zero e volta a
+     esconder assim que se rola. O cabeçalho vira fixo e absorve o inset — nada
+     passa por baixo da ilha, e o padding de cima do body some (o cabeçalho é
+     quem dá o respiro), então não se perde altura. */
+  body{padding-top:0}
+  .top{position:sticky;top:0;z-index:15;
+       margin:0 calc(-1 * var(--pad));
+       padding:calc(env(safe-area-inset-top,0px) + .45em) var(--pad) .45em;
+       background:color-mix(in srgb, var(--bg) 92%, transparent);
+       backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px)}
+  html{height:auto;overflow-y:auto}
+  body{height:auto;min-height:100%;overflow:visible;grid-template-rows:auto auto auto}
+  .mid{grid-template-columns:1fr;grid-template-rows:auto auto auto}
+  /* Em retrato o núcleo é `flex:1` e esticava pra ~600px, deixando um vão de
+     meia tela em volta do círculo. Aqui ele tem altura própria. */
+  .colC .core{flex:none;height:clamp(190px,40vw,340px);min-height:auto}
+  /* Lado a lado não cabe num aparelho em pé: os dois painéis empilham, e o
+     divisor vertical vira horizontal. */
+  .mixwrap{grid-template-columns:1fr;grid-template-rows:auto auto}
+  .mixpane.sep{border-left:0;padding-left:0;
+               border-top:1px solid var(--line);padding-top:clamp(8px,1.2vmin,14px)}
+  .mixpane svg{min-height:clamp(70px,18vw,150px)}
+  .card{min-height:auto}
+  .side,.tlist,.evts{overflow:visible;flex:none;justify-content:flex-start}
+  .card[style]{flex:none !important}
+}
+
+/* veredito: a coisa maior da tela, sempre */
+.verdict{display:flex;flex-direction:column;gap:clamp(4px,.6vmin,10px);flex:none}
+/* Era 8,2vmin (~88px num 1080p) e gritava o mesmo que o núcleo já diz em cor.
+   O núcleo virou o indicador de estado; aqui sobra a consequência ("preciso
+   agir?"), que precisa ser a maior coisa da COLUNA, não da tela. */
+.vnum{font-size:clamp(20px,3.5vmin,46px);font-weight:800;line-height:1.05;
+      letter-spacing:-.02em;color:var(--acc);
+      text-shadow:0 0 clamp(10px,1.6vmin,26px) var(--glow)}
+.vsub{font-size:clamp(10px,1.35vmin,18px);color:var(--muted);line-height:1.4}
+.vlist{display:flex;flex-direction:column;gap:clamp(4px,.6vmin,8px)}
+.vlist:empty{display:none}
+.vitem{display:flex;align-items:center;gap:.6em;font-size:clamp(11px,1.25vmin,17px);
+       padding:clamp(5px,.7vmin,10px) clamp(7px,1vmin,14px);
+       background:color-mix(in srgb, var(--acc) 10%, transparent);
+       border-left:3px solid var(--acc);color:var(--text)}
+.vitem[data-sev="warn"]{--acc:var(--warn)}
+.vitem em{font-style:normal;margin-left:auto;color:var(--dim);font-size:.85em}
+
+/* centro: o fluxo. Um pulso = uma publicação MQTT observada de verdade. */
+.core{position:relative;display:grid;place-items:center;min-height:0}
+.core svg{width:100%;height:100%;max-height:100%}
+.ring{fill:none;stroke:var(--line);stroke-width:1}
+.ring.live{stroke:color-mix(in srgb, var(--acc) 55%, transparent)}
+.hub{fill:color-mix(in srgb, var(--acc) 14%, transparent);stroke:var(--acc);stroke-width:2}
+/* O veredito vive AQUI, em cor: de longe o que se lê é o miolo do desenho, não
+   um texto no canto. `--acc` já troca com body[data-state], então a cor segue o
+   estado sem nenhuma regra nova. */
+.hubtxt{fill:var(--acc);font-weight:800;letter-spacing:.04em;text-anchor:middle}
+.hubbrand{fill:var(--dim);font-weight:700;letter-spacing:.26em;text-anchor:middle}
+.hubsub{fill:var(--dim);letter-spacing:.14em;text-anchor:middle;text-transform:uppercase}
+.lane{stroke:var(--line);stroke-width:1.5;fill:none}
+.pulse{fill:var(--flow);filter:drop-shadow(0 0 6px var(--flow))}
+.nodelbl{fill:var(--muted);text-anchor:middle;font-weight:600}
+.nodeval{fill:var(--text);text-anchor:middle;font-weight:800}
+.nd rect{fill:transparent}
+.nd{cursor:help}
+.nd[data-sev="warn"] .nodeval{fill:var(--warn)}
+.nd[data-sev="crit"] .nodeval{fill:var(--crit)}
+
+/* coluna direita: serviços, um ponto cada */
+.side{display:flex;flex-direction:column;gap:clamp(2px,.45vmin,7px);min-height:0;overflow:hidden}
+.srow{display:flex;align-items:center;gap:.7em;font-size:clamp(11px,1.5vmin,20px);
+      padding:clamp(3px,.45vmin,7px) 0;border-bottom:1px solid var(--line)}
+.srow:last-child{border-bottom:0}
+.dot{width:.62em;height:.62em;flex:none;border-radius:50%;background:var(--ok);
+     box-shadow:0 0 .7em color-mix(in srgb, var(--ok) 70%, transparent)}
+.srow[data-ok="false"] .dot{background:var(--crit);box-shadow:0 0 .7em var(--glow-crit)}
+.srow b{font-weight:600;color:var(--text)}
+.srow em{margin-left:auto;font-style:normal;color:var(--dim);font-size:.88em}
+
+/* ---------- rodapé: usinas ---------- */
+.foot{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:clamp(8px,1.4vmin,20px);
+      border-top:2px solid var(--rule);padding-top:clamp(8px,1.2vmin,16px)}
+.plant{display:flex;flex-direction:column;gap:.2em;min-width:0}
+.pmain{display:flex;align-items:baseline;gap:.55em;min-width:0}
+/* coluna da direita: o número sozinho não responde "17 kW é bom?". kWh do dia
+   e % da mediana desta hora respondem. Fica DIM de propósito — nuvem passando
+   derruba o % e a parede não pode virar âmbar por causa de nuvem; quem grita
+   por problema real é o alerta. */
+.paux{display:flex;align-items:baseline;gap:.4em;white-space:nowrap;
+      font-size:clamp(10px,1.35vmin,18px);color:var(--dim)}
+.paux b{font-weight:700;color:var(--muted)}
+.paux i{font-style:normal;opacity:.45}
+.plant .nm{font-size:clamp(11px,1.4vmin,19px);letter-spacing:.12em;text-transform:uppercase;color:var(--dim)}
+/* Sem valor não se desenha com o mesmo peso de um valor: o "—" a 40px virava
+   uma barra grossa que não lê como ausência. */
+.plant .kw{font-size:clamp(18px,2.9vmin,40px);font-weight:800;letter-spacing:-.02em}
+.plant .kw[data-vazio="true"]{font-size:clamp(11px,1.5vmin,20px);font-weight:600;
+                              color:var(--dim);letter-spacing:0}
+.plant .un{font-size:clamp(10px,1.1vmin,15px);color:var(--muted)}
+/* NADA de margin-left:auto aqui: empurrado pra direita da célula, o valor cola
+   no nome da usina SEGUINTE e de longe parece pertencer a ela. A temperatura
+   fica grudada no próprio kW, que é de quem ela é. */
+.plant .tp{font-size:clamp(11px,1.2vmin,16px);color:var(--muted);padding-left:.2em}
+.plant{min-width:0;flex-wrap:nowrap}
+/* Usina selecionada: o filtro tem que ser visível, senão o gráfico muda e não
+   se sabe por quê. Barra à esquerda em vez de fundo — o rodapé é uma linha só. */
+.plant[data-usina]{border-left:3px solid transparent;padding-left:.5em;margin-left:-.5em}
+.plant[data-sel="true"]{border-left-color:var(--acc)}
+.plant[data-sel="true"] .nm,
+.plant[data-sel="true"] .total{color:var(--text)}
+.plant .tp[data-st="warn"]{color:var(--warn)}
+.plant .tp[data-st="crit"]{color:var(--crit)}
+.total{color:var(--dim);font-size:clamp(11px,1.4vmin,19px);letter-spacing:.1em;text-transform:uppercase}
+
+/* Retrato (iPhone/iPad em pé): uma usina por linha, e aí sim as duas colunas —
+   identidade+potência à esquerda, o resto à direita. Em paisagem elas ficam
+   empilhadas dentro da célula, que é estreita demais pra dividir. */
+@media (max-aspect-ratio:1/1){
+  .foot{grid-auto-flow:row;grid-auto-columns:auto;gap:clamp(6px,1vmin,14px)}
+  /* Em retrato cada usina é uma LINHA, e linha pede coluna: como flex, cada
+     valor começava onde o texto anterior acabou, então nome, kW, °C e kWh não
+     alinhavam entre as linhas (ficava serrilhado). `display:contents` no .pmain
+     joga os filhos direto no grid da linha, e cada um ganha sua coluna fixa —
+     inclusive quando a temperatura falta, que aí a coluna só fica vazia. */
+  /* As colunas moram no .foot e as linhas HERDAM com `subgrid`. Antes cada
+     .plant era um grid próprio: a largura de cada coluna era calculada por
+     linha, então elas só pareciam alinhadas quando os textos tinham tamanho
+     parecido — bastou uma usina com "sem leitura" pra desalinhar tudo. Quem
+     achou foi o teste de retrato, não o olho. */
+  .foot{grid-template-columns:6.4em minmax(3.2em,max-content) max-content
+                             minmax(2.6em,max-content) minmax(0,1fr)}
+  .plant{display:grid;grid-column:1 / -1;grid-template-columns:subgrid;
+         align-items:baseline;gap:.15em .55em}
+  .pmain{display:contents}
+  .plant .nm,.plant .total{grid-column:1}
+  .plant .kw{grid-column:2;justify-self:end}
+  .plant .un{grid-column:3}
+  .plant .tp{grid-column:4;padding-left:0}
+  .plant .paux{grid-column:5;justify-self:end;margin-left:0}
+}
+
+/* Hover nos nós: o desenho diz SE tem problema; o hover diz o que cada coisa
+   está fazendo. Não tem clique aqui de propósito — na TV não há mouse, e quem
+   está no monitor só quer espiar de passagem. */
+#tip{position:fixed;z-index:25;pointer-events:none;background:var(--panel);
+     border:1px solid var(--rule);border-radius:clamp(6px,.8vmin,10px);
+     padding:clamp(7px,.9vmin,12px) clamp(9px,1.1vmin,15px);
+     font-size:clamp(11px,1.35vmin,17px);color:var(--muted);
+     max-width:min(460px,62vw);box-shadow:0 10px 34px rgba(0,0,0,.55);
+     display:flex;flex-direction:column;gap:.25em}
+#tip[hidden]{display:none}
+#tip b{color:var(--text);font-weight:700;font-size:1.04em;margin-bottom:.15em}
+#tip i{font-style:normal;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* Detalhe: o número da parede, aberto. Clicar em qualquer coisa que MOSTRA um
+   dado abre as leituras cruas que o produziram. Fica por cima em vez de navegar
+   pra outra página: numa TV não há como "voltar". */
+[data-det]{cursor:pointer}
+[data-det]:hover{background:color-mix(in srgb, var(--text) 5%, transparent)}
+#det{position:fixed;inset:0;z-index:20;display:grid;place-items:center;
+     background:rgba(4,5,8,.78);padding:4vmin}
+#det[hidden]{display:none}
+.detbox{background:var(--panel);border:1px solid var(--rule);border-radius:clamp(8px,1.1vmin,14px);
+        width:min(720px,94vw);max-height:86vh;display:flex;flex-direction:column;
+        padding:clamp(12px,1.8vmin,24px);gap:clamp(8px,1.1vmin,14px)}
+.dethead{display:flex;align-items:baseline;gap:.8em}
+.dethead b{font-size:clamp(15px,2.1vmin,28px);font-weight:800}
+.dethead button{margin-left:auto;background:none;border:0;color:var(--muted);cursor:pointer;
+                font:inherit;font-size:clamp(18px,2.4vmin,32px);line-height:1;padding:0 .2em}
+.detrows{display:flex;flex-direction:column;gap:clamp(4px,.6vmin,9px);overflow-y:auto;min-height:0}
+.drow{display:flex;align-items:baseline;gap:.8em;font-size:clamp(11px,1.5vmin,19px);
+      padding-bottom:clamp(3px,.45vmin,7px);border-bottom:1px solid var(--line)}
+.drow b{color:var(--muted);font-weight:600;flex:none;min-width:11em}
+.drow span{color:var(--text);font-weight:700}
+.drow i{font-style:normal;margin-left:auto;color:var(--dim);font-size:.85em;text-align:right}
+.detfoot{font-size:clamp(9px,1.1vmin,14px);color:var(--dim)}
+
+/* Faixa do modo demonstração: impossível confundir com dado real. */
+body:has(#faixademo){padding-bottom:calc(2.6em + env(safe-area-inset-bottom,0px))}
+#faixademo{position:fixed;left:0;right:0;bottom:0;z-index:30;text-align:center;
+  background:repeating-linear-gradient(45deg,#3a2a00,#3a2a00 12px,#2b1f00 12px,#2b1f00 24px);
+  color:var(--warn);font-size:clamp(10px,1.3vmin,16px);font-weight:700;
+  letter-spacing:.16em;text-transform:uppercase;padding:.45em}
+
+/* primeiro acesso: TV e iPad não têm o token ainda */
+#gate{position:fixed;inset:0;display:grid;place-items:center;background:var(--bg);z-index:9;padding:6vmin}
+#gate[hidden]{display:none}
+#gate form{display:flex;flex-direction:column;gap:14px;width:min(520px,90vw)}
+#gate h2{font-size:clamp(15px,2vmin,24px);font-weight:800}
+#gate p{font-size:clamp(11px,1.2vmin,15px);color:var(--muted)}
+#gate input{font:inherit;font-size:16px;padding:12px 14px;background:var(--panel);
+            border:1px solid var(--rule);color:var(--text)}
+#gate button{font:inherit;font-weight:700;padding:12px;background:var(--acc);border:0;color:#06121c;cursor:pointer}
+.err{color:var(--crit);font-size:clamp(11px,1.2vmin,15px)}
+</style>
+</head>
+<body data-state="ok">
+
+<div id="gate" hidden>
+  <form id="gform">
+    <h2>Token do bridge</h2>
+    <p>Esta tela lê o mesmo token do monitor. Cole uma vez — fica guardado neste aparelho.</p>
+    <input id="gtok" type="password" autocomplete="off" placeholder="token" inputmode="text">
+    <button type="submit">Conectar</button>
+    <p class="err" id="gerr"></p>
+  </form>
+</div>
+
+<div id="tip" hidden></div>
+
+<div id="det" hidden>
+  <div class="detbox">
+    <div class="dethead"><b id="dettitle">—</b><button id="detx" aria-label="fechar">&times;</button></div>
+    <div class="detrows" id="detrows"></div>
+    <div class="detfoot" id="detfoot"></div>
+  </div>
+</div>
+
+<header class="top">
+  <span class="brand">Bridge <i>·</i> parede</span>
+  <span class="sub" id="scope">—</span>
+  <span class="clock" id="clock">--:--</span>
+  <span class="stamp" id="stamp"></span>
+</header>
+
+<main class="mid">
+  <section class="colL">
+    <div class="verdict">
+      <div class="vnum" id="vnum">—</div>
+      <div class="vsub" id="vsub">conectando…</div>
+    </div>
+    <div class="vlist" id="vlist"></div>
+    <div class="card">
+      <div class="chead">Energia armazenada <em id="gsub"></em></div>
+      <div class="grow" id="gauges"></div>
+    </div>
+    <div class="card">
+      <div class="chead">Deu trabalho · 7 dias <em id="topsub"></em></div>
+      <div class="tlist" id="top7"></div>
+    </div>
+    <div class="card" style="flex:1">
+      <div class="chead">Eventos recentes <em id="evsub"></em></div>
+      <div class="evts" id="evts" data-det="eventos" data-hover="off"></div>
+    </div>
+  </section>
+
+  <section class="colC">
+  <div class="core">
+    <!-- viewBox mais larga que alta DE PROPÓSITO: os rótulos laterais são texto
+         centrado em x≈391 e o <svg> externo recorta por padrão, então "39,37 kW"
+         perdia o W (só não aparecia porque o valor de teste era "0,00 kW"). Os
+         -40/+40 são a folga; o centro segue em 210, os círculos não saem do lugar. -->
+    <svg id="core" viewBox="-40 0 500 420" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+      <g id="lanes"></g>
+      <circle class="ring" cx="210" cy="210" r="132"/>
+      <circle class="ring live" id="ring2" cx="210" cy="210" r="104"/>
+      <circle class="hub" cx="210" cy="210" r="74"/>
+      <text class="hubbrand" x="210" y="188" font-size="10.5">BRIDGE</text>
+      <text class="hubtxt" x="210" y="218" font-size="27" id="hubstate">—</text>
+      <text class="hubsub" x="210" y="238" font-size="10" id="hubsub">no ar</text>
+      <g id="pulses"></g>
+      <g id="nodes"></g>
+    </svg>
+  </div>
+    <div class="card" style="flex:1">
+      <div class="chead"><span id="gertit">Geração</span> <em id="gersub"></em></div>
+      <div class="mixwrap">
+        <div class="mixpane">
+          <span class="mixlbl">hoje · kWh/h + kW</span>
+          <svg class="spark" id="spark" viewBox="0 0 600 130"
+               preserveAspectRatio="none" aria-hidden="true"></svg>
+          <span class="mixfoot" id="sparksub"></span>
+        </div>
+        <div class="mixpane sep">
+          <span class="mixlbl">30 dias · kWh por dia</span>
+          <svg class="spark" id="daily" viewBox="0 0 600 130"
+               preserveAspectRatio="none" aria-hidden="true"></svg>
+          <span class="mixfoot" id="dailysub"></span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="colR">
+    <div class="card">
+      <div class="chead">Serviços <em id="svcsub"></em></div>
+      <div class="side" id="side"></div>
+    </div>
+    <div class="card" data-det="host">
+      <div class="chead">Mac Mini <em id="hostsub"></em></div>
+      <div class="side" id="host"></div>
+      <div class="hostpe" id="hostpe"></div>
+    </div>
+    <div class="card" style="flex:1">
+      <div class="chead">Backups <em id="bkpsub"></em></div>
+      <div class="side" id="bkps"></div>
+    </div>
+  </section>
+</main>
+
+<footer class="foot" id="foot"></footer>
+
+<script>
+// ── hover nos nós do desenho ────────────────────────────────────────────────
+let ultimoD = null;               // payload do último ciclo, pro tooltip
+// Vira pro outro lado perto da borda, senão o tooltip some pra fora da tela.
+function posTip(x, y) {
+  const r = tip.getBoundingClientRect();
+  tip.style.left = Math.max(8, Math.min(x + 16, innerWidth  - r.width  - 8)) + 'px';
+  tip.style.top  = Math.max(8, Math.min(y + 16, innerHeight - r.height - 8)) + 'px';
+}
+function mostraTip(k, x, y) {
+  const n = ultimoD && ultimoD.nodes && ultimoD.nodes[k];
+  if (!n) { tip.hidden = true; return; }
+  const cab = n.sev === 'ok' ? k.toUpperCase() : n.txt;
+  tip.innerHTML = `<b>${esc(cab)}</b>` + (n.det || []).map(l => `<i>${esc(l)}</i>`).join('');
+  tip.hidden = false;
+  posTip(x, y);
+}
+document.addEventListener('mousemove', (e) => {
+  const alvo = e.target.closest ? e.target : null;
+  const g = alvo && alvo.closest('.nd');
+  if (g) { hoverAtual = null; return mostraTip(g.dataset.node, e.clientX, e.clientY); }
+  if (alvo && alvo.closest('.spark')) { hoverAtual = null; return; }  // gráfico cuida do seu
+  // Linha do ranking: hover detalha a ocorrência; clique abre os horários dela.
+  const oc = alvo && alvo.closest('.trow[data-topi]');
+  if (oc) {
+    const t = (ultimoD?.top7d || [])[+oc.dataset.topi];
+    if (t) {
+      hoverAtual = null;
+      tip.innerHTML = `<b>${esc(t.label)}</b>` +
+        `<i>${t.n}x em 7 dias${t.pct ? ' · ' + t.pct + '% do mais frequente' : ''}</i>` +
+        `<i style="opacity:.6">clique para ver os horários</i>`;
+      tip.hidden = false;
+      return posTip(e.clientX, e.clientY);
+    }
+  }
+  // Linha de evento: o hover mostra ELA, não o log inteiro — despejar 56 linhas
+  // num tooltip ao passar o mouse tapava a tela. O log completo é o clique.
+  const ev = alvo && alvo.closest('.ev[data-evi]');
+  if (ev) {
+    const d = (ultimoD?.events || [])[+ev.dataset.evi];
+    if (d) {
+      hoverAtual = null;
+      tip.innerHTML = `<b>${hhmm(d.ts)} · ${esc(d.kind)}${d.n > 1 ? ' · ' + d.n + 'x' : ''}</b>` +
+                      `<i style="white-space:normal">${esc(d.msg)}</i>`;
+      tip.hidden = false;
+      return posTip(e.clientX, e.clientY);
+    }
+  }
+  // `data-hover="off"`: o container existe pro CLIQUE (log dos 7 dias), mas não
+  // deve abrir tooltip próprio — no vão entre duas linhas o cursor não acha
+  // nenhuma `.ev`, escorregava pra cá e despejava o log inteiro na tela.
+  const dt = alvo && alvo.closest('[data-det]');
+  if (dt && dt.dataset.hover === 'off') { hoverAtual = null; tip.hidden = true; return; }
+  if (dt) return void tipDetalhe(dt.dataset.det, e.clientX, e.clientY);
+  hoverAtual = null;
+  tip.hidden = true;
+});
+
+// ── usina selecionada ───────────────────────────────────────────────────────
+// Clicar numa usina do rodapé filtra os dois gráficos pra ela; clicar de novo
+// volta pro total. O hover continua abrindo o detalhe — some o modal da usina,
+// que era redundante com o tooltip. Repinta chamando tick(): a requisição é
+// local e o ciclo já é de 2s, não vale partir a função de desenho em duas.
+let usinaSel = null;
+
+// ── hover em qualquer coisa clicável ────────────────────────────────────────
+// Reusa o /api/wall/detail em vez de duplicar tudo no payload: uma fonte só pro
+// hover e pro clique. Cache de 3s (o ciclo é de 2s) pra não pedir a cada pixel
+// de movimento do mouse.
+const cacheDet = new Map();
+let hoverAtual = null;
+async function tipDetalhe(k, x, y) {
+  hoverAtual = k;
+  const c = cacheDet.get(k);
+  if (c && Date.now() - c.t < 3000) {
+    tip.innerHTML = c.html; tip.hidden = false; return posTip(x, y);
+  }
+  let d;
+  try {
+    const r = await fetch('/api/wall/detail?k=' + encodeURIComponent(k),
+                          { headers: { Authorization: 'Bearer ' + tk } });
+    if (!r.ok) return;
+    d = await r.json();
+  } catch (_) { return; }
+  // A nota entra quando acrescenta (ex.: "31 abertas"); URL fica só no modal —
+  // endereço de serviço não serve pra nada numa tela vista de longe.
+  const nota = (n) => (n && n.length <= 34 && !/^https?:\/\//.test(n)) ? ' · ' + n : '';
+  const html = `<b>${esc(d.title || k)}</b>` +
+    (d.rows || []).map(r => `<i>${esc(r.k)} · ${esc(r.v)}${esc(nota(r.n))}</i>`).join('');
+  cacheDet.set(k, { t: Date.now(), html });
+  // O mouse pode ter saído enquanto a resposta vinha — não reabre sozinho.
+  if (hoverAtual !== k) return;
+  tip.innerHTML = html; tip.hidden = false; posTip(x, y);
+}
+
+// ── hover nos gráficos de geração ───────────────────────────────────────────
+// O SVG estica na horizontal (preserveAspectRatio none), então a barra sob o
+// cursor sai direto da fração da largura — não precisa de área invisível por
+// barra. Lê de `ultimoD` na hora do hover pra não servir dado do ciclo passado.
+function marcaBarra(el, i) {
+  el.querySelectorAll('[data-i]').forEach(n => n.classList.toggle('hi', +n.dataset.i === i));
+}
+function grafHover(id, pega, monta) {
+  const el = document.getElementById(id);
+  el.addEventListener('mousemove', (e) => {
+    const arr = pega(ultimoD);
+    if (!arr || !arr.length) return;
+    const r = el.getBoundingClientRect();
+    const i = Math.max(0, Math.min(arr.length - 1,
+                Math.floor((e.clientX - r.left) / r.width * arr.length)));
+    tip.innerHTML = monta(arr[i], arr, i);
+    tip.hidden = false;
+    posTip(e.clientX, e.clientY);
+    marcaBarra(el, i);
+  });
+  el.addEventListener('mouseleave', () => { tip.hidden = true; marcaBarra(el, -1); });
+}
+grafHover('spark', (d) => d && d.spark, (x) =>
+  `<b>${x.h}h${x.parcial ? ' · hora em curso' : ''}</b>` +
+  `<i>potência ${fmtKw(x.kw)} kW</i>` +
+  `<i>energia ${fmtKwh(x.kwh)} kWh${x.parcial ? ' até agora' : ' na hora'}</i>`);
+grafHover('daily', (d) => d && d.daily, (x, arr, i) => {
+  const [a, m, dia] = x.date.split('-');
+  const passados = arr.slice(0, -1).map(v => v.kwh).filter(v => v > 0).sort((p, q) => p - q);
+  const med = passados.length ? passados[Math.floor(passados.length / 2)] : 0;
+  return `<b>${dia}/${m}${i === arr.length - 1 ? ' · hoje, dia em curso' : ''}</b>` +
+         `<i>${fmtKwh(x.kwh)} kWh</i>` +
+         (med > 0 ? `<i>${Math.round(x.kwh / med * 100)}% da mediana de ${fmtKwh(med)}</i>` : '');
+});
+
+// ── detalhe: o número da parede, aberto ──────────────────────────────────────
+// Fica aberto e VIVO: enquanto estiver na tela, cada ciclo relê do bridge. Um
+// painel de detalhe congelado no instante do clique é pior que não ter painel.
+let detAberto = null;
+async function abreDetalhe(k) {
+  detAberto = k;
+  det.hidden = false;
+  dettitle.textContent = 'lendo…';
+  detrows.innerHTML = '';
+  await pintaDetalhe();
+}
+async function pintaDetalhe() {
+  if (!detAberto) return;
+  let d;
+  try {
+    const r = await fetch('/api/wall/detail?k=' + encodeURIComponent(detAberto),
+                          { headers: { Authorization: 'Bearer ' + tk } });
+    if (!r.ok) throw new Error(r.status);
+    d = await r.json();
+  } catch (_) {
+    dettitle.textContent = 'sem detalhe';
+    detrows.innerHTML = '<div class="drow"><b>erro</b><span>não consegui ler do bridge agora</span></div>';
+    detfoot.textContent = '';
+    return;
+  }
+  dettitle.textContent = d.title || detAberto;
+  detrows.innerHTML = (d.rows || []).map(r =>
+    `<div class="drow"><b>${esc(r.k)}</b><span>${esc(r.v)}</span>` +
+    (r.n ? `<i>${esc(r.n)}</i>` : '') + '</div>').join('');
+  detfoot.textContent = 'lido agora do bridge · continua atualizando enquanto estiver aberto';
+}
+function fechaDetalhe() { detAberto = null; det.hidden = true; }
+document.addEventListener('click', (e) => {
+  const us = e.target.closest && e.target.closest('.plant[data-usina]');
+  if (us) {
+    // "total" é o jeito ÓBVIO de voltar pra todas — clicar de novo na usina já
+    // selecionada também volta, mas ninguém adivinha isso olhando a tela.
+    const k = us.dataset.usina;
+    usinaSel = (k === 'total' || usinaSel === k) ? null : k;
+    tip.hidden = true;
+    return void tick();
+  }
+  const el = e.target.closest('[data-det]');
+  if (el) return abreDetalhe(el.dataset.det);
+  if (e.target.id === 'det' || e.target.id === 'detx') fechaDetalhe();
+});
+addEventListener('keydown', (e) => { if (e.key === 'Escape') fechaDetalhe(); });
+
+// ── auth ─────────────────────────────────────────────────────────────────────
+// Mesmo token do /health.html. Numa TV/iPad recém-aberto não existe ainda, então
+// em vez de prompt() (que a TV renderiza mal) há um formulário na própria tela.
+const TK = 'bridge_token';
+let tk = localStorage.getItem(TK) || '';
+const gate = document.getElementById('gate');
+if (!tk) gate.hidden = false;
+document.getElementById('gform').addEventListener('submit', async e => {
+  e.preventDefault();
+  const v = document.getElementById('gtok').value.trim();
+  if (!v) return;
+  const r = await fetch('/api/wall', { headers: { Authorization: 'Bearer ' + v } }).catch(() => null);
+  if (!r || !r.ok) { document.getElementById('gerr').textContent = 'Token recusado.'; return; }
+  localStorage.setItem(TK, v); tk = v; gate.hidden = true; tick();
+});
+
+// ── nós do fluxo ─────────────────────────────────────────────────────────────
+// Posição fixa: de longe você identifica pelo LUGAR antes de ler o rótulo.
+// Ângulo calculado, não fixo: com 5 nós metade dos alertas do bridge não tinha
+// onde acender (starlink, disco, ssd, memória, backups, restarts, iCloud). São
+// 7 agora, e o mapa de alertas no servidor cobre todas as famílias.
+const NODES = [
+  { id: 'carro', lbl: 'CARRO' },
+  { id: 'solar', lbl: 'SOLAR' },
+  { id: 'casa',  lbl: 'CASA'  },
+  { id: 'sitio', lbl: 'SÍTIO' },
+  { id: 'apps',  lbl: 'APPS'  },
+  { id: 'rede',  lbl: 'REDE'  },
+  { id: 'mac',   lbl: 'MAC'   },
+].map((n, i, a) => ({ ...n, ang: -90 + i * 360 / a.length }));
+const R_NODE = 168, CX = 210, CY = 210;
+const pos = a => [CX + R_NODE * Math.cos(a * Math.PI / 180), CY + R_NODE * Math.sin(a * Math.PI / 180)];
+(function desenhaLanes() {
+  const lanes = document.getElementById('lanes'), nodes = document.getElementById('nodes');
+  for (const n of NODES) {
+    const [x, y] = pos(n.ang);
+    lanes.insertAdjacentHTML('beforeend',
+      `<path class="lane" id="lane-${n.id}" d="M${x.toFixed(1)},${y.toFixed(1)} L${CX},${CY}"/>`);
+    const fora = R_NODE + 22, [lx, ly] = [CX + fora * Math.cos(n.ang * Math.PI / 180),
+                                          CY + fora * Math.sin(n.ang * Math.PI / 180)];
+    // Envolve num <g> com retângulo transparente: <text> sozinho só recebe
+    // hover em cima do glifo, e mirar letra por letra numa parede é impossível.
+    nodes.insertAdjacentHTML('beforeend',
+      `<g class="nd" data-node="${n.id}">` +
+      `<rect x="${(lx - 78).toFixed(1)}" y="${(ly - 24).toFixed(1)}" width="156" height="46"/>` +
+      `<text class="nodelbl" x="${lx.toFixed(1)}" y="${(ly - 6).toFixed(1)}" font-size="13">${n.lbl}</text>` +
+      `<text class="nodeval" x="${lx.toFixed(1)}" y="${(ly + 13).toFixed(1)}" font-size="18" id="nv-${n.id}">—</text>` +
+      `</g>`);
+  }
+})();
+
+// Um pulso = uma publicação observada. Nada de animação em loop: numa tela de
+// monitoramento, movimento sem dado por trás dá sensação de vida com o sistema
+// morto — que é o oposto do que esta página serve.
+const reduz = matchMedia('(prefers-reduced-motion: reduce)').matches;
+function pulsa(nodeId) {
+  if (reduz) return;
+  const lane = document.getElementById('lane-' + nodeId);
+  if (!lane) return;
+  const p = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+  p.setAttribute('class', 'pulse'); p.setAttribute('r', '4.5');
+  document.getElementById('pulses').appendChild(p);
+  const len = lane.getTotalLength();
+  const t0 = performance.now(), dur = 900;
+  (function anda(t) {
+    const k = Math.min(1, (t - t0) / dur);
+    const pt = lane.getPointAtLength(len * k);
+    p.setAttribute('cx', pt.x); p.setAttribute('cy', pt.y);
+    p.setAttribute('opacity', String(1 - k * k));
+    if (k < 1) requestAnimationFrame(anda); else p.remove();
+  })(t0);
+}
+
+// ── ciclo ────────────────────────────────────────────────────────────────────
+let vistos = new Set();      // timestamps de publicação já animados
+let falhas = 0;
+
+const fmtKw = v => v == null ? '—' : v.toFixed(2).replace('.', ',');
+const fmtKwh = v => v == null ? '—' : v.toFixed(1).replace('.', ',');
+const fmtMin = m => m == null ? 'autonomia desconhecida'
+  : m >= 60 ? Math.floor(m / 60) + 'h' + String(m % 60).padStart(2, '0') : m + 'min';
+const hhmm = ms => new Date(ms).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+const fmtDias = (seg) => seg >= 86400 ? Math.floor(seg / 86400) + 'd' : Math.round(seg / 3600) + 'h';
+const esc = t => String(t).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+// O título do alerta cabe no card lateral, não no nó do desenho: tira o emoji e
+// o prefixo da usina, guarda o que diz O QUE houve.
+const curto = (t) => String(t).replace(/^[^\p{L}\d]+/u, '').split('—').pop().trim().slice(0, 26);
+// Arco para grandeza limitada (0-100). Potência e kWh não têm teto: não viram arco.
+function arco(pct, label, sub, st, det) {
+  const r = 42, c = 2 * Math.PI * r;
+  const off = pct == null ? c : c * (1 - Math.max(0, Math.min(100, pct)) / 100);
+  return `<div class="g" data-st="${st || ''}"${det ? ` data-det="${det}"` : ''}>` +
+    `<svg viewBox="0 0 100 100"><circle class="gbg" cx="50" cy="50" r="${r}"/>` +
+    `<circle class="gfg" cx="50" cy="50" r="${r}" transform="rotate(-90 50 50)" ` +
+    `stroke-dasharray="${c.toFixed(1)}" stroke-dashoffset="${off.toFixed(1)}"/>` +
+    `<text class="gtxt" x="50" y="57">${pct == null ? '—' : pct + '%'}</text></svg>` +
+    `<b>${label}</b><i>${sub}</i></div>`;
+}
+const idade = ms => {
+  if (!ms) return '—';
+  const s = Math.round((Date.now() - ms) / 1000);
+  return s < 60 ? s + 's' : s < 3600 ? Math.floor(s / 60) + 'min' : Math.floor(s / 3600) + 'h';
+};
+
+// ── modo demonstração ───────────────────────────────────────────────────────
+// `?demo=<cenario>` desenha um payload sintético em vez de buscar do bridge.
+// Existe porque a parede só tinha sido vista com TUDO VERDE: os caminhos de
+// crítico, "sem leitura", usina parcial e "sem contato" foram escritos e nunca
+// desenhados — e código não exercitado já mordeu neste projeto mais de uma vez.
+// Ideia emprestada do DashDB (`?seed=&freeze=`), com a faixa de aviso junto:
+// tela de monitoramento mostrando dado falso sem dizer é a pior mentira possível.
+const DEMO = new URLSearchParams(location.search).get('demo');
+function payloadDemo(cen) {
+  const agora = Date.now(), min = 60000;
+  const base = JSON.parse(JSON.stringify(ultimoD || {}));
+  if (!base.plants) return null;           // precisa de um ciclo real antes
+  base.ts = agora;
+  if (cen === 'crit' || cen === 'warn') {
+    const crit = cen === 'crit';
+    base.state = crit ? 'crit' : 'warn';
+    base.crit = crit ? 2 : 0; base.warn = crit ? 1 : 3;
+    base.alerts = [
+      { id: 'bluetti_casa_battery_critical', sev: crit ? 'crit' : 'warn',
+        title: '🏠 Casa — bateria CRÍTICA 8%', since_ms: agora - 12 * min },
+      { id: 'car_total_silence', sev: crit ? 'crit' : 'warn',
+        title: '🚗 Carro sem comunicação', since_ms: agora - 47 * min },
+      { id: 'solis_palmeiras_collector_offline', sev: 'warn',
+        title: '☀️ Palmeiras — planta cega', since_ms: agora - 133 * min },
+    ].slice(0, crit ? 3 : 2);
+    base.nodes.casa  = { txt: 'bateria CRÍTICA 8%', sev: crit ? 'crit' : 'warn', n: 1, det: base.nodes.casa.det };
+    base.nodes.carro = { txt: 'sem comunicação', sev: crit ? 'crit' : 'warn', n: 1, det: base.nodes.carro.det };
+    base.nodes.solar = { txt: 'planta cega', sev: 'warn', n: 1, det: base.nodes.solar.det };
+    if (base.bat?.[0]) Object.assign(base.bat[0], { pct: 8, offgrid: true, grid_w: 0, autonomy_min: 37 });
+    if (base.host?.disco) base.host.disco.usado = Math.round(base.host.disco.total * 0.94);
+  }
+  if (cen === 'ok') {
+    // Cenário limpo SINTÉTICO: usar a realidade como "tudo bem" faz o teste
+    // passar ou falhar conforme o dia, que é o oposto de teste.
+    base.state = 'ok'; base.crit = 0; base.warn = 0; base.alerts = [];
+    for (const k in base.nodes) base.nodes[k] = { ...base.nodes[k], sev: 'ok', n: 0, txt: 'ok' };
+    base.plants = base.plants.map((p, i) => ({ ...p, kw: 9.5 + i, kwh: 40 + i,
+      temp: 52 + i, temp_state: 'ok', partial: null, pace_kwh: 38 + i }));
+    if (base.host?.disco) base.host.disco.usado = Math.round(base.host.disco.total * 0.62);
+    base.bat = (base.bat || []).map(b => ({ ...b, reachable: true, pct: 100, offgrid: false, grid_w: 50 }));
+  }
+  if (cen === 'sem-leitura') {
+    base.state = 'warn'; base.crit = 0; base.warn = 1;
+    base.plants = base.plants.map((p, i) => i === 0
+      ? { ...p, kw: null, kwh: null, temp: null, pace_kwh: null, partial: null }
+      : (i === 1 ? { ...p, partial: [1, 2], exp_kw: null, pace_kwh: null } : p));
+    if (base.bat?.[1]) Object.assign(base.bat[1], { reachable: false, pct: null });
+    base.cars = (base.cars || []).map(c => ({ ...c, ts: agora - 190 * min }));
+  }
+  return base;
+}
+
+async function tick() {
+  if (!tk) return;
+  if (DEMO && ultimoD) {                   // 1º ciclo é real, os seguintes são o cenário
+    const f = payloadDemo(DEMO);
+    if (f) { desenha(f); return; }
+  }
+  let d;
+  try {
+    const r = await fetch('/api/wall', { headers: { Authorization: 'Bearer ' + tk } });
+    if (r.status === 401) { localStorage.removeItem(TK); tk = ''; gate.hidden = false; return; }
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    d = await r.json(); falhas = 0;
+  } catch (_) {
+    // Sem resposta a tela NÃO congela mostrando o último quadro como se fosse
+    // agora: ela diz que perdeu contato. Três ciclos pra não piscar em oscilação.
+    if (++falhas >= 3) {
+      document.body.dataset.state = 'crit';
+      document.getElementById('vnum').textContent = 'sem contato';
+      document.getElementById('vsub').textContent = 'A tela não está conseguindo falar com o bridge.';
+      document.getElementById('vlist').innerHTML = '';
+      document.getElementById('stamp').textContent = '';
+    }
+    return;
+  }
+
+  if (DEMO && !document.getElementById('faixademo')) {
+    const b = document.createElement('div');
+    b.id = 'faixademo';
+    b.textContent = 'DEMONSTRAÇÃO · dados simulados · cenário "' + DEMO + '"';
+    document.body.appendChild(b);
+  }
+  desenha(d);
+}
+
+function desenha(d) {
+  ultimoD = d;
+  document.body.dataset.state = d.state;
+  const n = d.crit + d.warn;
+  // O título grande responde "PRECISO AGIR?", que é a pergunta de quem passa na
+  // frente da tela. A contagem e o nome do problema ficam embaixo. "Tudo ok"
+  // dizia o estado, não a consequência — e o estado agora está no núcleo.
+  const pl = (n, um, mais) => `${n} ${n === 1 ? um : mais}`;
+  document.getElementById('vnum').textContent =
+    d.crit > 0 ? 'Precisa de você' : d.warn > 0 ? 'Vale olhar' : 'Nada a fazer';
+  document.getElementById('vsub').textContent =
+    n === 0 ? `${d.bridge.checks} serviços e ${(d.plants || []).length} usinas verificados agora`
+            : (d.alerts && d.alerts[0] ? d.alerts[0].title
+               : [d.crit ? pl(d.crit, 'crítico', 'críticos') : null,
+                  d.warn ? pl(d.warn, 'atenção', 'atenções') : null].filter(Boolean).join(' · '));
+  document.getElementById('hubstate').textContent =
+    d.crit > 0 ? 'CRÍTICO' : d.warn > 0 ? 'ATENÇÃO' : 'TUDO OK';
+  document.getElementById('vlist').innerHTML = (d.alerts || []).map(a =>
+    `<div class="vitem" data-sev="${a.sev}">${a.title}<em>${idade(a.since_ms)}</em></div>`).join('');
+
+  // centro
+  document.getElementById('hubsub').textContent = 'no ar ' + idade(Date.now() - d.bridge.uptime_sec * 1000);
+  // Usina sem leitura não entra como 0: o total é a soma do que foi lido, e se
+  // ninguém leu, o total é "—". Somar null como zero mostrava na parede uma
+  // queda de geração que não existia (Palmeiras, 13/09).
+  const kws = (d.plants || []).map(p => p.kw).filter(v => v != null);
+  const kwTotal = kws.length ? kws.reduce((s, v) => s + v, 0) : null;
+  const svcOk = (d.services || []).filter(s => s.ok).length;
+  // Com problema o nó NOMEIA o problema; sem problema mostra a medida (solar,
+  // apps) ou simplesmente "ok". O que cada coisa está fazendo foi pro hover.
+  const normal = {
+    carro: 'ok',
+    solar: kwTotal == null ? 'sem leitura' : fmtKw(kwTotal) + ' kW',
+    casa:  'ok',
+    sitio: 'ok',
+    apps:  svcOk + '/' + d.services.length,
+    rede:  'ok',
+    // O disco é o recurso que aperta primeiro aqui; o resto do host está no card.
+    mac:   d.host?.disco ? 'disco ' + Math.round(d.host.disco.usado / d.host.disco.total * 100) + '%' : 'ok',
+  };
+  for (const k in normal) {
+    const nd = (d.nodes || {})[k] || { sev: 'ok', txt: 'ok' };
+    const el = document.getElementById('nv-' + k);
+    if (el) el.textContent = nd.sev === 'ok' ? normal[k] : curto(nd.txt);
+    const g = document.querySelector(`.nd[data-node="${k}"]`);
+    if (g) g.dataset.sev = nd.sev;
+  }
+
+  // pulsos: só pros timestamps que ainda não vimos
+  for (const ms of (d.pulse_ms || [])) {
+    if (!vistos.has(ms)) { vistos.add(ms); pulsa('carro'); }
+  }
+  if (vistos.size > 200) vistos = new Set([...vistos].slice(-50));
+
+  // serviços
+  document.getElementById('side').innerHTML = (d.services || []).map(s =>
+    `<div class="srow" data-ok="${s.ok}" data-det="svc:${s.nome}"><span class="dot"></span><b>${s.nome}</b>` +
+    `<em>${s.det || (s.ok ? '' : 'fora')}</em></div>`).join('');
+  document.getElementById('svcsub').textContent = svcOk + '/' + d.services.length;
+
+  // ── Mac Mini ──────────────────────────────────────────────────────────────
+  // Barra de ocupação com a mesma régua dos alertas do bridge: >80% atenção,
+  // >90% crítico. O disco interno vive perto de 90% e não aparecia em canto
+  // nenhum — é o tipo de coisa que só se nota quando já encheu.
+  const h = d.host || {};
+  const barra = (rot, u, t, un) => {
+    if (!u || !t) return '';
+    const p = Math.round(u / t * 100);
+    const st = p > 90 ? 'crit' : p > 80 ? 'warn' : 'ok';
+    return `<div class="brow"><b>${rot}</b>` +
+      `<span class="bbar" data-st="${st}"><span style="width:${p}%"></span></span>` +
+      `<em>${p}%</em></div>`;
+  };
+  document.getElementById('host').innerHTML =
+    barra('Disco', h.disco?.usado, h.disco?.total) +
+    barra('SSD 1TB', h.ssd?.usado, h.ssd?.total) +
+    barra('Memória', h.mem?.usado, h.mem?.total);
+  document.getElementById('hostsub').textContent =
+    h.uptime_sec ? 'no ar ' + fmtDias(h.uptime_sec) : '';
+  document.getElementById('hostpe').textContent = [
+    h.disco ? `${Math.round(h.disco.total - h.disco.usado)} GB livres no interno` : null,
+    h.link && h.rx_kbps != null ? `${h.link} · ↓${h.rx_kbps} ↑${h.tx_kbps} kbps` : null,
+    h.cert_dias != null ? `certificado ${h.cert_dias} d` : null,
+  ].filter(Boolean).join(' · ');
+
+  // ── backups ───────────────────────────────────────────────────────────────
+  // Falha mais silenciosa que existe. Cada um tem prazo próprio (`limite`), que
+  // é a régua — não um número fixo pra todos.
+  const bk = d.backups || [];
+  document.getElementById('bkps').innerHTML = bk.length
+    ? bk.map(b => `<div class="srow" data-ok="${b.ok}"><span class="dot"></span>` +
+        `<b>${esc(b.nome)}</b><em>${b.horas == null ? '—' : fmtMin(Math.round(b.horas * 60))}</em></div>`).join('')
+    : '<div class="srow" data-ok="true"><b>sem registro</b></div>';
+  document.getElementById('bkpsub').textContent =
+    bk.length ? `${bk.filter(b => b.ok).length}/${bk.length}` : '';
+
+  // ── arcos: energia armazenada ──────────────────────────────────────────────
+  // Só grandeza LIMITADA vira arco. Bateria baixa só é problema DESCARREGANDO:
+  // 30% com a rede ligada é estação carregando, não alarme — mesma regra do
+  // alerta no bridge, que é quem manda o veredito `offgrid`.
+  const gs = (d.bat || []).map(b => {
+    if (!b.reachable) return arco(null, b.label, 'sem comunicação', 'none', 'bat:' + b.key);
+    const sub = b.offgrid === true ? 'na bateria · ' + fmtMin(b.autonomy_min)
+              : b.grid_w > 0       ? b.grid_w + ' W da rede'
+              : 'em espera';
+    const st = b.offgrid === true
+      ? (b.pct <= 10 ? 'crit' : b.pct <= 30 ? 'warn' : 'ok') : 'ok';
+    return arco(b.pct, b.label, sub, st, 'bat:' + b.key);
+  });
+  // Os dois carros. SOC de carro parado não deriva, então leitura velha segue
+  // verdadeira — mas diz a idade em vez de passar por atual.
+  for (const c of (d.cars || [])) {
+    const min = c.ts ? Math.round((Date.now() - c.ts) / 60000) : null;
+    const sub = c.charging          ? `carregando ${(c.power_kw || 0).toFixed(1)} kW`
+              : (min != null && min > 30) ? 'há ' + fmtMin(min)
+              : c.awake === true    ? 'acordado'
+              : c.awake === false   ? 'dormindo' : 'em repouso';
+    gs.push(arco(c.soc, c.label, sub, 'car', 'car:' + c.key));
+  }
+  document.getElementById('gauges').innerHTML = gs.join('');
+
+  // ── barras: a forma do dia ────────────────────────────────────────────────
+  // Soma por hora entre as usinas que reportaram AQUELA hora. Sem texto dentro
+  // do SVG: com preserveAspectRatio="none" a fonte estica junto e fica ilegível,
+  // então a escala vai no cabeçalho do card.
+  // Se a usina selecionada sumir do payload (planta removida), cai no total em
+  // vez de desenhar vazio.
+  if (usinaSel && !(d.spark || {})[usinaSel]) usinaSel = null;
+  const alvo = usinaSel ? (d.plants || []).find(p => p.key === usinaSel) : null;
+  document.getElementById('gertit').textContent =
+    alvo ? 'Geração · ' + alvo.label : 'Geração';
+  const sh = (d.spark || {})[usinaSel || 'total'] || [];
+  const sp = document.getElementById('spark');
+  if (!sh.length) {
+    sp.innerHTML = '';
+    document.getElementById('sparksub').textContent = 'sem amostras hoje';
+  } else {
+    const maxKwh = Math.max(...sh.map(x => x.kwh), 0.001);
+    const maxKw  = Math.max(...sh.map(x => x.kw),  0.001);
+    // TOP = respiro: sem ele a barra do pico encosta na borda do card e o
+    // conjunto parece espremido, mesmo com espaço sobrando embaixo.
+    const W = 600, H = 130, TOP = 15, pad = 6, bw = (W - 2 * pad) / sh.length;
+    const cx = i => pad + i * bw + bw / 2;
+    const yKw = v => H - (H - TOP) * (v / maxKw);
+    sp.innerHTML =
+      sh.map((x, i) => {
+        const alt = (H - TOP) * (x.kwh / maxKwh);
+        return `<rect class="sbar${x.parcial ? ' parcial' : ''}" data-i="${i}" rx="2" ` +
+               `x="${(pad + i * bw + bw * .16).toFixed(1)}" y="${(H - alt).toFixed(1)}" ` +
+               `width="${(bw * .68).toFixed(1)}" height="${alt.toFixed(1)}"/>`;
+      }).join('') +
+      `<polyline class="skw" points="${sh.map((x, i) => `${cx(i).toFixed(1)},${yKw(x.kw).toFixed(1)}`).join(' ')}"/>`;
+    document.getElementById('sparksub').textContent =
+      `${sh[0].h}h–${sh[sh.length - 1].h}h · pico ${fmtKw(maxKw)} kW`;
+  }
+
+  // ── série de 14 dias ──────────────────────────────────────────────────────
+  // A mediana entra como linha: "121% do normal" vira uma coisa que se VÊ, e
+  // um dia ruim isolado (nuvem) se distingue de três seguidos (problema).
+  const dl = (d.daily || {})[usinaSel || 'total'] || [];
+  const sd = document.getElementById('daily');
+  if (!dl.length) {
+    sd.innerHTML = '';
+    document.getElementById('dailysub').textContent = 'sem histórico';
+  } else {
+    // Hoje fica FORA da mediana: dia pela metade puxaria a referência pra baixo.
+    const passados = dl.slice(0, -1).map(x => x.kwh).filter(v => v > 0).sort((a, b) => a - b);
+    const med = passados.length ? passados[Math.floor(passados.length / 2)] : 0;
+    const max = Math.max(...dl.map(x => x.kwh), med) || 1;
+    const W = 600, H = 130, TOP = 15, pad = 6, bw = (W - 2 * pad) / dl.length;
+    const y = v => H - (H - TOP) * (v / max);
+    sd.innerHTML =
+      (med > 0 ? `<line class="dmed" x1="0" y1="${y(med).toFixed(1)}" x2="${W}" y2="${y(med).toFixed(1)}"/>` : '') +
+      dl.map((x, i) => {
+        const hoje = i === dl.length - 1, t = y(x.kwh);
+        return `<rect class="dbar${hoje ? ' hoje' : ''}" data-i="${i}" rx="2" ` +
+               `x="${(pad + i * bw + bw * .14).toFixed(1)}" y="${t.toFixed(1)}" ` +
+               `width="${(bw * .72).toFixed(1)}" height="${(H - t).toFixed(1)}"/>`;
+      }).join('');
+    const hojeKwh = dl[dl.length - 1].kwh;
+    // O card inteiro responde "como está a geração?" — então o de HOJE, que é o
+    // que muda, vai no cabeçalho; a régua de comparação fica no pé do painel.
+    document.getElementById('dailysub').textContent = `mediana ${fmtKwh(med)} kWh/dia`;
+    // A comparação é contra a mediana DESTA HORA (d.pace), nunca contra a do
+    // dia inteiro: às 11h o dia está pela metade e qualquer dia normal daria
+    // "40% da mediana".
+    // Filtrado, a régua é a DAQUELA usina (`pace_kwh`), não a do conjunto —
+    // senão compararia uma usina contra a mediana das três somadas.
+    const medHora = alvo ? alvo.pace_kwh : (d.pace ? d.pace.median_kwh : null);
+    const hora = d.pace ? d.pace.hour : new Date().getHours();
+    document.getElementById('gersub').textContent =
+      `hoje ${fmtKwh(hojeKwh)} kWh` +
+      (medHora ? ` · ${Math.round(hojeKwh / medHora * 100)}% do normal até as ${hora}h`
+               : ' · dia em curso');
+  }
+
+  // ── ranking da semana ─────────────────────────────────────────────────────
+  const t7 = d.top7d || [];
+  document.getElementById('top7').innerHTML = t7.length
+    ? t7.map((t, i) => `<div class="trow" data-topi="${i}" data-det="ocorrencias:${esc(t.tipo || '')}"><b>${esc(t.label)}</b>` +
+        `<span class="tbar"><span style="width:${t.pct}%"></span></span>` +
+        `<em>${t.n}x</em></div>`).join('')
+    : '<div class="trow"><b>nenhum alerta nos últimos 7 dias</b></div>';
+  document.getElementById('topsub').textContent =
+    t7.length ? t7.reduce((a, t) => a + t.n, 0) + ' ocorrências' : '';
+
+  // ── eventos ───────────────────────────────────────────────────────────────
+  const evs = d.events || [];
+  document.getElementById('evts').innerHTML = evs.length
+    ? evs.map((e, i) =>
+        `<div class="ev" data-k="${e.kind}" data-evi="${i}"><time>${hhmm(e.ts)}</time>` +
+        `<span>${esc(e.msg)}${e.n > 1 ? ' · ' + e.n + 'x' : ''}</span></div>`).join('')
+    : '<div class="ev"><span>nada registrado nas últimas horas</span></div>';
+  document.getElementById('evsub').textContent = evs.length ? evs.length + ' · 7 dias ›' : '';
+
+  // usinas
+  // "% do normal" = mediana desta hora nos últimos 14 dias. Sem 3 amostras o
+  // bridge manda null e aqui não se inventa comparação.
+  // Compara o ACUMULADO de hoje contra a mediana do acumulado nesta mesma hora.
+  // Antes comparava potência instantânea: uma nuvem em cima do tick virava "42%
+  // do normal" numa manhã que estava acima da média.
+  const pct = (p) => (p.pace_kwh && p.kwh != null)
+    ? `<i>·</i><span>${Math.round(p.kwh / p.pace_kwh * 100)}% do normal até agora</span>` : '';
+  // Um inversor mudo faz a planta somar metade. Sem esta etiqueta o kW menor
+  // parece queda de geração — e é só telemetria faltando.
+  const parc = (p) => p.partial ? `<i>·</i><span>${p.partial[0]} de ${p.partial[1]} inversores</span>` : '';
+  const aux = (kwh, extra) => `<div class="paux">` +
+    `<b>${fmtKwh(kwh)}</b> kWh hoje` + extra + `</div>`;
+  const kwhs = (d.plants || []).map(p => p.kwh).filter(v => v != null);
+  const kwhTotal = kwhs.length ? kwhs.reduce((s, v) => s + v, 0) : null;
+  // O total só vale como total se todas as usinas foram lidas. Somar 2 de 3 e
+  // chamar de "total" mostra uma queda de 12 kW que não aconteceu.
+  const inteiras = (d.plants || []).filter(p => p.kw != null && !p.partial).length;
+  const usinas = (d.plants || []).length;
+  const totExtra = inteiras < usinas
+    ? `<i>·</i><span>${inteiras} de ${usinas} usinas completas</span>` : '';
+  document.getElementById('foot').innerHTML = (d.plants || []).map(p =>
+    `<div class="plant" data-det="plant:${p.key}" data-usina="${p.key}"` +
+    `${usinaSel === p.key ? ' data-sel="true"' : ''}><div class="pmain"><span class="nm">${p.label}</span>` +
+    `<span class="kw"${p.kw == null ? ' data-vazio="true"' : ''}>` +
+    `${p.kw == null ? 'sem leitura' : fmtKw(p.kw)}</span>` +
+    `${p.kw == null ? '' : '<span class="un">kW</span>'}` +
+    `<span class="tp" data-st="${p.temp_state || ''}">` +
+    `${p.temp ? p.temp.toFixed(0) + '°C' : (p.kw == null ? '' : '—')}</span></div>` +
+    aux(p.kwh, parc(p) + pct(p)) + `</div>`
+  ).join('') + `<div class="plant" data-usina="total"` +
+    `${usinaSel ? '' : ' data-sel="true"'}><div class="pmain"><span class="total">total</span>` +
+    `<span class="kw">${fmtKw(kwTotal)}</span><span class="un">kW</span></div>` +
+    aux(kwhTotal, totExtra) + `</div>`;
+
+  document.getElementById('stamp').textContent = 'atualizado ' +
+    new Date(d.ts).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  document.getElementById('scope').textContent =
+    `${d.bridge.checks} serviços · ${(d.plants || []).length} usinas`;
+  pintaDetalhe();   // se houver detalhe aberto, ele acompanha o ciclo
+}
+
+setInterval(tick, 2000);
+tick();
+setInterval(() => {
+  document.getElementById('clock').textContent =
+    new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+}, 1000);
+</script>
+</body>
+</html>

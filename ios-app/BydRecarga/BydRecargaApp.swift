@@ -4,6 +4,7 @@
 //  Função única: registrar tokens APNs no bridge e exibir status da recarga.
 //
 import SwiftUI
+import UIKit
 import UserNotifications
 
 @main
@@ -16,6 +17,15 @@ struct BydRecargaApp: App {
                 .environmentObject(deepLinkRouter)
                 .preferredColorScheme(.dark)
                 .onOpenURL { url in
+                    // Tocar numa Live Activity SEMPRE abre o app dono do widget — o iOS
+                    // não entrega o toque ao Safari, mesmo com `widgetURL` https. Então
+                    // o link chega aqui, e é o app que precisa abri-lo. Sem isto o
+                    // `guard` abaixo descartava a URL e o toque só trazia o app pra
+                    // frente, sem mostrar o trajeto.
+                    if url.scheme == "https" || url.scheme == "http" {
+                        UIApplication.shared.open(url)
+                        return
+                    }
                     guard url.scheme == "grasi-recarga" else { return }
                     let token = URLComponents(url: url, resolvingAgainstBaseURL: false)?
                         .queryItems?.first { $0.name == "token" }?.value ?? ""

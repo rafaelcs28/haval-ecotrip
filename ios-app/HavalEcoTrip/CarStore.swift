@@ -402,6 +402,30 @@ final class CarStore: ObservableObject {
     /// O APK serve um SUBCONJUNTO RAW (sem GPS/fuel/trip). Sobrepõe só as chaves
     /// de telemetria rápida com semântica idêntica à do cloud; remapeia as poucas
     /// com nome diferente; ignora o resto (cloud continua dono).
+    /// Campos onde 0/vazio significa falha de leitura, não medida. Espelha o `NAO_ZERO`
+    /// do bridge, que faltava aqui: com o APK degradado o servidor local dele devolvia 0
+    /// e apagava o que a GWM entregava fresco pela nuvem.
+    ///
+    /// TEMPERATURA ENTRA. Eu a havia excluído argumentando que "0°C é legítimo" — errado
+    /// para este carro e este clima: o APK manda 0 quando não consegue ler, e 0°C em
+    /// Goiânia não acontece. O dono provou tirando o iPhone da LAN em 19/08: cabine e
+    /// externa voltaram na hora.
+    ///
+    /// `charge_power_kw`, `motor_power_kw` e `battery_current_a` ficam FORA de propósito:
+    /// ali 0 é medida real (não carregando, parado, sem corrente).
+    private static let lanNaoZero: Set<String> = [
+        "odometer_km", "soc_pct", "batt_12v_pct", "charge_remaining_min",
+        "inside_temp", "outside_temp",
+    ]
+    private static func ehZero(_ v: Any) -> Bool {
+        switch v {
+        case let d as Double: return d == 0
+        case let i as Int:    return i == 0
+        case let s as String: return s.isEmpty || Double(s) == 0
+        default: return false
+        }
+    }
+
     private static let lanPassthrough: Set<String> = [
         "speed_kmh", "motor_power_kw", "engine_rpm", "batt_power_pct", "steering_angle",
         "gear", "odometer_km", "soc_pct", "battery_current_a", "batt_12v_pct",
@@ -424,6 +448,11 @@ final class CarStore: ObservableObject {
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
         for (k, v) in obj {
             if v is NSNull { continue }
+            // Zero NÃO é leitura nestes campos — é "o APK não conseguiu ler". O bridge já
+            // tem essa guarda (NAO_ZERO); aqui faltava, e com o APK degradado o
+            // `odometer_km: 0` do servidor local dele apagava os 33.867 que a GWM
+            // entregava fresco (19/08: painel mostrando 0 km).
+            if Self.lanNaoZero.contains(k), Self.ehZero(v) { continue }
             if Self.lanPassthrough.contains(k) { raw[k] = v }
             else if let renamed = Self.lanRename[k] { raw[renamed] = v }
         }
@@ -524,8 +553,40 @@ final class CarStore: ObservableObject {
     /// marcando velho mesmo depois que o APK também parou (offline total).
     /// engine_state/door/window viram source 'apk' em fallback → NÃO congelam; lock/pneus sim.
     func isFrozen(_ key: String) -> Bool { gwmStale && fieldSource(key) == "gwm" }
-    /// Idade do dado mais recente (qualquer fonte), em segundos. -1 se nunca recebeu.
+    /// Idade de UM campo, em segundos: quando o carro confirmou aquele valor ao vivo
+    /// pela última vez (`_field_seen` do bridge). nil = o bridge não sabe.
+    ///
+    /// Existe porque a idade global não responde "posso afirmar que o motor está
+    /// ligado?": o carro publica dezenas de campos, e um deles fresco fazia todos
+    /// parecerem frescos. `engine_state` só muda na transição, então o que importa é
+    /// quando a fonte reconfirmou — não quando mudou.
+    func idadeCampoSec(_ chave: String) -> Double? {
+        guard let m = (raw["_field_seen"] as? [String: Any])?[chave] as? Double, m > 0
+        else { return nil }
+        return max(0, Date().timeIntervalSince1970 - m / 1000)
+    }
+    /// Este campo pode ser AFIRMADO? Fresco = confirmado ao vivo há pouco.
+    /// Sem idade por campo (bridge antigo), cai na idade global.
+    func campoConfiavel(_ chave: String, limiteSec: Double = 300) -> Bool {
+        if let i = idadeCampoSec(chave) { return i < limiteSec }
+        if carOnline { return true }
+        let g = dataAgeSec
+        return g >= 0 && g < limiteSec
+    }
+
+    /// Idade da última MEDIÇÃO do carro, em segundos. -1 se nunca recebeu.
+    ///
+    /// Usa `medicao_ms`, calculado pelo bridge, e não mais `max(lastApkMs, lastGwmMs)`:
+    /// aqueles dois marcam atividade da FONTE, não medição. `last_gwm_ms` fica em 0s
+    /// para sempre porque a integração republica o cache da nuvem a cada 5s, e
+    /// `last_apk_ms` é renovado por retained. O resultado era "agora" embaixo da
+    /// temperatura da cabine com o carro dormindo há 4h (visto em 31/07).
+    /// Fallback pro cálculo antigo só pra não quebrar contra bridge sem o campo.
     var dataAgeSec: Double {
+        if let ms = raw["medicao_ms"] as? Double, ms > 0 {
+            return Date().timeIntervalSince1970 - ms / 1000
+        }
+        if raw["medicao_ms"] != nil { return -1 }   // bridge já responde, mas nunca mediu
         let ms = max(lastApkMs, lastGwmMs)
         guard ms > 0 else { return -1 }
         return Date().timeIntervalSince1970 - ms / 1000
@@ -551,8 +612,86 @@ final class CarStore: ObservableObject {
         let t = u["texto"] as? String
         return (t?.isEmpty == false) ? t : nil
     }
+    /// Rótulo curto com emoji, composto AQUI a partir dos campos estruturados em vez
+    /// de usar o `displayText` do Impulse — que vinha "Tela · <ssid>", com o jargão
+    /// deles pra head unit.
+    ///
+    /// A VISIBILIDADE continua sendo decisão do Impulse: só compõe quando ele mandaria
+    /// texto (`ok` e `displayText` não vazio). `texto: null` é o pedido explícito dele
+    /// pra esconder a linha, e ignorar isso faria a linha aparecer em situações que
+    /// hoje ficam em silêncio. Se nenhum caso casar, cai no texto dele.
+    var uplinkLabelCurto: String? {
+        guard let u = uplinkRaw, (u["ok"] as? Bool) == true,
+              let original = u["texto"] as? String, !original.isEmpty else { return nil }
+        let modo = (u["modo"] as? String ?? "").uppercased()
+        let roteando = (u["roteando"] as? Bool) ?? false
+        let rede = (u["wifi"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+            ?? (u["wifiDaTela"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        let quatroG = (u["quatroGOn"] as? Bool) ?? false
+
+        switch true {
+        case modo == "ERROR":              return "⚠️ rede"
+        case modo == "STARTING":           return "⏳"
+        case roteando && modo == "WLAN":   return "📡 📶 " + (rede ?? "WiFi")
+        case roteando && modo == "4G":     return "📡 📱 4G"
+        case modo == "WLAN":               return "📶 " + (rede ?? "WiFi")
+        case quatroG:                      return "📱 4G"
+        case modo == "OFF":                return "🚫 rede"
+        default:                           return original
+        }
+    }
+
     var uplinkNivel: String { (uplinkRaw?["nivel"] as? String) ?? "muted" }
     var uplinkModo: String  { (uplinkRaw?["modo"]  as? String) ?? "" }
+    /// Ícone escolhido pelo IMPULSE (`displayIcon`), traduzido pra SF Symbol.
+    ///
+    /// Derivar do `routingMode` estava errado num caso real: com o HotRouter off e a
+    /// tela navegando por WiFi, o modo é `OFF` e eu mostrava "sem rede" — enquanto o
+    /// Impulse dizia `wifi`. Ele conhece a diferença entre "hotspot roteando" e "a
+    /// própria tela está no WiFi"; o modo bruto não carrega isso.
+    var uplinkIconeSF: String {
+        switch (uplinkRaw?["icone"] as? String) ?? "" {
+        case "satellite": return "antenna.radiowaves.left.and.right"
+        case "wifi":      return "wifi"
+        case "cell":      return "cellularbars"
+        case "cell_off":  return "cell.slash"
+        case "loader":    return "arrow.triangle.2.circlepath"
+        case "alert":     return "exclamationmark.triangle.fill"
+        default:
+            // Sem displayIcon (bridge/APK antigo) cai no modo, como antes.
+            switch uplinkModo {
+            case "WLAN": return "antenna.radiowaves.left.and.right"
+            case "4G":   return "cellularbars"
+            case "STARTING": return "arrow.triangle.2.circlepath"
+            case "ERROR": return "exclamationmark.triangle.fill"
+            default:     return "wifi.slash"
+            }
+        }
+    }
+
+    /// Idade da medição, em segundos. `nil` = desconhecida (retained de um APK que
+    /// não estampa `medidoMs`), e aí o badge não pode afirmar nada sobre frescor.
+    var uplinkIdadeSec: Double? {
+        guard let ms = uplinkRaw?["medidoMs"] as? Double, ms > 0 else { return nil }
+        return max(0, Date().timeIntervalSince1970 - ms / 1000)
+    }
+    /// Estado velho: o carro dormiu e o hotspot pode ter caído junto. O texto
+    /// continua sendo mostrado — o dono quer saber por onde ESTAVA roteando — mas o
+    /// badge precisa parar de afirmar que é agora. 3 min cobre o poll de 60s do APK
+    /// com folga pra uma perda de mensagem.
+    var uplinkVelho: Bool {
+        if let s = uplinkIdadeSec { return s > 180 }
+        return (uplinkRaw?["retido"] as? Bool) == true
+    }
+    /// "há 5 min" / "há 2 h" pra colar no badge quando o dado não é do momento.
+    var uplinkIdadeTexto: String? {
+        guard uplinkVelho else { return nil }
+        guard let s = uplinkIdadeSec else { return "sem atualizar" }
+        let min = Int(s / 60)
+        if min < 60 { return "há \(max(1, min)) min" }
+        let h = min / 60
+        return h < 24 ? "há \(h) h" : "há \(h / 24) d"
+    }
 
     var batt12vPct: Double { num("batt_12v_pct") }
     var batt12vV: Double { num("batt_12v_v") }
@@ -563,9 +702,35 @@ final class CarStore: ObservableObject {
     var tyreRR: Double { num("tyre_pressure_rr") }
 
     // Recarga
-    var isCharging: Bool       { chargingState == "Carregando" }
+    /// `charging_state` só existe no APK — a GWM não publica esse campo, então não há
+    /// quem devolva o comando quando o APK morre. Um "Carregando" congelado sobrevive
+    /// indefinidamente, e é o que sustenta o card de recarga na tela.
+    var isCharging: Bool { chargingState == "Carregando" && campoConfiavel("charging_state") }
+    /// Último estado conhecido, sem exigir frescor (histórico/diagnóstico).
+    var chargingStateBruto: String { chargingState }
     var chargePowerKw: Double  { num("charge_power_kw") }
-    var chargeSessionKwh: Double { num("charge_session_kwh") }
+    /// `charge_power_kw` e `charge_session_kwh` vêm SÓ do APK. Com ele caído, zero medido
+    /// e zero por ausência ficavam indistinguíveis — o card afirmava "0,0 kW · +0,0 kWh"
+    /// com o carro carregando (19/08). O bridge marca a confiabilidade e deriva a energia
+    /// do SOC, que vem fresco da GWM.
+    var chargePowerConfiavel: Bool { (raw["charge_power_confiavel"] as? Bool) ?? true }
+    private var chargeSessionKwhEst: Double? {
+        switch raw["charge_session_kwh_est"] {
+        case let d as Double: return d
+        case let i as Int: return Double(i)
+        default: return nil
+        }
+    }
+    /// Energia da sessão: a do APK quando existe, senão a derivada do SOC.
+    var chargeSessionKwh: Double {
+        let apk = num("charge_session_kwh")
+        if apk > 0.05 { return apk }
+        return chargeSessionKwhEst ?? apk
+    }
+    /// true = o número da sessão veio do SOC, não da medição do APK. A tela avisa.
+    var chargeSessionKwhEstimada: Bool {
+        num("charge_session_kwh") <= 0.05 && (chargeSessionKwhEst ?? 0) > 0
+    }
     var chargeRemainingMin: Int { Int(num("charge_remaining_min")) }
 
     // Status de condução (leitura — controles vêm no Bloco 2)
@@ -596,10 +761,71 @@ final class CarStore: ObservableObject {
     /// Rede do carro (APK publica em network/info): IP local + tipo + velocidade.
     private var carNetwork: [String: Any]? { raw["car_network"] as? [String: Any] }
     var carIP: String { carNetwork?["ip"] as? String ?? "" }
+    /// IP do carro APENAS se for de rede privada (RFC 1918). O pedido é o IP da rede
+    /// local, não o da internet — a fonte é `LinkProperties.linkAddresses` no APK, que
+    /// já entrega o endereço da interface, mas o filtro garante que nada público
+    /// apareça aqui se a origem mudar um dia. No 4G não há LAN, então some.
+    var carIPLocal: String {
+        let ip = carIP
+        let p = ip.split(separator: ".").compactMap { Int($0) }
+        guard p.count == 4 else { return "" }
+        let privado = p[0] == 10
+            || (p[0] == 192 && p[1] == 168)
+            || (p[0] == 172 && p[1] >= 16 && p[1] <= 31)
+        return privado ? ip : ""
+    }
     var carNetType: String { carNetwork?["type"] as? String ?? "" }
     var carDownlinkMbps: Double? {
         switch carNetwork?["downlink_kbps"] { case let d as Double: return d/1000; case let i as Int: return Double(i)/1000; default: return nil }
     }
+
+    // ── Navegação do Android Auto (Waze/Maps), via Impulse ───────────────────
+    // O bridge já reavalia o frescor na leitura e devolve {active:false} quando o dado
+    // parou de chegar, então aqui não há segundo julgamento de idade — um só lugar
+    // decide se o ETA vale.
+    // Sem lat/long: o host do AA não expõe. `navDestination` é rótulo, não ponto.
+    private var nav: [String: Any]? { raw["nav"] as? [String: Any] }
+    var navActive: Bool { (nav?["active"] as? Bool) ?? false }
+    private func nnum(_ k: String) -> Double {
+        switch nav?[k] { case let d as Double: return d; case let i as Int: return Double(i); default: return 0 }
+    }
+    var navEta: String        { (nav?["eta"] as? String) ?? "" }
+    var navDestination: String { (nav?["destination"] as? String) ?? "" }
+    var navCurrentRoad: String { (nav?["current_road"] as? String) ?? "" }
+    var navRemainingKm: Double { nnum("remaining_meters") / 1000 }
+    var navRemainingSec: Int   { Int(nnum("remaining_seconds")) }
+    var navNextIcon: String    { (nav?["next_icon"] as? String) ?? "" }
+    var navNextRoad: String    { (nav?["next_road"] as? String) ?? "" }
+
+    /// Ícone SF pro tipo de manobra que o host mandou. Fallback genérico — o host tem
+    /// mais tipos que o SF Symbols, e manobra errada desenhada é pior que seta neutra.
+    var navNextSF: String {
+        switch navNextIcon {
+        case let s where s.contains("turn_l") || s.contains("left"):  return "arrow.turn.up.left"
+        case let s where s.contains("turn_r") || s.contains("right"): return "arrow.turn.up.right"
+        case let s where s.contains("uturn"):      return "arrow.uturn.down"
+        case let s where s.contains("roundabout"): return "arrow.triangle.turn.up.right.circle"
+        case let s where s.contains("merge"):      return "arrow.merge"
+        case let s where s.contains("destination"):return "mappin.and.ellipse"
+        default: return "arrow.up"
+        }
+    }
+
+    // ── Mídia tocando no carro (via Impulse) ─────────────────────────────────
+    // O bridge já filtra frescor e devolve {playing:false} quando o carro parou de
+    // publicar. Presença de TÍTULO é o que define "há mídia" — o Impulse reporta
+    // playing=false na sessão do Android Auto mesmo com som saindo.
+    private var mediaRaw: [String: Any]? { raw["media"] as? [String: Any] }
+    var mediaTitle: String  { (mediaRaw?["title"] as? String) ?? "" }
+    var mediaArtist: String { (mediaRaw?["artist"] as? String) ?? "" }
+    var mediaMuted: Bool    { (mediaRaw?["muted"] as? Bool) ?? false }
+    var mediaPlaying: Bool  { (mediaRaw?["playing"] as? Bool) ?? false }
+    /// Exige PLAY ATIVO. Pausado não é escutado — faixa parada há horas não deve
+    /// aparecer como "tocando". O bridge já filtra, mas a regra fica explícita aqui
+    /// também porque é o consumidor que responde pelo que afirma na tela.
+    var hasMedia: Bool      { mediaPlaying && !mediaTitle.isEmpty }
+    /// ♪ tocando · 🔇 tocando no mudo — mesma convenção da página compartilhada.
+    var mediaSF: String { mediaMuted ? "speaker.slash.fill" : "music.note" }
 
     var trip: [String: Any]? { raw["current_trip"] as? [String: Any] }
     var tripActive: Bool { trip != nil }
@@ -645,7 +871,18 @@ final class CarStore: ObservableObject {
     var lockKnown: Bool { let s = str("lock_state"); return s == "on" || s == "off" }
     var isLocked: Bool  { str("lock_state") == "off" }
     /// AC ligado: mestre hvac_power_mode (1) OU ventilador girando — fallback ac_state.
-    var acOn: Bool { hvacPowerOn || fanSpeed > 0 || str("ac_state") == "on" }
+    /// AC ligado. `ac_state` MANDA quando está fresco; os auxiliares (`hvac_*`) só
+    /// entram como fallback.
+    ///
+    /// Antes era um OR entre os três, e o OR fazia auxiliar morto vencer fonte viva:
+    /// em 04/08 `ac_state=off` vinha da GWM ao vivo enquanto `hvac_fan_speed=3` e
+    /// `hvac_ac_enable=1` estavam congelados no último valor do APK — e esses dois não
+    /// existem na GWM, então nunca são devolvidos e ficam presos pra sempre. O app
+    /// mostrava AC ligado com o carro desligado.
+    var acOn: Bool {
+        if campoConfiavel("ac_state", limiteSec: 300) { return str("ac_state") == "on" }
+        return hvacPowerOn || fanSpeed > 0 || str("ac_state") == "on"
+    }
 
     // HVAC (campos hvac_* do estado)
     var hvacPowerOn: Bool { ["1", "on", "true"].contains(str("hvac_power_mode").lowercased()) }
@@ -677,15 +914,24 @@ final class CarStore: ObservableObject {
     private func openLabels(_ map: [(String, String)]) -> [String] {
         map.filter { str($0.0) == "on" }.map { $0.1 }
     }
+    /// Aberturas AFIRMADAS. Cada porta/vidro só entra se o campo dela foi confirmado
+    /// ao vivo — a mesma regra que o bridge aplica no alerta de segurança. Sem isso o
+    /// painel acusava "1 aberta" com o carro trancado, porque `door_fl` ficou no último
+    /// valor do APK (que morre junto com o carro) e ninguém publicou o fechamento.
     var openings: [String] {
-        openLabels([
+        openLabels(camposAbertura.filter { campoConfiavel($0.0) })
+    }
+    /// Sem filtro de frescor — pra telas que querem mostrar "último conhecido".
+    var openingsSemFiltro: [String] { openLabels(camposAbertura) }
+    private var camposAbertura: [(String, String)] {
+        [
             ("door_fl", "Porta diant. esq."), ("door_fr", "Porta diant. dir."),
             ("door_rl", "Porta tras. esq."),  ("door_rr", "Porta tras. dir."),
             ("door_trunk", "Porta-malas"),
             ("window_fl", "Vidro diant. esq."), ("window_fr", "Vidro diant. dir."),
             ("window_rl", "Vidro tras. esq."),  ("window_rr", "Vidro tras. dir."),
             ("sunroof", "Teto solar"),
-        ])
+        ]
     }
 
     // MARK: - Comandos (POST /api/<path>)

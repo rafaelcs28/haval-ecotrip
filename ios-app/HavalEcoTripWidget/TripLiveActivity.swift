@@ -23,7 +23,10 @@ struct TripLiveActivity: Widget {
 
         } dynamicIsland: { context in
             let s = context.state
-            let hasDest = s.destName != nil && s.active
+            // Destino = ter distância restante. Com a navegação do Android Auto não vem
+            // nome (o host não entrega), e amarrar isso ao nome deixava o ícone e o
+            // subtítulo no modo "sem destino" mesmo com rota ativa.
+            let hasDest = s.destKm != nil && s.active
             return DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
                     Image(systemName: hasDest ? "location.north.fill" : "car.fill")
@@ -141,17 +144,30 @@ struct TripLockScreenView: View {
                     }
                 }
                 Spacer(minLength: 8)
-                if let dest = state.destName, state.active {
+                if state.active, state.destKm != nil || state.destName != nil {
                     VStack(alignment: .trailing, spacing: 2) {
-                        Text("→ \(dest)")
-                            .font(.system(size: 14, weight: .semibold)).foregroundStyle(LAv2.text)
-                            .lineLimit(1).minimumScaleFactor(0.7)
-                        if let eta = etaClock, let rest = state.destKm {
-                            (Text("chega ") + Text(eta, format: .dateTime.hour().minute())
-                                + Text(" · faltam \(laDec1(rest)) km"))
-                                .font(.system(size: 11)).monospacedDigit()
-                                .foregroundStyle(LAv2.text2)
+                        if let dest = state.destName, !dest.isEmpty {
+                            Text("→ \(dest)")
+                                .font(.system(size: 14, weight: .semibold)).foregroundStyle(LAv2.text)
                                 .lineLimit(1).minimumScaleFactor(0.7)
+                        }
+                        if let eta = etaClock {
+                            // Sem nome de destino a chegada vira a linha principal, e por
+                            // isso ganha o corpo maior — antes ela morava dentro do
+                            // condicional do nome e desaparecia junto com ele.
+                            let semNome = (state.destName ?? "").isEmpty
+                            (Text("chega ") + Text(eta, format: .dateTime.hour().minute()))
+                                .font(.system(size: semNome ? 14 : 11,
+                                              weight: semNome ? .semibold : .regular))
+                                .monospacedDigit()
+                                .foregroundStyle(semNome ? LAv2.text : LAv2.text2)
+                                .lineLimit(1).minimumScaleFactor(0.7)
+                            if let rest = state.destKm {
+                                Text("faltam \(laDec1(rest)) km")
+                                    .font(.system(size: 11)).monospacedDigit()
+                                    .foregroundStyle(LAv2.text2)
+                                    .lineLimit(1).minimumScaleFactor(0.7)
+                            }
                         }
                     }
                 } else if !state.active && state.effKwh100 > 0 {

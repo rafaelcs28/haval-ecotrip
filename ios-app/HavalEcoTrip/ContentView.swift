@@ -175,6 +175,8 @@ struct ContentView: View {
             if newPhase == .active {
                 Task { await manager.autoStartIfCharging() }
                 LiveActivityPush.shared.reregisterAll()   // garante pts-token no servidor
+                // Card de viagem preso em "em curso": sem isto só sumia matando o app.
+                LiveActivityPush.shared.sanearViagemOrfa()
             } else if newPhase == .background {
                 BackgroundRefresh.schedule()
             }

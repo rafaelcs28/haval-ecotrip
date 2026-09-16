@@ -176,9 +176,11 @@ async function _send(targets, body, pushType = 'liveactivity', attrition = false
       ':method': 'POST',
       ':path':   `/3/device/${t.token}`,
       'authorization':  `bearer ${jwt}`,
-      'apns-topic':     pushType === 'alert' ? tokBundle : `${tokBundle}.push-type.liveactivity`,
+      'apns-topic':     (pushType === 'alert' || pushType === 'background')
+                          ? tokBundle : `${tokBundle}.push-type.liveactivity`,
       'apns-push-type': pushType,
-      'apns-priority':  '10',
+      // A Apple REJEITA background push com prioridade 10.
+      'apns-priority':  pushType === 'background' ? '5' : '10',
       'content-type':   'application/json',
     });
     let status = 0, respBody = '';
@@ -224,6 +226,22 @@ async function _send(targets, body, pushType = 'liveactivity', attrition = false
 }
 
 // Status pro monitor de saúde (não expõe tokens).
+/// Acorda o app em background pra ele registrar o update token da Live Activity.
+///
+/// LA criada por push-to-start com o app fechado nunca entrega update token — o
+/// iOS só o emite com o app rodando. Sem token o bridge não atualiza NEM encerra:
+/// em 02/08 o card de viagem ficou parado em "0,0 km" enquanto o carro já tinha
+/// rodado 2,6 km. Um push silencioso faz o iOS subir o app por alguns segundos,
+/// tempo suficiente pro `pushTokenUpdates` disparar e o token chegar aqui.
+///
+/// Melhor esforço: o iOS limita a frequência e pode ignorar com bateria baixa.
+async function wakeApp() {
+  if (!enabled || !alertTokens.length) return { sent: 0 };
+  const r = await _send(alertTokens, { aps: { 'content-available': 1 } }, 'background');
+  console.log(`[apns] wake silencioso enviado a ${r.sent} device(s)`);
+  return r;
+}
+
 function getStatus() {
   return {
     enabled, env, bundle_id: bundleId,
@@ -289,6 +307,7 @@ async function pushAlert(title, body, opts = {}) {
 }
 
 module.exports = {
+  wakeApp,
   init, registerStartToken, registerUpdateToken, unregisterActivity, registerAlertToken,
   hasUpdateToken, clearUpdateTokensByType,
   pushStart, pushUpdate, pushAlert, tokenCount, getStatus,

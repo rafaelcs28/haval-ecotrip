@@ -75,7 +75,7 @@ struct DashV2View: View {
         pv == "anomalia" ? ["Porta tras. esq.", "Porta-malas"] : store.openings
     }
     private var unlockedAnomaly: Bool {
-        pv == "anomalia" || (store.lockKnown && !store.isLocked && !store.engineOn)
+        pv == "anomalia" || (travaConfiavel && store.lockKnown && !store.isLocked && !store.engineOn)
     }
     private var hasAnomaly: Bool {
         !isDriving && (unlockedAnomaly || !openingsNow.isEmpty)
@@ -114,7 +114,7 @@ struct DashV2View: View {
                 // Por onde o carro roteia. Fica no header e não nas mini-métricas
                 // porque é estado de infraestrutura, não medida de condução — e o
                 // que importa é perceber "estou gastando 4G" ao olhar o painel.
-                if let up = store.uplinkTexto { uplinkRow(up) }
+                if let up = store.uplinkLabelCurto { uplinkRow(up) }
                 actionsGrid
                 quickRow
                 if !isDriving { lastTripRow }
@@ -424,9 +424,18 @@ struct DashV2View: View {
         let mins = mock ? 18 : store.tripTimeSec / 60
         let cons: Double = mock ? 13.9 : (dist > 0.3 ? store.tripNetKwh / dist * 100 : 0)
         let arr = store.arrivalRaw
-        let arrName = arr?["name"] as? String ?? ""
-        let arrClock = arr?["etaClock"] as? String ?? ""
-        let arrDist = (arr?["distKm"] as? Double) ?? ((arr?["distKm"] as? Int).map(Double.init) ?? 0)
+        // Com o Waze/Maps navegando no Android Auto, o ETA DELE ganha: sai da rota que o
+        // dono está de fato seguindo e já embute trânsito. Nosso arrivalRaw é estimativa
+        // sobre o destino digitado no app — continua sendo o fallback, e o rótulo da
+        // fonte fica visível pra não misturar as duas coisas.
+        let navOn = store.navActive
+        let arrName = navOn && !store.navDestination.isEmpty ? store.navDestination
+                                                             : (arr?["name"] as? String ?? "")
+        let arrClock = navOn && !store.navEta.isEmpty ? store.navEta
+                                                      : (arr?["etaClock"] as? String ?? "")
+        let arrDist = navOn && store.navRemainingKm > 0
+            ? store.navRemainingKm
+            : ((arr?["distKm"] as? Double) ?? ((arr?["distKm"] as? Int).map(Double.init) ?? 0))
         return Button { TabRouter.shared.go(.drive) } label: {
             VStack(alignment: .leading, spacing: 9) {
                 HStack(spacing: 6) {
@@ -435,10 +444,33 @@ struct DashV2View: View {
                         .font(.system(size: 9.5, weight: .bold))
                         .foregroundStyle(DS.green).tracking(1)
                     Spacer()
-                    if !arrName.isEmpty {
-                        Text("→ \(arrName)\(arrClock.isEmpty ? "" : " · chega \(arrClock)")")
-                            .font(.system(size: 10.5)).foregroundStyle(DS.text2)
+                    if !arrName.isEmpty || !arrClock.isEmpty {
+                        // Sem nome: só a chegada. O canal do AA não entrega o destino
+                        // pro Waze, e rótulo inventado polui mais do que informa.
+                        Text(arrName.isEmpty
+                             ? "chega \(arrClock)"
+                             : "→ \(arrName)\(arrClock.isEmpty ? "" : " · chega \(arrClock)")")
+                            .font(.system(size: DS.FontSize.micro)).foregroundStyle(DS.text2)
                             .lineLimit(1).minimumScaleFactor(0.8)
+                    }
+                }
+                if navOn && (!store.navNextRoad.isEmpty || store.navRemainingKm > 0) {
+                    HStack(spacing: 5) {
+                        Image(systemName: store.navNextSF)
+                            .font(.system(size: 10, weight: .semibold)).foregroundStyle(DS.text)
+                        if !store.navNextRoad.isEmpty {
+                            Text(store.navNextRoad)
+                                .font(.system(size: DS.FontSize.micro, weight: .medium))
+                                .foregroundStyle(DS.text).lineLimit(1)
+                        }
+                        if store.navRemainingKm > 0 {
+                            Text("· faltam \(Fmt.dec1(store.navRemainingKm)) km")
+                                .font(.system(size: DS.FontSize.micro)).foregroundStyle(DS.text2)
+                        }
+                        Spacer()
+                        Text("NAV · AA")
+                            .font(.system(size: 8, weight: .bold)).foregroundStyle(DS.text2)
+                            .tracking(0.8)
                     }
                 }
                 HStack(alignment: .firstTextBaseline) {
@@ -482,7 +514,7 @@ struct DashV2View: View {
             Text(value)
                 .font(.system(size: 24, weight: .semibold, design: .rounded))
                 .monospacedDigit().foregroundStyle(DS.text)
-            Text(unit).font(.system(size: 10.5)).foregroundStyle(DS.muted)
+            Text(unit).font(.system(size: DS.FontSize.micro)).foregroundStyle(DS.muted)
         }
     }
 
@@ -490,30 +522,50 @@ struct DashV2View: View {
 
     /// Cor pelo nível que o Impulse mandou: 4G roteando vem 'warn' porque é o caso
     /// de queimar pacote — foi assim que 2 GB foram embora em menos de um mês.
+    /// Revelação do IP: NÃO persiste. É informação de diagnóstico pontual; deixar
+    /// aparecendo pra sempre desfaz o motivo de ter escondido.
+    @State private var mostrarIP = false
+
     private func uplinkRow(_ texto: String) -> some View {
-        let cor: Color = switch store.uplinkNivel {
+        // Dado velho perde a cor: verde ao lado de "Roteando" com o carro dormindo há
+        // uma hora afirma uma coisa que ninguém verificou. Cinza + "há N min" mantém
+        // a informação (por onde ESTAVA roteando) sem alegar que é agora.
+        let velho = store.uplinkVelho
+        let corNivel: Color = switch store.uplinkNivel {
             case "good": DS.green
             case "warn": DS.orange
             case "bad":  DS.red
             default:     DS.muted
         }
-        let icone = switch store.uplinkModo {
-            case "WLAN": "antenna.radiowaves.left.and.right"
-            case "4G":   "cellularbars"
-            case "STARTING": "arrow.triangle.2.circlepath"
-            case "ERROR": "exclamationmark.triangle.fill"
-            default:     "wifi.slash"
-        }
+        let cor: Color = velho ? DS.muted : corNivel
+        // Sem ícone SF: o rótulo já começa com emoji (📶/📡/📱), e os dois juntos
+        // mostravam o símbolo de rede duas vezes na mesma linha. A cor do nível segue
+        // no fundo e na borda.
         return HStack(spacing: 7) {
-            Image(systemName: icone).font(.system(size: 12, weight: .bold)).foregroundStyle(cor)
-            Text(texto).font(.system(size: 12, weight: .semibold)).foregroundStyle(DS.text)
+            Text(texto).font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(velho ? DS.text2 : DS.text)
                 .lineLimit(1).minimumScaleFactor(0.8)
+            // IP da rede local: oculto por padrão, aparece ao tocar no card. 20% menor
+            // que o texto da linha (12 → 9,6). Cede espaço antes do nome da rede.
+            if mostrarIP && !store.carIPLocal.isEmpty {
+                Text(store.carIPLocal)
+                    .font(.system(size: 9.6, weight: .medium)).monospacedDigit()
+                    .foregroundStyle(DS.muted)
+                    .lineLimit(1).layoutPriority(-1)
+            }
             Spacer()
+            if let idade = store.uplinkIdadeTexto {
+                Text(idade).font(.system(size: 11)).foregroundStyle(DS.muted)
+            }
         }
         .padding(.horizontal, 13).padding(.vertical, 9)
         .background(cor.opacity(0.10))
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(cor.opacity(0.35), lineWidth: 1))
+        // Toque no card revela/esconde o IP. `contentShape` porque o fundo translúcido
+        // não captura toque sozinho, e sem isso só o texto seria clicável.
+        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .onTapGesture { withAnimation(.easeInOut(duration: 0.18)) { mostrarIP.toggle() } }
     }
 
     private var sleepInfoRow: some View {
@@ -626,19 +678,35 @@ struct DashV2View: View {
                         }
                         .frame(width: 72, height: 5)
                     Text("COMBUSTÍVEL \(Fmt.int(fuelFrac * 100))% · \(Fmt.int(store.rangeIceKm)) km")
-                        .font(.system(size: 10.5, weight: .semibold))
+                        .font(.system(size: DS.FontSize.micro, weight: .semibold))
                         .foregroundStyle(DS.muted).tracking(0.5)
-                        .lineLimit(1).minimumScaleFactor(0.7)
+                        .lineLimit(1).minimumScaleFactor(0.9)
+                    // Affordance do long-press: sem isto, calibrar o tanque era um
+                    // gesto invisível — não havia nada na tela dizendo que este texto
+                    // reagia a toque.
+                    Image(systemName: "slider.horizontal.3")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(DS.muted.opacity(0.7))
                 }
+                // Alvo de 44pt: a faixa tinha ~15pt de altura e era o gatilho da
+                // calibração do tanque. Errar o toque com o carro andando é o padrão,
+                // não a exceção.
+                .frame(minHeight: DS.hitTarget)
                 .contentShape(Rectangle())
                 .onLongPressGesture { showFuelCalib = true }
+                .accessibilityLabel("Combustível \(Fmt.int(fuelFrac * 100)) por cento, \(Fmt.int(store.rangeIceKm)) quilômetros")
+                .accessibilityHint("Toque longo para calibrar o tanque")
                 Spacer(minLength: 8)
                 if store.isCharging {
                     Button { showChargeTarget = true } label: {
                         Text(limit > 0 && limit < 100 ? "LIMITE \(Fmt.int(limit))%" : "LIMITE")
-                            .font(.system(size: 10.5, weight: .semibold))
+                            .font(.system(size: DS.FontSize.micro, weight: .semibold))
                             .foregroundStyle(DS.muted).tracking(0.5)
                             .fixedSize()
+                            // Padding + 44pt: o texto ERA o botão, com ~15pt de altura.
+                            .padding(.horizontal, 10)
+                            .frame(minHeight: DS.hitTarget)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .layoutPriority(1)
@@ -662,7 +730,20 @@ struct DashV2View: View {
                 }
             } else {
                 if !store.gearDisplay.isEmpty { chipV2(store.gearDisplay, .neutral) }
-                chipV2(store.engineOn ? "Motor ligado" : "Desligado", store.engineOn ? .tint(DS.orange) : .neutral)
+                // Motor só é AFIRMADO com leitura recente. `engine_state` muda apenas na
+                // transição, e o APK costuma morrer junto com o desligamento — então o
+                // último valor publicado ("ligado") sobrevive indefinidamente. Em 04/08
+                // o app dizia "Motor ligado" com o carro dormindo, duas vezes.
+                // Sem medição fresca, o chip mostra o que ESTAVA, esmaecido e com idade.
+                if motorConfiavel {
+                    chipV2(store.engineOn ? "Motor ligado" : "Motor desligado",
+                           store.engineOn ? .tint(DS.orange) : .neutral)
+                } else if store.engineOn {
+                    // `.outline(muted)` e não `.neutral`: o fundo neutro é panel2, que
+                    // no tema escuro desaparece — o chip virava texto solto ao lado do
+                    // "P". O contorno mantém a forma de chip e o cinza diz "não sei".
+                    chipV2("Motor ligado?", .outline(DS.muted))
+                }
                 if store.lockKnown || unlockedAnomaly {
                     chipV2(unlockedAnomaly ? "Destravado" : (store.isLocked ? "Travado" : "Destravado"),
                            unlockedAnomaly || !store.isLocked ? .tint(DS.red) : .tint(DS.green))
@@ -673,6 +754,19 @@ struct DashV2View: View {
             }
             Spacer()
         }
+    }
+
+    /// A leitura da trava é recente o bastante pra o botão afirmar uma ação?
+    /// Usa a mesma idade de medição do resto do painel (`dataAgeSec`, que desde
+    /// hoje vem de `medicao_ms` e não da atividade da fonte). 5 min cobre o carro
+    /// dormindo com a GWM republicando cache.
+    /// Mesma regra da trava: carro online, ou medição de menos de 5 min. Vale pro
+    /// motor porque o sintoma é idêntico — valor de transição sem quem publique o fim.
+    private var motorConfiavel: Bool { store.campoConfiavel("engine_state") }
+
+    private var travaConfiavel: Bool {
+        guard store.lockKnown else { return false }
+        return store.campoConfiavel("lock_state")
     }
 
     private var drivingGearLabel: String {
@@ -715,13 +809,18 @@ struct DashV2View: View {
                         .foregroundStyle(DS.green).tracking(1.1)
                 }
                 HStack(alignment: .firstTextBaseline, spacing: 3) {
-                    Text(Fmt.dec1(store.chargePowerKw))
+                    // Sem leitura viva mostra "—", não "0,0": zero medido e zero por
+                    // ausência são coisas diferentes, e afirmar 0 kW carregando é mentir.
+                    Text(store.chargePowerConfiavel ? Fmt.dec1(store.chargePowerKw) : "—")
                         .font(.system(size: 30, weight: .semibold, design: .rounded))
-                        .monospacedDigit().foregroundStyle(DS.text)
+                        .monospacedDigit()
+                        .foregroundStyle(store.chargePowerConfiavel ? DS.text : DS.muted)
                     Text("kW").font(.system(size: 13)).foregroundStyle(DS.muted)
                 }
-                Text("+\(Fmt.dec1(store.chargeSessionKwh)) kWh nesta sessão")
+                Text("+\(Fmt.dec1(store.chargeSessionKwh)) kWh nesta sessão"
+                     + (store.chargeSessionKwhEstimada ? " · estimado pelo SOC" : ""))
                     .font(.system(size: 12)).foregroundStyle(DS.text2)
+                    .lineLimit(1).minimumScaleFactor(0.85)
             }
             Spacer()
             VStack(alignment: .trailing, spacing: 4) {
@@ -827,16 +926,18 @@ struct DashV2View: View {
     private func miniCell(_ label: String, _ value: String, _ sub: String, tint: Color = DS.text) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(label)
-                .font(.system(size: 8.5, weight: .bold))
+                .font(.system(size: DS.FontSize.micro, weight: .bold))
                 .foregroundStyle(DS.muted).tracking(0.8)
-                .lineLimit(1).minimumScaleFactor(0.7)
+                .lineLimit(1).minimumScaleFactor(0.9)
             Text(value)
-                .font(.system(size: 15, weight: .semibold, design: .rounded))
+                .font(.system(size: DS.FontSize.strong, weight: .semibold, design: .rounded))
                 .monospacedDigit().foregroundStyle(tint)
-                .lineLimit(1).minimumScaleFactor(0.7)
+                .lineLimit(1).minimumScaleFactor(0.9)
+            // Era 8.5 com escala 0.7 — chegava a ~6pt, e é justamente aqui que ficam
+            // o percentual da 12V e a idade da leitura.
             Text(sub)
-                .font(.system(size: 8.5)).foregroundStyle(DS.muted)
-                .lineLimit(1).minimumScaleFactor(0.7)
+                .font(.system(size: DS.FontSize.micro)).foregroundStyle(DS.muted)
+                .lineLimit(1).minimumScaleFactor(0.9)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 10).padding(.vertical, 9)
@@ -851,15 +952,34 @@ struct DashV2View: View {
         let cols = Array(repeating: GridItem(.flexible(), spacing: 8), count: 3)
         let lockAlert = hasAnomaly && unlockedAnomaly
         return LazyVGrid(columns: cols, spacing: 8) {
-            actionTile("lock.fill", lockAlert ? "Travar" : (store.isLocked ? "Destravar" : "Travar"),
-                       lockAlert ? DS.red : DS.green, state: cmdState("lock"),
+            // O rótulo é a AÇÃO, derivada do estado atual da trava. Se esse estado
+            // está velho, o botão oferece a ação contrária à intenção — e o comando
+            // sai. Aconteceu de verdade: com o lock_state congelado o app dizia
+            // "Travar" num carro já trancado. Quando a leitura não é confiável, o
+            // tile não afirma nada: vira "Trava" e a escolha é feita no popover, que
+            // mostra as duas opções e a idade do dado.
+            actionTile("lock.fill", travaConfiavel ? (lockAlert ? "Travar" : (store.isLocked ? "Destravar" : "Travar")) : "Trava",
+                       lockAlert ? DS.red : (travaConfiavel ? DS.green : DS.muted), state: cmdState("lock"),
                        confirmed: confirmedLabel("lock"),
                        alert: lockAlert, dimmed: isDriving) { tapCommand("lock") { showLock = true } }
                 .popover(isPresented: $showLock, arrowEdge: .top) {
-                    confirmPop(store.isLocked ? "Destravar o carro?" : "Travar o carro?") {
-                        popBtn(store.isLocked ? "Destravar" : "Travar", DS.green) {
-                            showLock = false
-                            store.fireCommand(store.isLocked ? "lock_open" : "lock_close")
+                    confirmPop(travaConfiavel
+                               ? (store.isLocked ? "Destravar o carro?" : "Travar o carro?")
+                               : "Estado da trava desatualizado (\(freshness))") {
+                        if travaConfiavel {
+                            popBtn(store.isLocked ? "Destravar" : "Travar", DS.green) {
+                                showLock = false
+                                store.fireCommand(store.isLocked ? "lock_open" : "lock_close")
+                            }
+                        } else {
+                            // Sem estado confiável, as duas ações ficam explícitas —
+                            // o dono decide, em vez de o app adivinhar por ele.
+                            popBtn("Travar", DS.green) {
+                                showLock = false; store.fireCommand("lock_close")
+                            }
+                            popBtn("Destravar", DS.text2) {
+                                showLock = false; store.fireCommand("lock_open")
+                            }
                         }
                     }
                 }
@@ -1016,7 +1136,7 @@ struct DashV2View: View {
                     .foregroundStyle(fg)
                     .symbolEffect(.pulse, options: .repeating, isActive: state == .sending)
                 Text(shownLabel)
-                    .font(.system(size: 10.5, weight: .semibold))
+                    .font(.system(size: DS.FontSize.micro, weight: .semibold))
                     .foregroundStyle(state == .idle ? (alert ? DS.red : DS.text) : fg)
                     .lineLimit(1).minimumScaleFactor(0.75)
             }
@@ -1181,9 +1301,13 @@ struct LiveChipV2: View {
             chip(icon: nil, dot: DS.green, text: "AO VIVO", fg: DS.green,
                  bg: DS.green.opacity(0.12), stroke: DS.green.opacity(0.3), pulse: false, breathe: true)
         } else {
+            // Em horas quando passa de 60min: agora que a idade é a medição real (e
+            // não a atividade da GWM, que nunca envelhecia), esse número chega a
+            // centenas de minutos e "HÁ 247 MIN" não se lê de relance.
             let min = store.dataAgeSec >= 0 ? Int(store.dataAgeSec / 60) : 0
+            let idade = min >= 60 ? "HÁ \(min / 60) H" : "HÁ \(min) MIN"
             chip(icon: "moon.fill", dot: nil,
-                 text: min > 0 ? "DORMINDO · HÁ \(min) MIN" : "DORMINDO",
+                 text: min > 0 ? "DORMINDO · \(idade)" : "DORMINDO",
                  fg: DS.text2, bg: DS.panel2, stroke: DS.border, pulse: false)
         }
     }

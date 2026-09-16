@@ -80,16 +80,16 @@
     <canvas id="chart-speed"></canvas>
   </div>
   <div class="chart-wrap" id="chart-pwr-wrap" hidden>
-    <div class="chart-title">Potência (kW) · negativo = regen</div>
+    <div class="chart-title">Potência do motor elétrico (kW) · negativo = regen</div>
     <canvas id="chart-pwr"></canvas>
+  </div>
+  <div class="chart-wrap" id="chart-rpm-wrap" hidden>
+    <div class="chart-title">Rotação do motor térmico (RPM)</div>
+    <canvas id="chart-rpm"></canvas>
   </div>
   <div class="chart-wrap" id="chart-soc-wrap" hidden>
     <div class="chart-title">Bateria (%)</div>
     <canvas id="chart-soc"></canvas>
-  </div>
-  <div class="chart-wrap" id="chart-rpm-wrap" hidden>
-    <div class="chart-title">Motor à combustão (RPM)</div>
-    <canvas id="chart-rpm"></canvas>
   </div>
   <div class="foot">Haval Hub · trajeto compartilhado</div>
 </div>
@@ -229,11 +229,12 @@ function buildCharts() {
     return c;
   };
   const rpm = samples.map(s => +s.rpm || 0);
+  // Ordem visual: velocidade → potência elétrica (azul) → rotação térmico (laranja) → bateria.
+  // RPM só aparece se motor à combustão realmente rodou.
   if (spd.some(v => v > 0)) { $('chart-speed-wrap').hidden = false; charts.push({ chart: mk('chart-speed', '#5eead4', spd), id: 'speed' }); }
   if (pwr.some(v => v !== 0)) { $('chart-pwr-wrap').hidden = false; charts.push({ chart: mk('chart-pwr', '#60a5fa', pwr), id: 'pwr' }); }
-  if (soc.some(v => v > 0)) { $('chart-soc-wrap').hidden = false; charts.push({ chart: mk('chart-soc', '#a3e635', soc), id: 'soc' }); }
-  // Só mostra o gráfico de RPM se o motor à combustão realmente rodou
   if (rpm.some(v => v > 0)) { $('chart-rpm-wrap').hidden = false; charts.push({ chart: mk('chart-rpm', '#f97316', rpm), id: 'rpm' }); }
+  if (soc.some(v => v > 0)) { $('chart-soc-wrap').hidden = false; charts.push({ chart: mk('chart-soc', '#a3e635', soc), id: 'soc' }); }
 }
 
 function wireTimeline() {

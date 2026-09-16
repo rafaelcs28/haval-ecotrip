@@ -59,7 +59,9 @@ struct RecargasV2View: View {
     @State private var showAnalysis = false
     @State private var showForecast = false
     @State private var editingId: Double?
+    @State private var confirmandoId: Double?
     @State private var editingRefuel: Refuel?
+    @State private var showAddRefuel = false
     @State private var toast: String?
 
     private var fromDate: Binding<Date> { Binding(get: { fromTS > 0 ? Date(timeIntervalSince1970: fromTS) : Date() }, set: { fromTS = $0.timeIntervalSince1970 }) }
@@ -101,6 +103,12 @@ struct RecargasV2View: View {
         .sheet(isPresented: $showHealth) { BatteryHealthSheet(charges: loader.charges) }
         .sheet(isPresented: $showAnalysis) { ChargeAnalysisSheet(charges: loader.charges) }
         .sheet(isPresented: $showForecast) { ChargeForecastSheet() }
+        .sheet(isPresented: $showAddRefuel) {
+            RefuelAddSheet(odometerAtual: CarStore.shared.odometerKm) { litros, total, posto, odo in
+                Task { _ = await refLoader.criar(liters: litros, total: total,
+                                                 location: posto, odometer: odo) }
+            }
+        }
         .sheet(item: $editingRefuel) { r in
             RefuelEditSheet(refuel: r) { liters, pricePerL, location in
                 Task { await refLoader.patch(r, liters: liters, pricePerL: pricePerL, location: location) }
@@ -179,7 +187,11 @@ struct RecargasV2View: View {
                 Text("\(Fmt.brl(cost)) · média R$ \(kwh > 0 && cost > 0 ? Fmt.dec2(cost / kwh) : "—")/kWh")
                     .font(.system(size: 11.5)).foregroundStyle(DS.text2)
                 if car.priceKwh > 0 {
-                    Text("tarifa atual R$ \(Fmt.dec2(car.priceKwh))/kWh")
+                    // "tarifa atual" era engano: este número é o `battery_avg_price_per_kwh`
+                    // do bridge — a média PONDERADA do que está na bateria, misturando
+                    // recargas antigas com a de hoje. Não é o preço que se paga agora.
+                    // Confundiu de verdade: 0,89 aqui contra 0,68 na recarga do dia.
+                    Text("energia na bateria R$ \(Fmt.dec2(car.priceKwh))/kWh · média")
                         .font(.system(size: 10.5)).monospacedDigit().foregroundStyle(DS.muted)
                 }
             }
@@ -345,6 +357,8 @@ struct RecargasV2View: View {
             }
 
             if !curve.isEmpty && curveForId == c.id { powerCurve(c) }
+
+            if let aviso = c.precoAtipico { avisoCusto(c, aviso) }
 
             if c.chargerKwh > 0 {
                 Text("Medidor \(Fmt.dec2(c.chargerKwh)) kWh · entrou \(Fmt.dec2(c.kwh)) · perda \(Fmt.int(c.lossPct))%")
@@ -620,6 +634,62 @@ struct RecargasV2View: View {
         }.buttonStyle(.plain)
     }
 
+    /// Aviso de custo fora do padrão, com as duas saídas: confirmar (é isso mesmo)
+    /// ou corrigir. Fica no card e não numa notificação isolada, porque é aqui que
+    /// os números que geraram a dúvida estão à vista.
+    @ViewBuilder
+    private func avisoCusto(_ c: Charge, _ texto: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 7) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 12)).foregroundStyle(DS.orange)
+                Text(texto).font(.system(size: 11.5)).foregroundStyle(DS.text)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            HStack(spacing: 8) {
+                Button {
+                    Task { await confirmarCusto(c) }
+                } label: {
+                    Text(confirmandoId == c.id ? "Confirmando…" : "É isso mesmo")
+                        .font(.system(size: 11.5, weight: .semibold)).foregroundStyle(DS.bg)
+                        .padding(.horizontal, 14).frame(minHeight: 40)
+                        .background(DS.orange).clipShape(Capsule())
+                }
+                .buttonStyle(.plain).disabled(confirmandoId == c.id)
+                Button {
+                    withAnimation { editingId = c.id }
+                } label: {
+                    Text("Corrigir")
+                        .font(.system(size: 11.5, weight: .semibold)).foregroundStyle(DS.orange)
+                        .padding(.horizontal, 14).frame(minHeight: 40)
+                        .background(DS.orange.opacity(0.14)).clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                Spacer()
+            }
+        }
+        .padding(.horizontal, 12).padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(DS.orange.opacity(0.10))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .stroke(DS.orange.opacity(0.35), lineWidth: 1))
+    }
+
+    private func confirmarCusto(_ c: Charge) async {
+        confirmandoId = c.id
+        defer { confirmandoId = nil }
+        guard Settings.isConfigured,
+              let url = URL(string: Settings.apiBase + "/api/charges/\(Int(c.id))/confirm-cost")
+        else { return }
+        var r = URLRequest(url: url, timeoutInterval: 12)
+        r.httpMethod = "POST"
+        r.addValue("Bearer " + Settings.bridgeToken, forHTTPHeaderField: "Authorization")
+        _ = try? await URLSession.shared.data(for: r)
+        // Recarrega pra flag sumir do card — o bridge é a fonte, não um estado local.
+        await loader.load()
+    }
+
     private func card<C: View>(@ViewBuilder _ content: () -> C) -> some View {
         content()
             .padding(14)
@@ -632,6 +702,17 @@ struct RecargasV2View: View {
 
     private var refHistorico: some View {
         LazyVStack(spacing: 10) {
+            Button { showAddRefuel = true } label: {
+                HStack(spacing: 7) {
+                    Image(systemName: "plus.circle.fill").font(.system(size: 15, weight: .semibold))
+                    Text("Registrar abastecimento").font(.system(size: 14, weight: .bold))
+                }
+                .foregroundStyle(DS.orange)
+                .frame(maxWidth: .infinity).padding(.vertical, 13)
+                .background(DS.orange.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(DS.orange.opacity(0.35), lineWidth: 1))
+            }
+            .padding(.bottom, 2)
             if filteredRefuels.isEmpty {
                 Text("Nenhum abastecimento no período.")
                     .font(.system(size: 13)).foregroundStyle(DS.muted)

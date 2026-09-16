@@ -405,6 +405,21 @@ final class NavFavStore: ObservableObject {
         return r
     }
 
+    /// Espelha os locais do PlacesStore (que vivem só neste aparelho) pro bridge,
+    /// pra a aba "Meus locais" da multimídia mostrar os MESMOS lugares que você vê
+    /// aqui. Substitui a lista inteira: mesclar faria lugar apagado no celular
+    /// ressuscitar no carro.
+    func sincronizarMeusLocais(_ places: [SavedPlace]) async {
+        let corpo = places.sorted(by: ordemDestinos)
+            .map { ["name": $0.display, "lat": $0.lat, "lng": $0.lng] }
+        guard !corpo.isEmpty, !base.isEmpty, let u = URL(string: base + "/api/meus-locais") else { return }
+        var r = URLRequest(url: u); r.httpMethod = "POST"; r.timeoutInterval = 12
+        r.addValue("Bearer " + Settings.bridgeToken, forHTTPHeaderField: "Authorization")
+        r.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        r.httpBody = try? JSONSerialization.data(withJSONObject: corpo)
+        _ = try? await URLSession.shared.data(for: r)
+    }
+
     func load() async {
         guard let r = req("/api/nav-favorites", "GET") else { return }
         guard let (d, resp) = try? await URLSession.shared.data(for: r),
@@ -437,6 +452,25 @@ struct SavedPlace: Codable, Identifiable, Equatable {
     var favorite: Bool = false
     var ts: Double = Date().timeIntervalSince1970
     var display: String { label.isEmpty ? name : label }
+
+    /// Posição fixa: Casa (0), Trabalho (1), qualquer outro (2). São os dois destinos
+    /// do dia a dia — ninguém procura por eles na lista, só toca no primeiro item.
+    /// Compara sem acento e sem caixa porque o apelido é digitado à mão.
+    var rankFixo: Int {
+        let n = display.folding(options: [.diacriticInsensitive, .caseInsensitive],
+                                locale: Locale(identifier: "pt_BR"))
+            .trimmingCharacters(in: .whitespaces)
+        if n == "casa" { return 0 }
+        if n == "trabalho" { return 1 }
+        return 2
+    }
+}
+
+/// Ordem canônica das listas de destino: Casa, Trabalho, resto alfabético. Mesma
+/// regra do bridge (`_rankFixo`), pra a multimídia e o iPhone não discordarem.
+func ordemDestinos(_ a: SavedPlace, _ b: SavedPlace) -> Bool {
+    if a.rankFixo != b.rankFixo { return a.rankFixo < b.rankFixo }
+    return a.display.localizedCaseInsensitiveCompare(b.display) == .orderedAscending
 }
 
 // Persiste recentes + favoritos no App Group (compartilhável com widgets/intents).
@@ -450,7 +484,7 @@ final class PlacesStore: ObservableObject {
     init() { if let d = def.data(forKey: key), let p = try? JSONDecoder().decode([SavedPlace].self, from: d) { places = p } }
     private func persist() { if let d = try? JSONEncoder().encode(places) { def.set(d, forKey: key) } }
 
-    var favorites: [SavedPlace] { places.filter { $0.favorite }.sorted { $0.label.localizedCaseInsensitiveCompare($1.label) == .orderedAscending } }
+    var favorites: [SavedPlace] { places.filter { $0.favorite }.sorted(by: ordemDestinos) }
     var recents: [SavedPlace]   { places.filter { !$0.favorite }.sorted { $0.ts > $1.ts } }
 
     private func near(_ p: SavedPlace, _ lat: Double, _ lng: Double) -> Bool {
@@ -631,7 +665,12 @@ struct ArrivalSheet: View {
                 }
             }
             .onAppear { focusedField = .dest }
-            .task { await favsCarro.load() }
+            .task {
+                await favsCarro.load()
+                // Manda os locais deste aparelho pro bridge, pra a multimídia mostrar
+                // os mesmos. Roda ao abrir a tela: é quando a lista está fresca.
+                await favsCarro.sincronizarMeusLocais(places.places)
+            }
             .sheet(isPresented: $showMapPicker) {
                 MapPickerSheet(start: mapInitial ?? destCoord.map { .init(latitude: $0.0, longitude: $0.1) } ?? CarStore.shared.coordinate,
                                initial: mapInitial) { c, nm in

@@ -30,11 +30,13 @@
 		30E7EF6F07C0F5426CFC7E3D /* ChargeAnalysisSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = FFF70A4F7CBB079E318E2289 /* ChargeAnalysisSheet.swift */; };
 		31C4EEF5E7D54B74A2F8DCA1 /* SongProLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8667439515FC27589EEEDBC9 /* SongProLiveActivity.swift */; };
 		326CAF9CD3D64AD79469D6C5 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 0C916CB148E5590BB5EF8513 /* Assets.xcassets */; };
+		3415D5108C04AAF8C9573FBE /* CarMessageSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 863D3C9EEE6ACCFDC700C7A1 /* CarMessageSheet.swift */; };
 		358FAD5EC35FFE7883AA5F9F /* CockpitRoute.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25A17F71A438747B21DAF8B6 /* CockpitRoute.swift */; };
 		3980C2076408E94B4B512D5B /* PeriodFilter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A74BCCDF1A1B7A5A4D1A2F /* PeriodFilter.swift */; };
 		3B1E127339910428D3BC6CB3 /* InfraActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72A96429D1C213B7BC4490B3 /* InfraActivityAttributes.swift */; };
 		3ED1321FB7B61D7ADDAA032F /* DesignSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7376EEA5C86B0C60FE3CE4E3 /* DesignSystem.swift */; };
 		3F02C89011D88C610B91C20C /* SharedTripActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEFBCE42F4C0655FC9E8CAFE /* SharedTripActivityAttributes.swift */; };
+		3F0818EEE7D9AC13D771EC27 /* group.br.com.consorciolimpagyn.havalecotrip.plist in Resources */ = {isa = PBXBuildFile; fileRef = B3F2DAEDB3C0B17828F7DD84 /* group.br.com.consorciolimpagyn.havalecotrip.plist */; };
 		3F3BD6924FA83F04DB29CF0B /* CarHeroView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA1A634027D62C075536F879 /* CarHeroView.swift */; };
 		40FD4BDFC584EDCEDD3A24E6 /* ModeEconomySheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00A892D7A0CA83BABF2920BE /* ModeEconomySheet.swift */; };
 		42169A88F8E36FD03EA47301 /* ConfigStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD7173E45A0E0AAFE9AD301F /* ConfigStore.swift */; };
@@ -87,6 +89,7 @@
 		8B73DFD0957C51F2398BED33 /* NativeDriveView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0D6E362CB348E539FA519CC /* NativeDriveView.swift */; };
 		8C38A751217FF17B7A5F5691 /* BydChargeWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84E0CFB1FD73D4EBEF6720A1 /* BydChargeWidget.swift */; };
 		8C3FA5DCF7133607EC275A89 /* TripLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B0EC768E77CEDD141861D39 /* TripLiveActivity.swift */; };
+		8CA84A44DD5A9465CC78AE3E /* ZonasSilencioView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60686867184476F78E4F1691 /* ZonasSilencioView.swift */; };
 		8E243C437C40D71C7010FE21 /* DepartureAskManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C084EFC344E5832B39E32B4E /* DepartureAskManager.swift */; };
 		907217011438996B6B234CBE /* DriveSheetsV2.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76A9EF7A30ED513EAB44FB7C /* DriveSheetsV2.swift */; };
 		918327725401C391E14F531E /* BydDesignSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93B4FFFA330691BE792A6CD2 /* BydDesignSystem.swift */; };
@@ -111,11 +114,15 @@
 		A3A6AF98888B41E747C0D262 /* BatteryHealthSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE7C90F87D39219D3F202F0E /* BatteryHealthSheet.swift */; };
 		A7702B4C541BF386DC61A751 /* DestinationsCostSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1BC76CD875BA1A36A4E1E089 /* DestinationsCostSheet.swift */; };
 		AACDCF32BF0A0A36A4A2F84F /* HavalEcoTripApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5A372CA99C89C5712EE54BC /* HavalEcoTripApp.swift */; };
+		AB2217EAF49264A640E4AD70 /* ConectividadeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B5961361C168FECA29C493F /* ConectividadeView.swift */; };
 		AB54B999C13215025CD95776 /* EcoScoreSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5B823C235ED2AB25740FEEA /* EcoScoreSheet.swift */; };
 		AB83E9252E2D2EA3B5AAAC0A /* MotorActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 636438201B328EA34B285F3A /* MotorActivityAttributes.swift */; };
 		ABF9F470EA6B41F8BC23D16E /* InfraLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0436DB31F705209C4895283B /* InfraLiveActivity.swift */; };
 		AE6DF0BA2B76E13159F83FE3 /* BackgroundRefresh.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F97B54C85FEC5A112CB0C9E /* BackgroundRefresh.swift */; };
+		AF2D614622D1A0A12F98FFCF /* MonitorWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D16A6F26C4CA83D2C44DA03 /* MonitorWidget.swift */; };
+		B207F7EC823C3BE280AE87EE /* PerfView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7B6F61B4374D5273E81796A /* PerfView.swift */; };
 		B25D2B9EB0665CADC0BFB9E8 /* RecordingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44155F27E876BF6FC49BEC89 /* RecordingsView.swift */; };
+		B81261672B73FDCDB61528DC /* NavApps.swift in Sources */ = {isa = PBXBuildFile; fileRef = B104D289C7FB1F0C74F38870 /* NavApps.swift */; };
 		B81E30EC9F98C5B71D4E12E8 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 940E4AE86B859186BAE647F3 /* Assets.xcassets */; };
 		B96C51890F002FCEC37EB6B2 /* MonthlyReportSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BBB9A0DE1F041DBBD0BFD00 /* MonthlyReportSheet.swift */; };
 		BA44D6E648CAA30EFD8C11AF /* ArrivalSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59969E598BACA40911CD6232 /* ArrivalSheet.swift */; };
@@ -216,6 +223,7 @@
 		19F1EE1E1159233D66EEAFA8 /* LiveActivityPush.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveActivityPush.swift; sourceTree = "<group>"; };
 		1BC76CD875BA1A36A4E1E089 /* DestinationsCostSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DestinationsCostSheet.swift; sourceTree = "<group>"; };
 		1C2F4161732FE79AB2415337 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		1D16A6F26C4CA83D2C44DA03 /* MonitorWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonitorWidget.swift; sourceTree = "<group>"; };
 		1D49A69E4850202A417ACB89 /* SavingsSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavingsSheet.swift; sourceTree = "<group>"; };
 		1D8DD420046BFFF1A114B6B5 /* LiveRouteBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveRouteBanner.swift; sourceTree = "<group>"; };
 		1E3DCC65EEE32FFFC3727847 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
@@ -226,6 +234,7 @@
 		26B936D2B31C5DE61815546A /* HavalEcoTrip-dev.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "HavalEcoTrip-dev.entitlements"; sourceTree = "<group>"; };
 		290EB87DC1EC5670D4F65A0E /* PreclimatContextStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreclimatContextStore.swift; sourceTree = "<group>"; };
 		2A0F1250A4346D17F0539FE8 /* MotorLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MotorLiveActivity.swift; sourceTree = "<group>"; };
+		2B5961361C168FECA29C493F /* ConectividadeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConectividadeView.swift; sourceTree = "<group>"; };
 		2EBD85F9B7D028E3D520ED77 /* OfflineSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OfflineSync.swift; sourceTree = "<group>"; };
 		2F97B54C85FEC5A112CB0C9E /* BackgroundRefresh.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundRefresh.swift; sourceTree = "<group>"; };
 		2FF82EC94D39D72882566F0F /* DepartureAskActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DepartureAskActivityAttributes.swift; sourceTree = "<group>"; };
@@ -249,6 +258,7 @@
 		5B6819E27B57380D580AC0FF /* LeaveBySheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LeaveBySheet.swift; sourceTree = "<group>"; };
 		5C78BF7DF42C2CEA8466E30F /* BydRecarga.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = BydRecarga.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		60050A5D1678A9235BEB0730 /* BydLiveActivityPush.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BydLiveActivityPush.swift; sourceTree = "<group>"; };
+		60686867184476F78E4F1691 /* ZonasSilencioView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZonasSilencioView.swift; sourceTree = "<group>"; };
 		6160C161401773B289CF8215 /* ShareExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ShareExtension.entitlements; sourceTree = "<group>"; };
 		61B11EA0C5430FE17543E5CB /* CalendarPreclimat.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarPreclimat.swift; sourceTree = "<group>"; };
 		6215EB2F3EA8C80FA49D1477 /* PreclimatSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreclimatSheet.swift; sourceTree = "<group>"; };
@@ -269,6 +279,7 @@
 		8036EB500E09B8F08A9EA755 /* MaintenanceStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MaintenanceStore.swift; sourceTree = "<group>"; };
 		80A945217321F91BDD85E6F3 /* MicTestSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MicTestSheet.swift; sourceTree = "<group>"; };
 		84E0CFB1FD73D4EBEF6720A1 /* BydChargeWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BydChargeWidget.swift; sourceTree = "<group>"; };
+		863D3C9EEE6ACCFDC700C7A1 /* CarMessageSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarMessageSheet.swift; sourceTree = "<group>"; };
 		8667439515FC27589EEEDBC9 /* SongProLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SongProLiveActivity.swift; sourceTree = "<group>"; };
 		8E2D54361AF23B5E75EF04B7 /* CarStatusInfoView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarStatusInfoView.swift; sourceTree = "<group>"; };
 		915E7661920B0022793D3A63 /* PreClimatLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreClimatLiveActivity.swift; sourceTree = "<group>"; };
@@ -286,13 +297,16 @@
 		A799F69A43F78E263048C8F4 /* AuthConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthConfig.swift; sourceTree = "<group>"; };
 		AD7173E45A0E0AAFE9AD301F /* ConfigStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigStore.swift; sourceTree = "<group>"; };
 		AF8BF0D6E8837DEC20056AB8 /* SongProActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SongProActivityAttributes.swift; sourceTree = "<group>"; };
+		B104D289C7FB1F0C74F38870 /* NavApps.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NavApps.swift; sourceTree = "<group>"; };
 		B1529D67B256468DE1C71396 /* ShareStatusSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareStatusSheet.swift; sourceTree = "<group>"; };
 		B1F322C191BA5762BDB4C8C4 /* RouteCompareSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RouteCompareSheet.swift; sourceTree = "<group>"; };
 		B39E9CAF8843B5BC8C6A6DA1 /* LATheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LATheme.swift; sourceTree = "<group>"; };
+		B3F2DAEDB3C0B17828F7DD84 /* group.br.com.consorciolimpagyn.havalecotrip.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = group.br.com.consorciolimpagyn.havalecotrip.plist; sourceTree = "<group>"; };
 		B41BC4A6A889A1B5BBFCF7C6 /* PwaWebView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PwaWebView.swift; sourceTree = "<group>"; };
 		B5A372CA99C89C5712EE54BC /* HavalEcoTripApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HavalEcoTripApp.swift; sourceTree = "<group>"; };
 		B6A433A5AA48336FD73F1C85 /* ChargeActivityLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChargeActivityLiveActivity.swift; sourceTree = "<group>"; };
 		B70CD6CCACB7545098A80F39 /* InsightsSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsightsSheet.swift; sourceTree = "<group>"; };
+		B7B6F61B4374D5273E81796A /* PerfView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerfView.swift; sourceTree = "<group>"; };
 		B8AFBB5C9B38702398F58246 /* CarAudioSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarAudioSession.swift; sourceTree = "<group>"; };
 		B8C3D7D3EC9E5F913CE28355 /* BydMiniMap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BydMiniMap.swift; sourceTree = "<group>"; };
 		B9BBC1E7EB38A5621A6751AA /* ShareExtension.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = ShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -344,6 +358,14 @@
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
+		0C475B28C2AE7B2B834535A4 /* Developer */ = {
+			isa = PBXGroup;
+			children = (
+				CA6DA3D610407BDC837CD6E1 /* CoreSimulator */,
+			);
+			path = Developer;
+			sourceTree = "<group>";
+		};
 		19DFA1BC8964C5B35958B0DD /* HavalEcoTrip */ = {
 			isa = PBXGroup;
 			children = (
@@ -362,11 +384,13 @@
 				C88C20EF0FDB1AB8EB036191 /* CarActions.swift */,
 				B8AFBB5C9B38702398F58246 /* CarAudioSession.swift */,
 				BA1A634027D62C075536F879 /* CarHeroView.swift */,
+				863D3C9EEE6ACCFDC700C7A1 /* CarMessageSheet.swift */,
 				8E2D54361AF23B5E75EF04B7 /* CarStatusInfoView.swift */,
 				C68353FA3433CBE88BFA4347 /* CarStore.swift */,
 				FFF70A4F7CBB079E318E2289 /* ChargeAnalysisSheet.swift */,
 				D2C8DF4BFA59CDFFCB7CAABF /* ChargeForecastSheet.swift */,
 				25A17F71A438747B21DAF8B6 /* CockpitRoute.swift */,
+				2B5961361C168FECA29C493F /* ConectividadeView.swift */,
 				25AF744D0A813EC24608D127 /* ConfigSheets.swift */,
 				AD7173E45A0E0AAFE9AD301F /* ConfigStore.swift */,
 				E25E4CB35E07E12C3CBD67E4 /* ConfigV2View.swift */,
@@ -410,11 +434,13 @@
 				07A4D05D4468B1E0F2E83B3A /* NativeInsightsView.swift */,
 				FB5145A32C36D0D8E2E36E83 /* NativeRecargasView.swift */,
 				638ACE606ED94D317501DB0E /* NativeViagensView.swift */,
+				B104D289C7FB1F0C74F38870 /* NavApps.swift */,
 				C7817E2396F9C3176DF2954E /* NotificationsCenterSheet.swift */,
 				2EBD85F9B7D028E3D520ED77 /* OfflineSync.swift */,
 				FA80C20DB354205B277ADC19 /* ParkGuardSheet.swift */,
 				98AAF0B9FB74534380E99D24 /* ParkingSheet.swift */,
 				31A72286F2044C2FB45A957A /* ParkingStore.swift */,
+				B7B6F61B4374D5273E81796A /* PerfView.swift */,
 				A1A74BCCDF1A1B7A5A4D1A2F /* PeriodFilter.swift */,
 				34DDF3B14C6A69EC6D8F3A6F /* PhoneLocationReporter.swift */,
 				290EB87DC1EC5670D4F65A0E /* PreclimatContextStore.swift */,
@@ -432,6 +458,8 @@
 				5A0BF2317E99D3BCDB34E075 /* SpeedFenceSheet.swift */,
 				099944E7CC1BCBFE6E3A0B09 /* TempConsumptionSheet.swift */,
 				74CCDC7C537D3745BA939111 /* ViagensV2View.swift */,
+				60686867184476F78E4F1691 /* ZonasSilencioView.swift */,
+				93D5723EF46BF3407E23FA8C /* group.br.com.consorciolimpagyn.havalecotrip	 */,
 			);
 			path = HavalEcoTrip;
 			sourceTree = "<group>";
@@ -475,6 +503,7 @@
 				30F76E0D9822CBB897499A4D /* LAActionButton.swift */,
 				B39E9CAF8843B5BC8C6A6DA1 /* LATheme.swift */,
 				C7C8F9D484392C67E49E3E78 /* LockWidgets.swift */,
+				1D16A6F26C4CA83D2C44DA03 /* MonitorWidget.swift */,
 				636438201B328EA34B285F3A /* MotorActivityAttributes.swift */,
 				2A0F1250A4346D17F0539FE8 /* MotorLiveActivity.swift */,
 				233A69DF139C48429A427377 /* ParkingActivityAttributes.swift */,
@@ -495,6 +524,30 @@
 			path = HavalEcoTripWidget;
 			sourceTree = "<group>";
 		};
+		6A424803BC78DE48EA305DBE /* consorciolimpagyn */ = {
+			isa = PBXGroup;
+			children = (
+				B3BBB3E90E2C12EA85498DFE /* Library */,
+			);
+			path = consorciolimpagyn;
+			sourceTree = "<group>";
+		};
+		7ADC84869C511A4D90C2A942 /* Users */ = {
+			isa = PBXGroup;
+			children = (
+				6A424803BC78DE48EA305DBE /* consorciolimpagyn */,
+			);
+			path = Users;
+			sourceTree = "<group>";
+		};
+		7D09D9BFA7356DB5609CCF47 /* Containers */ = {
+			isa = PBXGroup;
+			children = (
+				FB2EA9C95C2903B4299EF41B /* Shared */,
+			);
+			path = Containers;
+			sourceTree = "<group>";
+		};
 		8189E525203ABEDA3C0DE197 /* BydRecargaWidget */ = {
 			isa = PBXGroup;
 			children = (
@@ -506,6 +559,54 @@
 			path = BydRecargaWidget;
 			sourceTree = "<group>";
 		};
+		8191ADBBA207D33B7EA8CA81 /* AppGroup */ = {
+			isa = PBXGroup;
+			children = (
+				E10F3C342FE57A82C6C23DE8 /* 53E46060-7B2F-4021-86DE-408B712F9EB1 */,
+			);
+			path = AppGroup;
+			sourceTree = "<group>";
+		};
+		8A28A6DD95D0587F1B660090 /* Devices */ = {
+			isa = PBXGroup;
+			children = (
+				9DABB1E36E6439D847830A3A /* 91F68A9F-59F3-4355-A101-4328D6FBC279 */,
+			);
+			path = Devices;
+			sourceTree = "<group>";
+		};
+		93D5723EF46BF3407E23FA8C /* group.br.com.consorciolimpagyn.havalecotrip	 */ = {
+			isa = PBXGroup;
+			children = (
+				7ADC84869C511A4D90C2A942 /* Users */,
+			);
+			path = "group.br.com.consorciolimpagyn.havalecotrip\t";
+			sourceTree = "<group>";
+		};
+		9DABB1E36E6439D847830A3A /* 91F68A9F-59F3-4355-A101-4328D6FBC279 */ = {
+			isa = PBXGroup;
+			children = (
+				F298C94BA875CD897C096A5D /* data */,
+			);
+			path = "91F68A9F-59F3-4355-A101-4328D6FBC279";
+			sourceTree = "<group>";
+		};
+		B3BBB3E90E2C12EA85498DFE /* Library */ = {
+			isa = PBXGroup;
+			children = (
+				0C475B28C2AE7B2B834535A4 /* Developer */,
+			);
+			path = Library;
+			sourceTree = "<group>";
+		};
+		CA6DA3D610407BDC837CD6E1 /* CoreSimulator */ = {
+			isa = PBXGroup;
+			children = (
+				8A28A6DD95D0587F1B660090 /* Devices */,
+			);
+			path = CoreSimulator;
+			sourceTree = "<group>";
+		};
 		E005AB11A0FEF6448D74F6BF /* ShareExtension */ = {
 			isa = PBXGroup;
 			children = (
@@ -514,6 +615,30 @@
 				D2E5847D4B630A807A07557A /* ShareViewController.swift */,
 			);
 			path = ShareExtension;
+			sourceTree = "<group>";
+		};
+		E0EADF3C3E4DF94606500599 /* Library */ = {
+			isa = PBXGroup;
+			children = (
+				E1E06FF099D46B41BCB45F83 /* Preferences */,
+			);
+			path = Library;
+			sourceTree = "<group>";
+		};
+		E10F3C342FE57A82C6C23DE8 /* 53E46060-7B2F-4021-86DE-408B712F9EB1 */ = {
+			isa = PBXGroup;
+			children = (
+				E0EADF3C3E4DF94606500599 /* Library */,
+			);
+			path = "53E46060-7B2F-4021-86DE-408B712F9EB1";
+			sourceTree = "<group>";
+		};
+		E1E06FF099D46B41BCB45F83 /* Preferences */ = {
+			isa = PBXGroup;
+			children = (
+				B3F2DAEDB3C0B17828F7DD84 /* group.br.com.consorciolimpagyn.havalecotrip.plist */,
+			);
+			path = Preferences;
 			sourceTree = "<group>";
 		};
 		E3F9CDB4A84F984C5043F62B /* Products */ = {
@@ -528,6 +653,14 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
+		F298C94BA875CD897C096A5D /* data */ = {
+			isa = PBXGroup;
+			children = (
+				7D09D9BFA7356DB5609CCF47 /* Containers */,
+			);
+			path = data;
+			sourceTree = "<group>";
+		};
 		F978D81279B4F6D52E87CFA3 = {
 			isa = PBXGroup;
 			children = (
@@ -538,6 +671,14 @@
 				E005AB11A0FEF6448D74F6BF /* ShareExtension */,
 				E3F9CDB4A84F984C5043F62B /* Products */,
 			);
+			sourceTree = "<group>";
+		};
+		FB2EA9C95C2903B4299EF41B /* Shared */ = {
+			isa = PBXGroup;
+			children = (
+				8191ADBBA207D33B7EA8CA81 /* AppGroup */,
+			);
+			path = Shared;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -703,6 +844,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				6223380A259556C149F9E067 /* Assets.xcassets in Resources */,
+				3F0818EEE7D9AC13D771EC27 /* group.br.com.consorciolimpagyn.havalecotrip.plist in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -736,6 +878,7 @@
 				98A61174D1B1F41AC4E60640 /* LAActionButton.swift in Sources */,
 				E33E3495749BD15F6586204D /* LATheme.swift in Sources */,
 				6B1479E8CF6EDE745584DB42 /* LockWidgets.swift in Sources */,
+				AF2D614622D1A0A12F98FFCF /* MonitorWidget.swift in Sources */,
 				AB83E9252E2D2EA3B5AAAC0A /* MotorActivityAttributes.swift in Sources */,
 				C25004AC6E9825F287951DC4 /* MotorLiveActivity.swift in Sources */,
 				C1AB7CACAF2F5707D93C8B2C /* ParkingActivityAttributes.swift in Sources */,
@@ -789,12 +932,14 @@
 				6AC2ED6F20F98D935A953C0A /* CarAudioSession.swift in Sources */,
 				3F3BD6924FA83F04DB29CF0B /* CarHeroView.swift in Sources */,
 				77EF0F880D1B98744B21C2C5 /* CarIntents.swift in Sources */,
+				3415D5108C04AAF8C9573FBE /* CarMessageSheet.swift in Sources */,
 				D09B9FDE499BEDF1D32157CF /* CarStatusInfoView.swift in Sources */,
 				E4DBC8604FEF4AF3E5F39336 /* CarStore.swift in Sources */,
 				920A0533D20932EF36FC4D49 /* ChargeActivityAttributes.swift in Sources */,
 				30E7EF6F07C0F5426CFC7E3D /* ChargeAnalysisSheet.swift in Sources */,
 				BBDA07ABAFDD14A11CEAC022 /* ChargeForecastSheet.swift in Sources */,
 				358FAD5EC35FFE7883AA5F9F /* CockpitRoute.swift in Sources */,
+				AB2217EAF49264A640E4AD70 /* ConectividadeView.swift in Sources */,
 				0BB7525EC9FA3BFAAE77FCB0 /* ConfigSheets.swift in Sources */,
 				42169A88F8E36FD03EA47301 /* ConfigStore.swift in Sources */,
 				9D8A593457802718AE4EA0C2 /* ConfigV2View.swift in Sources */,
@@ -838,12 +983,14 @@
 				56DB4B366860CA6AC5500786 /* NativeInsightsView.swift in Sources */,
 				694901AB2FD60B4D5A1322DA /* NativeRecargasView.swift in Sources */,
 				62435AEEC1C0E57CFBB27ABE /* NativeViagensView.swift in Sources */,
+				B81261672B73FDCDB61528DC /* NavApps.swift in Sources */,
 				6C1FE4315EFC5408CBF98788 /* NotificationsCenterSheet.swift in Sources */,
 				6B3EDE545B2502D265805216 /* OfflineSync.swift in Sources */,
 				1680B02F6D37B65B3E2AC1F5 /* ParkGuardSheet.swift in Sources */,
 				2E5167D0ADF77FFAC397D835 /* ParkingActivityAttributes.swift in Sources */,
 				E33D5E05A2258BAED6BFBF7A /* ParkingSheet.swift in Sources */,
 				DFCCD6179A36858D2D824148 /* ParkingStore.swift in Sources */,
+				B207F7EC823C3BE280AE87EE /* PerfView.swift in Sources */,
 				3980C2076408E94B4B512D5B /* PeriodFilter.swift in Sources */,
 				4AC88532EF1E06F2F60CAF5F /* PhoneLocationReporter.swift in Sources */,
 				0C3838E769FD23A972E10B3E /* PreClimatActivityAttributes.swift in Sources */,
@@ -864,6 +1011,7 @@
 				F84F3B84B0CC0D78ACA5E89B /* TempConsumptionSheet.swift in Sources */,
 				2480E68526B78CFE04F2C37B /* TripActivityAttributes.swift in Sources */,
 				21AF7E0943D616FF926C18CE /* ViagensV2View.swift in Sources */,
+				8CA84A44DD5A9465CC78AE3E /* ZonasSilencioView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -922,7 +1070,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0.3;
+				MARKETING_VERSION = 1.0.4;
 				PRODUCT_BUNDLE_IDENTIFIER = br.com.consorciolimpagyn.songpro;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = 1;
@@ -1042,7 +1190,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0.3;
+				MARKETING_VERSION = 1.0.4;
 				PRODUCT_BUNDLE_IDENTIFIER = br.com.consorciolimpagyn.songpro;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = 1;
@@ -1060,7 +1208,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.0.3;
+				MARKETING_VERSION = 1.0.4;
 				PRODUCT_BUNDLE_IDENTIFIER = br.com.consorciolimpagyn.songpro.BydRecargaWidget;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = 1;
@@ -1191,7 +1339,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.0.3;
+				MARKETING_VERSION = 1.0.4;
 				PRODUCT_BUNDLE_IDENTIFIER = br.com.consorciolimpagyn.songpro.BydRecargaWidget;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = 1;

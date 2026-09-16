@@ -70,3 +70,10 @@ app/src/main/assets/controles/_debug.js
 # Atalhos com token do bridge embutido (não vão pro repo público)
 ios-app/AutoShareLocal.shortcut
 ios-app/AutoShareReady.shortcut
+
+# Manuais do fabricante: binários grandes e material de terceiro
+*.pdf
+*.docx
+
+# Logs de runtime dos vigias/backup
+logs/

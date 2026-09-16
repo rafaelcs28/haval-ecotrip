@@ -151,6 +151,9 @@ struct RouteCompareSheet: View {
     /// Quando vem do card de uma viagem: abre direto no detalhe da rota dela e
     /// destaca essa viagem contra a média.
     var focusTrip: Trip? = nil
+    /// Viagem aberta ao tocar num recorde ou na lista — mesma tela de detalhe que a
+    /// viagem atual usa, pra não existir "detalhe de primeira" e "detalhe de segunda".
+    @State private var abrirTrip: Trip? = nil
 
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var loader = TripsLoader.shared
@@ -203,6 +206,8 @@ struct RouteCompareSheet: View {
                 .padding(.horizontal, 18).padding(.top, 8).padding(.bottom, 16)
             }
             .background(DS.bg.ignoresSafeArea())
+            // Detalhe da viagem tocada — mesma tela usada pela viagem atual.
+            .sheet(item: $abrirTrip) { t in TrajetoV2Sheet(trip: t) }
             .navigationTitle(selected == nil ? "Comparar trechos" : "Trecho")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -401,14 +406,23 @@ struct RouteCompareSheet: View {
     }
 
     private func recordLine(_ title: String, _ t: Trip, _ value: String, _ tint: Color) -> some View {
-        HStack(spacing: 8) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.system(size: 12, weight: .semibold)).foregroundStyle(DS.text)
-                Text(Self.dayFmt.string(from: t.date)).font(.system(size: 10.5)).foregroundStyle(DS.muted)
+        Button { abrirTrip = t } label: {
+            HStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(.system(size: 12, weight: .semibold)).foregroundStyle(DS.text)
+                    Text(Self.dayFmt.string(from: t.date)).font(.system(size: 10.5)).foregroundStyle(DS.muted)
+                }
+                Spacer(minLength: 8)
+                Text(value).font(.system(size: 13, weight: .bold)).monospacedDigit().foregroundStyle(tint)
+                // Chevron discreto: sem ele nada indica que a linha abre algo.
+                Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(DS.muted)
             }
-            Spacer(minLength: 8)
-            Text(value).font(.system(size: 13, weight: .bold)).monospacedDigit().foregroundStyle(tint)
+            // 44pt e contentShape: a linha inteira é o alvo, não só o texto.
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
     }
 
     @ViewBuilder private func tempCard(_ bt: [(label: String, cons: Double, n: Int)]) -> some View {
@@ -443,6 +457,7 @@ struct RouteCompareSheet: View {
             sectionLabel("VIAGENS DESTE TRECHO")
             ForEach(g.trips) { t in
                 let isFocus = focusTrip?.id == t.id
+                Button { abrirTrip = t } label: {
                 HStack(spacing: 8) {
                     VStack(alignment: .leading, spacing: 2) {
                         HStack(spacing: 5) {
@@ -463,7 +478,13 @@ struct RouteCompareSheet: View {
                     Text(t.consumo > 0 ? Fmt.dec1(t.consumo) : "—")
                         .font(.system(size: 13, weight: .bold)).monospacedDigit().foregroundStyle(DS.teal)
                     Text("kWh/100").font(.system(size: 8.5)).foregroundStyle(DS.muted)
+                    Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(DS.muted)
                 }
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
                 .padding(.vertical, 5)
                 if t.id != g.trips.last?.id { Rectangle().fill(DS.divider).frame(height: 1) }
             }

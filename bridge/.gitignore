@@ -69,3 +69,37 @@ admin_auth.json
 bridge_tokens.json
 host-hits.json
 src_change.json
+
+# Estado/credencial que escapou do ignore até 16/09 — o repo é PÚBLICO e estes
+# arquivos carregam token de nuvem (bluetti/saj/impulse-help), localização da
+# família e endereços de casa/trabalho.
+alert_state.json
+baseline_cost.json
+baseline_matrix.json
+bluetti_reauth.json
+bluetti_tokens.json
+car_qa_cache.json
+departure_asked.json
+fuel-park.json
+icloud_family.json
+impulse-help-token.json
+impulse_qa_cache.json
+localperm-heal.json
+meus_locais.json
+nav-raw.ndjson
+nav_dests.json
+nav_favorites.json
+nav_recentes.json
+parking_note.json
+qa_rate_log.ndjson
+saj_token.json
+silence_zones.json
+solar_history.json
+starlink_history.ndjson
+starlink_outages.json
+starlink_state.json
+sustain-state.json
+traffic_snapshots.json
+# backups pontuais de dados (gerados em correções)
+charges.json.pre-*
+refuels.json.pre-*

@@ -47,6 +47,16 @@ struct Charge: Identifiable {
     var costTotal: Double { (cost("cost_override") ?? cost("cost"))?.0 ?? 0 }
     var costPerKwh: Double { (cost("cost_override") ?? cost("cost"))?.1 ?? 0 }
     var isCharge: Bool { kwh > 0 }
+
+    /// Custo marcado como atípico pelo bridge (fora de 10% da mediana do local, ou
+    /// acima de R$ 2,00/kWh). Fica pendente até o dono confirmar — um custo errado
+    /// não fica contido: entra na média ponderada da bateria e contamina o custo de
+    /// todas as viagens seguintes.
+    var precoAtipico: String? {
+        guard let d = raw["_precoAtipico"] as? [String: Any],
+              let t = d["texto"] as? String, !t.isEmpty else { return nil }
+        return t
+    }
     /// Perda: (medidor − energia na bateria) / medidor. Só com medidor lançado.
     var lossKwh: Double { max(0, chargerKwh - kwh) }
     var lossPct: Double { chargerKwh > 0 ? lossKwh / chargerKwh * 100 : 0 }
@@ -115,6 +125,24 @@ final class RefuelsLoader: ObservableObject {
     init() { bag = sync.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() } }
     var refuels: [Refuel] { sync.items.map(Refuel.init).filter { $0.valid }.sorted { $0.id > $1.id } }
     func load() async { await sync.sync() }
+    /// Registro MANUAL. A detecção automática errava os litros (compara duas leituras
+    /// do sensor do tanque) e depende do evento de motor ligado, que o bridge às vezes
+    /// suprime como ruído de inicialização. O que a bomba mostra é a verdade.
+    func criar(liters: Double, total: Double, location: String, odometer: Double) async -> Bool {
+        var body: [String: Any] = ["liters_added": liters, "total_cost": total]
+        if !location.isEmpty { body["location_name"] = location }
+        if odometer > 0 { body["odometer_km"] = odometer }
+        guard let url = URL(string: BridgeRouter.shared.currentURL + "/api/refuels") else { return false }
+        var r = URLRequest(url: url); r.httpMethod = "POST"; r.timeoutInterval = 15
+        r.addValue("Bearer " + Settings.bridgeToken, forHTTPHeaderField: "Authorization")
+        r.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        r.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        guard let (_, resp) = try? await URLSession.shared.data(for: r),
+              (200..<300).contains((resp as? HTTPURLResponse)?.statusCode ?? -1) else { return false }
+        await sync.sync()
+        return true
+    }
+
     func patch(_ r: Refuel, liters: Double?, pricePerL: Double?, location: String?) async {
         let lid = SyncedList.canonId(r.id)
         let idStr = String(format: "%.0f", r.id)
@@ -161,6 +189,7 @@ struct NativeRecargasView: View {
     @AppStorage("rec_from") private var fromTS: Double = 0
     @AppStorage("rec_to") private var toTS: Double = 0
     @State private var showCal = false
+    @State private var showAddRefuel = false
     @State private var expandedCharge: Double?
     @State private var toast: String?
     @State private var showHealth = false
@@ -227,6 +256,15 @@ struct NativeRecargasView: View {
         .sheet(isPresented: $showHealth) { BatteryHealthSheet(charges: loader.charges) }
         .sheet(isPresented: $showAnalysis) { ChargeAnalysisSheet(charges: loader.charges) }
         .sheet(isPresented: $showForecast) { ChargeForecastSheet() }
+        .sheet(isPresented: $showAddRefuel) {
+            RefuelAddSheet(odometerAtual: CarStore.shared.odometerKm) { litros, total, posto, odo in
+                Task {
+                    let ok = await refLoader.criar(liters: litros, total: total,
+                                                   location: posto, odometer: odo)
+                    toast = ok ? "Abastecimento registrado" : "Falha ao registrar"
+                }
+            }
+        }
         .sheet(item: $editingRefuel) { r in
             RefuelEditSheet(refuel: r) { liters, pricePerL, location in
                 Task { await refLoader.patch(r, liters: liters, pricePerL: pricePerL, location: location) }
@@ -456,6 +494,16 @@ struct NativeRecargasView: View {
     // MARK: Abastecimento
     private var refHistorico: some View {
         LazyVStack(spacing: 14) {
+            Button { showAddRefuel = true } label: {
+                HStack(spacing: 7) {
+                    Image(systemName: "plus.circle.fill").font(.system(size: 15, weight: .semibold))
+                    Text("Registrar abastecimento").font(.system(size: 14, weight: .bold))
+                }
+                .foregroundStyle(DS.orange)
+                .frame(maxWidth: .infinity).padding(.vertical, 13)
+                .background(DS.orange.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(DS.orange.opacity(0.35), lineWidth: 1))
+            }
             if filteredRefuels.isEmpty {
                 Text("Nenhum abastecimento no período.").font(.subheadline).foregroundStyle(DS.muted)
                     .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 20)
@@ -553,6 +601,84 @@ private struct ChargeEditFields: View {
             TextField(ph, text: text).keyboardType(kb).foregroundStyle(DS.text)
                 .padding(9).background(DS.panel2).clipShape(RoundedRectangle(cornerRadius: 9))
                 .overlay(RoundedRectangle(cornerRadius: 9).stroke(DS.border, lineWidth: 1))
+        }
+    }
+}
+
+/// Registro manual de abastecimento: o que a BOMBA mostrou.
+/// Pede litros e valor total (não R$/L) porque é o que está no visor e na nota — o
+/// preço por litro sai da divisão e evita erro de digitação em dois campos redundantes.
+struct RefuelAddSheet: View {
+    let odometerAtual: Double
+    let onSave: (Double, Double, String, Double) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var litros = ""
+    @State private var total = ""
+    @State private var posto = ""
+    @State private var odo = ""
+
+    /// Aceita vírgula: o teclado decimal em pt-BR entrega vírgula e `Double("6,19")` é nil.
+    private func num(_ t: String) -> Double { Double(t.replacingOccurrences(of: ",", with: ".")) ?? 0 }
+    private var litrosN: Double { num(litros) }
+    private var totalN: Double { num(total) }
+    private var precoL: Double { litrosN > 0 ? totalN / litrosN : 0 }
+    private var valido: Bool { litrosN > 0 && totalN > 0 }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Na bomba") {
+                    HStack {
+                        Text("LITROS").font(.system(size: 9, weight: .semibold)).foregroundStyle(DS.muted)
+                        Spacer()
+                        TextField("Ex: 44,36", text: $litros).keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                    }
+                    HStack {
+                        Text("TOTAL R$").font(.system(size: 9, weight: .semibold)).foregroundStyle(DS.muted)
+                        Spacer()
+                        TextField("Ex: 295,00", text: $total).keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                    }
+                    if precoL > 0 {
+                        HStack {
+                            Text("R$/L").font(.system(size: 9, weight: .semibold)).foregroundStyle(DS.muted)
+                            Spacer()
+                            Text(Fmt.brl(precoL)).font(.system(size: 14, weight: .bold))
+                                .foregroundStyle(DS.orange)
+                        }
+                    }
+                }
+                Section("Posto") {
+                    TextField("Nome do posto", text: $posto)
+                }
+                Section("Odômetro") {
+                    HStack {
+                        Text("KM").font(.system(size: 9, weight: .semibold)).foregroundStyle(DS.muted)
+                        Spacer()
+                        TextField(odometerAtual > 0 ? Fmt.int(odometerAtual) : "Ex: 32940", text: $odo)
+                            .keyboardType(.numberPad).multilineTextAlignment(.trailing)
+                    }
+                    Text("Vazio usa o odômetro atual do carro.")
+                        .font(.caption).foregroundStyle(DS.muted)
+                }
+            }
+            .navigationTitle("Registrar abastecimento")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancelar") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Salvar") {
+                        // Odômetro em branco cai no do carro; nunca manda 0, que o bridge
+                        // gravaria como quilometragem zero no registro.
+                        let odoFinal = num(odo) > 0 ? num(odo) : odometerAtual
+                        onSave(litrosN, totalN, posto.trimmingCharacters(in: .whitespaces), odoFinal)
+                        dismiss()
+                    }.disabled(!valido)
+                }
+            }
         }
     }
 }

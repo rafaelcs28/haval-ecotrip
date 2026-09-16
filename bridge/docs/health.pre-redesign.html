@@ -1,0 +1,1824 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Bridge Health</title>
+<link rel="apple-touch-icon" href="/health-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Bridge">
+<style>
+:root {
+  --bg:     #0f0f0f;
+  --panel:  #1a1a1a;
+  --border: rgba(255,255,255,.07);
+  --text:   #e2e8f0;
+  --muted:  #64748b;
+  --green:  #a3e635;
+  --red:    #f87171;
+  --yellow: #fbbf24;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: var(--bg); color: var(--text); font-family: -apple-system,sans-serif;
+       padding: env(safe-area-inset-top,0) 0 env(safe-area-inset-bottom,0); min-height: 100dvh; }
+.page { max-width: 480px; margin: 0 auto; padding: 16px 16px 32px; }
+.topbar { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+h1 { font-size: 17px; font-weight: 700; }
+.sub { font-size: 11px; color: var(--muted); margin: 2px 0 16px; }
+.btn { font-size: 11px; color: var(--green); cursor: pointer; background: none;
+       border: 1px solid var(--border); border-radius: 8px; padding: 5px 10px; }
+
+/* cards grid */
+.cards { display: grid; grid-template-columns: 1fr; gap: 12px; align-items: start; }
+.card { background: var(--panel); border: 1px solid var(--border); border-radius: 14px;
+        overflow: hidden; }
+summary { list-style: none; cursor: pointer; display: flex; align-items: center;
+          justify-content: space-between; gap: 10px; padding: 13px 15px;
+          -webkit-tap-highlight-color: transparent; }
+summary::-webkit-details-marker { display: none; }
+.sum-title { font-size: 11px; font-weight: 700; letter-spacing: .8px;
+             text-transform: uppercase; color: var(--text); white-space: nowrap; }
+.sum-right { display: flex; align-items: center; gap: 8px; font-size: 12px;
+             color: var(--muted); font-variant-numeric: tabular-nums;
+             overflow: hidden; text-overflow: ellipsis; }
+.chev { width: 7px; height: 7px; border-right: 2px solid var(--muted);
+        border-bottom: 2px solid var(--muted); transform: rotate(-45deg);
+        transition: transform .2s; flex-shrink: 0; margin-left: 2px; }
+details[open] .chev { transform: rotate(45deg); }
+.card-body { padding: 2px 15px 13px; }
+
+.row { display: flex; justify-content: space-between; align-items: center;
+       padding: 5px 0; border-bottom: 1px solid var(--border); gap: 10px; }
+.row:last-child { border-bottom: none; }
+.row .label { font-size: 12px; color: var(--muted); }
+.row .val   { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums;
+              text-align: right; }
+.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+.dot.green  { background: var(--green); box-shadow: 0 0 6px var(--green); }
+.dot.red    { background: var(--red);   box-shadow: 0 0 6px var(--red); }
+.dot.yellow { background: var(--yellow); }
+
+/* mini sparkline */
+canvas { display: block; width: 100%; height: 60px; margin-top: 8px; }
+
+/* top mem bars */
+.topbar-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
+.topbar-row .tname { font-size: 12px; color: var(--text); width: 38%;
+                     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.topbar-row .tbar { flex: 1; height: 6px; background: rgba(255,255,255,.06);
+                    border-radius: 3px; overflow: hidden; }
+.topbar-row .tbar > span { display: block; height: 100%; background: var(--green); border-radius: 3px; }
+.topbar-row .tmb { font-size: 11px; color: var(--muted); width: 58px; text-align: right;
+                   font-variant-numeric: tabular-nums; }
+
+/* crash log */
+.event-list { list-style: none; }
+.ev { padding: 8px 0; border-bottom: 1px solid var(--border); }
+.ev:last-child { border-bottom: none; }
+.ev .ev-time { font-size: 10px; color: var(--muted); margin-bottom: 2px; }
+.ev .ev-type { font-size: 11px; font-weight: 700; color: var(--red); }
+.ev .ev-msg  { font-size: 10px; color: #94a3b8; margin-top: 3px;
+               white-space: pre-wrap; word-break: break-word; max-height: 60px; overflow: hidden; }
+.empty { font-size: 12px; color: var(--muted); text-align: center; padding: 16px 0; }
+
+/* Activity Monitor table */
+.proc-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.proc-table th, .proc-table td { padding: 4px 6px; text-align: left;
+                                  border-bottom: 1px solid var(--border); }
+.proc-table th { color: var(--muted); font-weight: 600; user-select: none;
+                 cursor: pointer; white-space: nowrap; }
+.proc-table th:hover { color: var(--text); }
+.proc-table th.active { color: var(--green); }
+.proc-table th.active.desc::after { content: ' ▼'; font-size: 9px; }
+.proc-table th.active.asc::after  { content: ' ▲'; font-size: 9px; }
+.proc-table td { color: var(--text); font-variant-numeric: tabular-nums; }
+.proc-table td.num { text-align: right; }
+.proc-table td.name { white-space: nowrap; overflow: hidden;
+                       text-overflow: ellipsis; max-width: 160px; }
+
+.pill { display: inline-flex; align-items: center; gap: 4px;
+        padding: 3px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+.pill.green { background: rgba(163,230,53,.12); color: var(--green); }
+.pill.red   { background: rgba(248,113,113,.12); color: var(--red); }
+.pill.yellow{ background: rgba(251,191,36,.12); color: var(--yellow); }
+
+/* stats grid */
+.stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 12px; }
+.stat-box { background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+            padding: 10px 8px; text-align: center; }
+.stat-box .stat-label { font-size: 9px; color: var(--muted); text-transform: uppercase;
+                        letter-spacing: .8px; margin-bottom: 6px; }
+.stat-box .stat-r { font-size: 18px; font-weight: 700; color: var(--green);
+                    font-variant-numeric: tabular-nums; line-height: 1; }
+.stat-box .stat-r.hot { color: var(--red); }
+.stat-box .stat-e { font-size: 11px; color: var(--yellow); margin-top: 3px;
+                    font-variant-numeric: tabular-nums; }
+
+@media (min-width: 720px) {
+  .page  { max-width: 780px; }
+  .cards { grid-template-columns: 1fr 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="topbar">
+    <h1>Bridge Health</h1>
+    <div style="display:flex;gap:6px">
+      <button class="btn" id="toggle-all" onclick="toggleAll()">Expandir tudo</button>
+      <button class="btn" onclick="load()">↻</button>
+    </div>
+  </div>
+  <div class="sub" id="last-update">Carregando…</div>
+
+  <!-- Stats por janela -->
+  <div class="stats-grid" id="stats-grid">
+    <div class="stat-box"><div class="stat-label">1h</div><div class="stat-r" id="s-h1-r">—</div><div class="stat-e" id="s-h1-e"></div></div>
+    <div class="stat-box"><div class="stat-label">24h</div><div class="stat-r" id="s-h24-r">—</div><div class="stat-e" id="s-h24-e"></div></div>
+    <div class="stat-box"><div class="stat-label">7d</div><div class="stat-r" id="s-d7-r">—</div><div class="stat-e" id="s-d7-e"></div></div>
+    <div class="stat-box"><div class="stat-label">30d</div><div class="stat-r" id="s-d30-r">—</div><div class="stat-e" id="s-d30-e"></div></div>
+  </div>
+
+  <div class="cards">
+
+    <!-- Processo -->
+    <details class="card" data-k="proc" open>
+      <summary><span class="sum-title">Processo</span>
+        <span class="sum-right"><span id="head-proc">—</span><span class="chev"></span></span></summary>
+      <div class="card-body">
+        <div class="row"><span class="label">Status</span><span class="val" id="proc-status">—</span></div>
+        <div class="row"><span class="label">Uptime bridge</span><span class="val" id="proc-uptime">—</span></div>
+        <div class="row"><span class="label">Iniciado em</span><span class="val" id="proc-started">—</span></div>
+        <div class="row"><span class="label">Node</span><span class="val" id="proc-node">—</span></div>
+        <div class="row"><span class="label">APK version</span><span class="val" id="sys-apkver">—</span></div>
+      </div>
+    </details>
+
+    <!-- Mac (host) -->
+    <details class="card" data-k="mac" open>
+      <summary><span class="sum-title">Mac</span>
+        <span class="sum-right"><span id="head-mac">—</span><span class="chev"></span></span></summary>
+      <div class="card-body">
+        <div class="row"><span class="label">Uptime</span><span class="val" id="mac-uptime">—</span></div>
+        <div class="row"><span class="label">Memória em uso</span><span class="val" id="mac-mem-used">—</span></div>
+        <div class="row"><span class="label">Memória disponível</span><span class="val" id="mac-mem-avail">—</span></div>
+        <div class="row"><span class="label">Disco livre</span><span class="val" id="mac-disk">—</span></div>
+        <div class="row"><span class="label">SSD externo</span><span class="val" id="mac-disk-ext">—</span></div>
+        <div class="row"><span class="label">Tendência disco /</span><span class="val" id="trend-di">—</span></div>
+        <div class="row"><span class="label">Tendência SSD</span><span class="val" id="trend-de">—</span></div>
+        <div class="row"><span class="label">Tendência RSS bridge</span><span class="val" id="trend-rss">—</span></div>
+        <div class="row" style="display:block;border-bottom:none">
+          <span class="label">Activity Monitor (sistema)</span>
+          <table id="sysproc-table" class="proc-table" style="margin-top:6px">
+            <thead><tr>
+              <th data-sort="name">Processo</th>
+              <th data-sort="cpu" class="active desc">CPU%</th>
+              <th data-sort="rssMb">Mem</th>
+            </tr></thead>
+            <tbody><tr><td colspan="3" class="empty">—</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </details>
+
+    <!-- Processos pm2 -->
+    <details class="card" data-k="procs" open>
+      <summary><span class="sum-title">Processos</span>
+        <span class="sum-right"><span id="head-procs">—</span><span class="chev"></span></span></summary>
+      <div class="card-body"><div id="proc-list"><div class="empty">—</div></div></div>
+    </details>
+
+
+    <!-- Conexões -->
+    <details class="card" data-k="conn">
+      <summary><span class="sum-title">Conexões</span>
+        <span class="sum-right"><span id="head-conn">—</span><span class="chev"></span></span></summary>
+      <div class="card-body">
+        <div class="row"><span class="label">MQTT broker</span><span class="val" id="mqtt-status">—</span></div>
+        <div class="row"><span class="label">MQTT latência</span><span class="val" id="mqtt-ping">—</span></div>
+        <div class="row"><span class="label">Último dado APK</span><span class="val" id="mqtt-apk">—</span></div>
+        <div class="row"><span class="label">Chave APK</span><span class="val" id="mqtt-apk-key" style="font-size:11px;word-break:break-all">—</span></div>
+        <div class="row"><span class="label">Carro acordado</span><span class="val" id="mqtt-apk-live">—</span></div>
+        <div class="row"><span class="label">Chave (live)</span><span class="val" id="mqtt-apk-live-key" style="font-size:11px;word-break:break-all">—</span></div>
+        <div class="row"><span class="label">Último dado GWM</span><span class="val" id="mqtt-gwm">—</span></div>
+        <div class="row"><span class="label">Clientes WS</span><span class="val" id="ws-clients">—</span></div>
+        <div class="row"><span class="label">Clientes áudio</span><span class="val" id="audio-clients">—</span></div>
+      </div>
+    </details>
+
+    <!-- Solar (SAJ Clean Master Ambiental — Catalão) -->
+    <details class="card" data-k="solar">
+      <summary><span class="sum-title">Solar Catalão</span>
+        <span class="sum-right"><span id="head-solar">—</span><span class="chev"></span></span></summary>
+      <div class="card-body">
+        <div class="row"><span class="label">Status</span><span class="val" id="sol-status">—</span></div>
+        <div class="row"><span class="label">Gerando agora</span><span class="val" id="sol-pv-now">—</span></div>
+        <div class="row"><span class="label">Direção</span><span class="val" id="sol-direction">—</span></div>
+        <div class="row"><span class="label">Hoje</span><span class="val" id="sol-today">—</span></div>
+        <div class="row"><span class="label">Pico hoje</span><span class="val" id="sol-peak">—</span></div>
+        <div class="row"><span class="label">Horas sol pleno</span><span class="val" id="sol-hours">—</span></div>
+        <div class="row"><span class="label">Mês</span><span class="val" id="sol-month">—</span></div>
+        <div class="row"><span class="label">Total (vida)</span><span class="val" id="sol-total">—</span></div>
+        <div class="row"><span class="label">CO₂ evitado hoje</span><span class="val" id="sol-co2">—</span></div>
+        <div class="row"><span class="label">Última sync SAJ</span><span class="val" id="sol-stale">—</span></div>
+        <div class="row"><span class="label">Nascer / pôr do sol</span><span class="val" id="sol-sun">—</span></div>
+        <div class="row" style="border-bottom:1px solid #333;padding-bottom:6px;margin-top:12px;margin-bottom:8px;font-weight:600">
+          <span style="width:100%">🔌 Inv A <span style="font-weight:400;color:#888;font-size:11px">— 30214</span></span>
+        </div>
+        <div class="row"><span class="label">Potência</span><span class="val" id="sol-a-power">—</span></div>
+        <div class="row"><span class="label">Energia hoje</span><span class="val" id="sol-a-today">—</span></div>
+        <div class="row"><span class="label">Temperatura</span><span class="val" id="sol-a-temp">—</span></div>
+        <div class="row"><span class="label">Rede</span><span class="val" id="sol-a-grid">—</span></div>
+        <div class="row"><span class="label">String 1</span><span class="val" id="sol-a-s1">—</span></div>
+        <div class="row"><span class="label">String 2</span><span class="val" id="sol-a-s2">—</span></div>
+        <div class="row"><span class="label">Alarmes hoje</span><span class="val" id="sol-a-alarms">—</span></div>
+        <div class="row" style="border-bottom:1px solid #333;padding-bottom:6px;margin-top:12px;margin-bottom:8px;font-weight:600">
+          <span style="width:100%">🔌 Inv B <span style="font-weight:400;color:#888;font-size:11px">— 37763</span></span>
+        </div>
+        <div class="row"><span class="label">Potência</span><span class="val" id="sol-b-power">—</span></div>
+        <div class="row"><span class="label">Energia hoje</span><span class="val" id="sol-b-today">—</span></div>
+        <div class="row"><span class="label">Temperatura</span><span class="val" id="sol-b-temp">—</span></div>
+        <div class="row"><span class="label">Rede</span><span class="val" id="sol-b-grid">—</span></div>
+        <div class="row"><span class="label">String 1</span><span class="val" id="sol-b-s1">—</span></div>
+        <div class="row"><span class="label">String 2</span><span class="val" id="sol-b-s2">—</span></div>
+        <div class="row"><span class="label">Alarmes hoje</span><span class="val" id="sol-b-alarms">—</span></div>
+      </div>
+    </details>
+
+    <!-- Solar Ivonei (Goiânia — 2 inversores S6-GR1P6K) -->
+    <details class="card" data-k="solis-ivonei">
+      <summary><span class="sum-title">Solar Ivonei</span>
+        <span class="sum-right"><span id="head-iv">—</span><span class="chev"></span></span></summary>
+      <div class="card-body">
+        <div class="row" style="border-bottom:1px solid #333;padding-bottom:6px;margin-bottom:8px;color:#888;font-size:11px">
+          <span style="width:100%">Goiânia · 2 × S6-GR1P6K</span>
+        </div>
+        <div class="row"><span class="label">Status</span><span class="val" id="iv-status">—</span></div>
+        <div class="row"><span class="label">Gerando</span><span class="val" id="iv-power">—</span></div>
+        <div class="row"><span class="label">Hoje</span><span class="val" id="iv-today">—</span></div>
+        <div class="row"><span class="label">Mês</span><span class="val" id="iv-month">—</span></div>
+        <div class="row"><span class="label">Total (vida)</span><span class="val" id="iv-total">—</span></div>
+        <div class="row"><span class="label">Nascer / pôr</span><span class="val" id="iv-sun">—</span></div>
+        <div class="row"><span class="label">Inv 1</span><span class="val" id="iv-inv1">—</span></div>
+        <div class="row"><span class="label">Inv 2</span><span class="val" id="iv-inv2">—</span></div>
+      </div>
+    </details>
+
+    <!-- Solar Palmeiras (Palmeiras de Goiás — 1 inversor S5-GR1P10K) -->
+    <details class="card" data-k="solis-palmeiras">
+      <summary><span class="sum-title">Solar Palmeiras</span>
+        <span class="sum-right"><span id="head-pm">—</span><span class="chev"></span></span></summary>
+      <div class="card-body">
+        <div class="row" style="border-bottom:1px solid #333;padding-bottom:6px;margin-bottom:8px;color:#888;font-size:11px">
+          <span style="width:100%">Palmeiras de Goiás · 1 × S5-GR1P10K</span>
+        </div>
+        <div class="row"><span class="label">Status</span><span class="val" id="pm-status">—</span></div>
+        <div class="row"><span class="label">Gerando</span><span class="val" id="pm-power">—</span></div>
+        <div class="row"><span class="label">Hoje</span><span class="val" id="pm-today">—</span></div>
+        <div class="row"><span class="label">Mês</span><span class="val" id="pm-month">—</span></div>
+        <div class="row"><span class="label">Total (vida)</span><span class="val" id="pm-total">—</span></div>
+        <div class="row"><span class="label">Nascer / pôr</span><span class="val" id="pm-sun">—</span></div>
+        <div class="row"><span class="label">Inv</span><span class="val" id="pm-inv1">—</span></div>
+      </div>
+    </details>
+
+    <!-- Estações portáteis (Bluetti EL100V2) -->
+    <details class="card" data-k="bluetti">
+      <summary><span class="sum-title">Estações portáteis</span>
+        <span class="sum-right"><span id="head-bluetti">—</span><span class="chev"></span></span></summary>
+      <div class="card-body">
+        <!-- Login da nuvem Bluetti: o grant morre 31 dias depois do login manual (o
+             refresh renova o token mas não move o vencimento). Aparece só quando
+             falta <7 dias ou o refresh quebrou. -->
+        <a id="bl-reauth" href="#" target="_blank" rel="noopener" style="display:none;text-decoration:none">
+          <div style="background:#3a2a00;border:1px solid #e6b800;border-radius:6px;padding:8px 10px;margin-bottom:10px;font-size:12px;color:#ffd966">
+            <span id="bl-reauth-txt">login da Bluetti expirando</span>
+            <span style="color:#e6b800;font-weight:600"> → clique pra religar</span>
+          </div>
+        </a>
+        <div class="row" style="border-bottom:1px solid #333;padding-bottom:6px;margin-bottom:8px;font-weight:600">
+          <span style="width:100%">🏠 Casa <span style="font-weight:400;color:#888;font-size:11px">— Mac Mini + Roteador</span></span>
+        </div>
+        <div class="row"><span class="label">Status</span><span class="val" id="bl-casa-status">—</span></div>
+        <div class="row"><span class="label">Bateria</span><span class="val" id="bl-casa-battery">—</span></div>
+        <div class="row"><span class="label">Autonomia</span><span class="val" id="bl-casa-eta">—</span></div>
+        <div class="row"><span class="label">Modo</span><span class="val" id="bl-casa-mode">—</span></div>
+        <div class="row"><span class="label">Entrada rede</span><span class="val" id="bl-casa-grid">—</span></div>
+        <div class="row"><span class="label">Entrada solar</span><span class="val" id="bl-casa-pv">—</span></div>
+        <div class="row"><span class="label">Saída AC</span><span class="val" id="bl-casa-ac">—</span></div>
+        <div class="row"><span class="label">Saída DC</span><span class="val" id="bl-casa-dc">—</span></div>
+        <div class="row" style="border-bottom:1px solid #333;padding-bottom:6px;margin-top:12px;margin-bottom:8px;font-weight:600">
+          <span style="width:100%">🌱 Sítio <span style="font-weight:400;color:#888;font-size:11px">— Starlink</span></span>
+        </div>
+        <div class="row"><span class="label">Status</span><span class="val" id="bl-sitio-status">—</span></div>
+        <div class="row"><span class="label">Bateria</span><span class="val" id="bl-sitio-battery">—</span></div>
+        <div class="row"><span class="label">Autonomia</span><span class="val" id="bl-sitio-eta">—</span></div>
+        <div class="row"><span class="label">Modo</span><span class="val" id="bl-sitio-mode">—</span></div>
+        <div class="row"><span class="label">Entrada rede</span><span class="val" id="bl-sitio-grid">—</span></div>
+        <div class="row"><span class="label">Entrada solar</span><span class="val" id="bl-sitio-pv">—</span></div>
+        <div class="row"><span class="label">Saída AC</span><span class="val" id="bl-sitio-ac">—</span></div>
+        <div class="row"><span class="label">Saída DC</span><span class="val" id="bl-sitio-dc">—</span></div>
+      </div>
+    </details>
+
+    <!-- Família (localização iCloud) -->
+    <details class="card" data-k="family">
+      <summary><span class="sum-title">Família</span>
+        <span class="sum-right"><span id="head-family">—</span><span class="chev"></span></span></summary>
+      <div class="card-body">
+        <div id="family-list"><div class="empty">—</div></div>
+      </div>
+    </details>
+
+    <!-- Clockin -->
+    <details class="card" data-k="clockin">
+      <summary><span class="sum-title">Clockin</span>
+        <span class="sum-right"><span id="head-clockin">—</span><span class="chev"></span></span></summary>
+      <div class="card-body">
+        <div class="row"><span class="label">HTTP</span><span class="val" id="clockin-http">—</span></div>
+        <div class="row"><span class="label">Saúde</span><span class="val" id="clockin-healthy">—</span></div>
+        <div class="row"><span class="label">Versão</span><span class="val" id="clockin-ver">—</span></div>
+        <div class="row"><span class="label">Latência</span><span class="val" id="clockin-lat">—</span></div>
+        <div class="row"><span class="label">Último backup</span><span class="val" id="clockin-backup">—</span></div>
+        <div class="row"><span class="label">Funcionários</span><span class="val" id="clockin-emp">—</span></div>
+        <div class="row"><span class="label">Push (admin/disp.)</span><span class="val" id="clockin-push">—</span></div>
+        <div class="row" id="clockin-issues-row" style="display:none;border-bottom:none">
+          <div style="width:100%"><span class="label">Problemas</span><div id="clockin-issues" style="margin-top:6px"></div></div>
+        </div>
+      </div>
+    </details>
+
+    <!-- Haval -->
+    <details class="card" data-k="car">
+      <summary><span class="sum-title">Haval</span>
+        <span class="sum-right"><span id="head-car">—</span><span class="chev"></span></span></summary>
+      <div class="card-body">
+        <div class="row"><span class="label">Status</span><span class="val" id="car-online">—</span></div>
+        <div class="row"><span class="label">APK (últ. dado)</span><span class="val" id="car-apk-age">—</span></div>
+        <div class="row"><span class="label">GWM (últ. dado)</span><span class="val" id="car-gwm-age">—</span></div>
+        <div class="row"><span class="label">Ativo há</span><span class="val" id="car-awake-age">—</span></div>
+        <div class="row"><span class="label">Alertas ativos</span><span class="val" id="car-alerts">—</span></div>
+        <div class="row"><span class="label">Última telemetria</span><span class="val" id="car-last">—</span></div>
+        <div class="row"><span class="label">SOC</span><span class="val" id="car-soc">—</span></div>
+        <div class="row"><span class="label">Potência</span><span class="val" id="car-power">—</span></div>
+        <div class="row"><span class="label">Carregando</span><span class="val" id="car-charging">—</span></div>
+        <div class="row"><span class="label">Executor APK/Shizuku</span><span class="val" id="car-apk-exec">—</span></div>
+        <div class="row"><span class="label">Automações (24h)</span><span class="val" id="car-apk-stats">—</span></div>
+      </div>
+    </details>
+
+    <!-- Grasi (BYD) -->
+    <details class="card" data-k="grasi">
+      <summary><span class="sum-title">Grasi (BYD)</span>
+        <span class="sum-right"><span id="head-grasi">—</span><span class="chev"></span></span></summary>
+      <div class="card-body">
+        <div class="row"><span class="label">Última telemetria</span><span class="val" id="grasi-last">—</span></div>
+        <div class="row"><span class="label">SOC</span><span class="val" id="grasi-soc">—</span></div>
+        <div class="row"><span class="label">Potência</span><span class="val" id="grasi-power">—</span></div>
+        <div class="row"><span class="label">Carregando</span><span class="val" id="grasi-charging">—</span></div>
+      </div>
+    </details>
+
+    <details class="card" data-k="lari">
+      <summary><span class="sum-title">Assistentes (WhatsApp)</span>
+        <span class="sum-right"><span id="head-lari">—</span><span class="chev"></span></span></summary>
+      <div class="card-body" id="lari-body">
+        <div class="row"><span class="label">—</span><span class="val">—</span></div>
+      </div>
+    </details>
+
+    <!-- Backups -->
+    <details class="card" data-k="bkp">
+      <summary><span class="sum-title">Backups</span>
+        <span class="sum-right"><span id="head-bkp">—</span><span class="chev"></span></span></summary>
+      <div class="card-body">
+        <div class="row"><span class="label">iCloud sincronizado</span><span class="val" id="icloud-sync">—</span></div>
+        <div id="bkp-body">
+          <div class="row"><span class="label">—</span><span class="val">—</span></div>
+        </div>
+      </div>
+    </details>
+
+    <!-- APNs / Live Activities -->
+    <details class="card" data-k="apns">
+      <summary><span class="sum-title">APNs / Live Activities</span>
+        <span class="sum-right"><span id="head-apns">—</span><span class="chev"></span></span></summary>
+      <div class="card-body">
+        <div class="row"><span class="label">Estado</span><span class="val" id="apns-state">—</span></div>
+        <div class="row"><span class="label">Ambiente</span><span class="val" id="apns-env">—</span></div>
+        <div class="row"><span class="label">Tokens (start/upd/alert)</span><span class="val" id="apns-tokens">—</span></div>
+        <div class="row"><span class="label">Atrito (mortos 24h/total)</span><span class="val" id="apns-attrition">—</span></div>
+        <div class="row"><span class="label">Último envio</span><span class="val" id="apns-last">—</span></div>
+        <div class="row"><span class="label">Último erro</span><span class="val" id="apns-err" style="font-size:11px;word-break:break-all">—</span></div>
+      </div>
+    </details>
+
+    <!-- Rede -->
+    <!-- Tokens do bridge. Auth PRÓPRIA (senha + TOTP): esta página é pública em
+         bridge.malha.dev, e emitir credencial a partir dela não pode depender só
+         do token do monitor. A sessão é curta e não sobrevive a restart. -->
+    <details class="card" data-k="tokens">
+      <summary><span class="sum-title">Tokens</span>
+        <span class="sum-right"><span id="head-tok">—</span><span class="chev"></span></span></summary>
+      <div class="card-body">
+        <!-- primeiro acesso -->
+        <div id="tok-setup" style="display:none">
+          <div class="row"><span class="label" style="color:#e6b800">Primeiro acesso — defina a senha do painel</span></div>
+          <div class="row"><input id="tok-newpw" type="password" placeholder="senha (mín. 10 caracteres)"
+               style="flex:1;background:#111;border:1px solid #333;color:#eee;padding:6px;border-radius:6px"></div>
+          <div class="row"><button id="tok-setpw" class="btn">Definir senha</button></div>
+        </div>
+        <!-- ativar 2FA -->
+        <div id="tok-totp" style="display:none">
+          <div class="row"><span class="label" style="color:#e6b800">Ative o 2FA para concluir</span></div>
+          <div class="row"><input id="tok-totppw" type="password" placeholder="sua senha"
+               style="flex:1;background:#111;border:1px solid #333;color:#eee;padding:6px;border-radius:6px">
+               <button id="tok-totpbegin" class="btn">Gerar QR</button></div>
+          <div class="row" id="tok-qrbox" style="display:none;flex-direction:column;gap:6px">
+            <img id="tok-qr" alt="QR do TOTP" style="width:180px;height:180px;background:#fff;border-radius:8px;padding:6px">
+            <span class="label" id="tok-secret" style="font-size:10px;color:#888;word-break:break-all"></span>
+            <div style="display:flex;gap:6px">
+              <input id="tok-totpcode" inputmode="numeric" maxlength="6" placeholder="código de 6 dígitos"
+                style="flex:1;background:#111;border:1px solid #333;color:#eee;padding:6px;border-radius:6px">
+              <button id="tok-totpconfirm" class="btn">Confirmar</button>
+            </div>
+          </div>
+        </div>
+        <!-- login -->
+        <div id="tok-login" style="display:none">
+          <div class="row"><input id="tok-pw" type="password" placeholder="senha"
+               style="flex:1;background:#111;border:1px solid #333;color:#eee;padding:6px;border-radius:6px"></div>
+          <div class="row"><input id="tok-code" inputmode="numeric" maxlength="6" placeholder="código 2FA"
+               style="flex:1;background:#111;border:1px solid #333;color:#eee;padding:6px;border-radius:6px">
+               <button id="tok-dologin" class="btn">Entrar</button></div>
+          <div class="row"><span class="label" id="tok-loginmsg" style="color:#e74c3c"></span></div>
+        </div>
+        <!-- área autenticada -->
+        <div id="tok-area" style="display:none">
+          <div class="row"><span class="label">Sessão</span><span class="val" id="tok-sess">—</span></div>
+          <div class="row" style="flex-direction:column;gap:6px;align-items:stretch">
+            <div style="display:flex;gap:6px">
+              <input id="tok-name" placeholder="nome (ex: cluster-ipad)" maxlength="60"
+                style="flex:1;background:#111;border:1px solid #333;color:#eee;padding:6px;border-radius:6px">
+              <select id="tok-scope" style="background:#111;border:1px solid #333;color:#eee;padding:6px;border-radius:6px">
+                <option value="read">read (só GET)</option>
+                <option value="write">write (GET+POST)</option>
+                <option value="admin">admin (tudo)</option>
+              </select>
+              <button id="tok-gen" class="btn">Gerar</button>
+            </div>
+            <div id="tok-new" style="display:none;background:#0c2b22;border:1px solid #1c6b52;border-radius:8px;padding:8px">
+              <div style="font-size:11px;color:#7bc47f;margin-bottom:4px">Copie agora — não aparece de novo</div>
+              <code id="tok-newval" style="font-size:11px;word-break:break-all;color:#eee"></code>
+              <div style="margin-top:6px"><button id="tok-copy" class="btn">Copiar</button></div>
+            </div>
+          </div>
+          <div id="tok-list" style="margin-top:8px"></div>
+          <div class="row"><button id="tok-logout" class="btn">Sair</button></div>
+        </div>
+      </div>
+    </details>
+
+    <!-- Cloudflare Tunnel — porta de entrada de tudo que é HTTP desde que
+         substituiu o Funnel. Cai ele, caem os links compartilhados, o app e o
+         HA remoto de uma vez. -->
+    <details class="card" data-k="cf">
+      <summary><span class="sum-title">Cloudflare</span>
+        <span class="sum-right"><span id="head-cf">—</span><span class="chev"></span></span></summary>
+      <div class="card-body">
+        <div class="row"><span class="label">Túnel</span><span class="val" id="cf-status">—</span></div>
+        <div class="row"><span class="label">Conexões de edge</span><span class="val" id="cf-conns">—</span></div>
+        <div class="row"><span class="label">cloudflared local</span><span class="val" id="cf-proc">—</span></div>
+        <div class="row"><span class="label">Hostnames</span><span class="val" id="cf-hosts" style="font-size:11px">—</span></div>
+        <div class="row"><span class="label">URL do servidor</span><span class="val" id="cf-url" style="font-size:12px">—</span></div>
+        <div class="row"><span class="label">URL dos links do carro</span><span class="val" id="cf-carurl" style="font-size:12px">—</span></div>
+        <!-- Enquanto isto não zerar, desligar o Funnel quebra alguém. -->
+        <div class="row"><span class="label">Funnel (ts.net)</span>
+          <span class="val"><span id="cf-legacy">—</span>
+          <button class="btn" id="cf-reset" style="margin-left:8px">zerar</button></span></div>
+        <div class="row" style="flex-direction:column;align-items:stretch">
+          <span class="label">Acessos por host</span>
+          <div id="cf-hosts-list" style="font-size:11px;color:#888;margin-top:4px">—</div>
+        </div>
+      </div>
+    </details>
+
+    <details class="card" data-k="net">
+      <summary><span class="sum-title">Rede</span>
+        <span class="sum-right"><span id="head-net">—</span><span class="chev"></span></span></summary>
+      <div class="card-body">
+        <div class="row"><span class="label">Tailscale</span><span class="val" id="ts-backend">—</span></div>
+        <div class="row"><span class="label">Funnel ingress</span><span class="val" id="funnel-status">—</span></div>
+        <div class="row"><span class="label">Gateway LAN</span><span class="val" id="gw-status">—</span></div>
+        <div class="row"><span class="label">Mosquitto 1883</span><span class="val" id="broker-1883">—</span></div>
+        <div class="row"><span class="label">Mosquitto 1884</span><span class="val" id="broker-1884">—</span></div>
+        <div class="row"><span class="label">Mosquitto 8883</span><span class="val" id="broker-8883">—</span></div>
+        <div class="row"><span class="label">Home Assistant</span><span class="val" id="ha-status">—</span></div>
+        <div class="row"><span class="label">Monitor externo</span><span class="val" id="ext-mon-status">—</span></div>
+        <div class="row"><span class="label">Monitor externo · último ping</span><span class="val" id="ext-mon-last">—</span></div>
+        <div class="row"><span class="label">IP público</span><span class="val" id="net-pubip" style="font-size:12px">—</span></div>
+        <div class="row"><span class="label">DuckDNS resolve</span><span class="val" id="net-duck">—</span></div>
+        <div class="row"><span class="label">DNS correto</span><span class="val" id="net-match">—</span></div>
+        <div class="row"><span class="label">Cert TLS</span><span class="val" id="cert-status">—</span></div>
+        <div class="row"><span class="label">Cert broker MQTT</span><span class="val" id="cert-broker-status">—</span></div>
+        <div class="row"><span class="label">Banda (↓/↑)</span><span class="val" id="net-bw">—</span></div>
+        <div class="row"><span class="label">Link local</span><span class="val" id="net-link">—</span></div>
+        <div class="row"><span class="label">Verificado</span><span class="val" id="net-checked">—</span></div>
+      </div>
+    </details>
+
+    <!-- Starlink do Sítio (via HA de lá, pelo túnel Cloudflare) -->
+    <details class="card" data-k="starlink">
+      <summary><span class="sum-title">Starlink · Sítio</span>
+        <span class="sum-right"><span id="head-starlink">—</span><span class="chev"></span></span></summary>
+      <div class="card-body">
+        <div class="row"><span class="label">Conectividade</span><span class="val" id="sl-conn">—</span></div>
+        <div class="row"><span class="label">Ping</span><span class="val" id="sl-ping">—</span></div>
+        <div class="row"><span class="label">Perda de pacote</span><span class="val" id="sl-drop">—</span></div>
+        <div class="row"><span class="label">Download / Upload</span><span class="val" id="sl-thr">—</span></div>
+        <div class="row"><span class="label">Tráfego (sessão)</span><span class="val" id="sl-traffic">—</span></div>
+        <div class="row"><span class="label">Consumo</span><span class="val" id="sl-power">—</span></div>
+        <div class="row"><span class="label">Diagnóstico</span><span class="val" id="sl-diag">—</span></div>
+        <div class="row"><span class="label">Quedas hoje</span><span class="val" id="sl-drops">—</span></div>
+        <div class="row"><span class="label">Fora do ar hoje</span><span class="val" id="sl-offline">—</span></div>
+        <div class="row"><span class="label">Quedas 7 dias</span><span class="val" id="sl-drops7">—</span></div>
+        <div class="row"><span class="label">Fora do ar 7 dias</span><span class="val" id="sl-off7">—</span></div>
+        <div class="row"><span class="label">Quedas 30 dias</span><span class="val" id="sl-drops30">—</span></div>
+        <div class="row"><span class="label">Fora do ar 30 dias</span><span class="val" id="sl-off30">—</span></div>
+        <div class="row"><span class="label">Contando desde</span><span class="val" id="sl-epoch">—</span></div>
+        <div class="row"><button class="btn" id="sl-reset" onclick="starlinkReset()">Zerar contadores (mudança de local)</button></div>
+        <div class="row"><span class="label">Uptime do dish</span><span class="val" id="sl-uptime">—</span></div>
+        <div class="row"><span class="label">Última leitura</span><span class="val" id="sl-age">—</span></div>
+      </div>
+    </details>
+
+    <!-- HA do Sítio (push) -->
+    <details class="card" data-k="hawork">
+      <summary><span class="sum-title">HA do Sítio</span>
+        <span class="sum-right"><span id="head-hawork">—</span><span class="chev"></span></span></summary>
+      <div class="card-body">
+        <div class="row"><span class="label">Último push</span><span class="val" id="hawork-last">—</span></div>
+        <div class="row"><span class="label">Guards</span><span class="val" id="hawork-guards">—</span></div>
+        <div class="row" style="display:block">
+          <div class="label" style="margin-bottom:6px">Serviços</div>
+          <div id="hawork-services" style="display:flex;flex-wrap:wrap;gap:6px">—</div>
+        </div>
+        <div class="row" style="display:block">
+          <div class="label" style="margin-bottom:6px">Uptime 7d</div>
+          <div id="hawork-uptime" style="display:flex;flex-wrap:wrap;gap:6px">—</div>
+        </div>
+        <ul class="event-list" id="hawork-ev-list">
+          <li class="empty">Sem transições registradas ainda.</li>
+        </ul>
+      </div>
+    </details>
+
+    <!-- Erros -->
+    <details class="card" data-k="err">
+      <summary><span class="sum-title">Erros / crashes</span>
+        <span class="sum-right"><span id="head-err">—</span><span class="chev"></span></span></summary>
+      <div class="card-body">
+        <div class="row" style="border-bottom:none;justify-content:flex-end">
+          <button class="btn" onclick="clearEvents()">✕ Limpar</button>
+        </div>
+        <ul class="event-list" id="ev-list">
+          <li class="empty">Nenhum erro registrado nesta sessão.</li>
+        </ul>
+      </div>
+    </details>
+
+  </div>
+</div>
+
+<script>
+const tk = localStorage.getItem('bridge_token') || prompt('Token do bridge:');
+if (tk) localStorage.setItem('bridge_token', tk);
+
+// ── Estado expandido/colapsado persistente ──────────────────────────────────
+const OPEN_KEY = 'health_open_v1';
+function loadOpenState() {
+  let st;
+  try { st = JSON.parse(localStorage.getItem(OPEN_KEY) || 'null'); } catch (_) {}
+  document.querySelectorAll('details[data-k]').forEach(d => {
+    if (st && d.dataset.k in st) d.open = !!st[d.dataset.k];
+    d.addEventListener('toggle', () => { saveOpenState(); if (d.dataset.k === 'mem' && d.open) drawChart(); });
+  });
+  refreshToggleAllLabel();
+}
+function saveOpenState() {
+  const st = {};
+  document.querySelectorAll('details[data-k]').forEach(d => st[d.dataset.k] = d.open);
+  localStorage.setItem(OPEN_KEY, JSON.stringify(st));
+  refreshToggleAllLabel();
+}
+function toggleAll() {
+  const all = [...document.querySelectorAll('details[data-k]')];
+  const anyClosed = all.some(d => !d.open);
+  all.forEach(d => d.open = anyClosed);
+  saveOpenState();
+  if (anyClosed) drawChart();
+}
+function refreshToggleAllLabel() {
+  const all = [...document.querySelectorAll('details[data-k]')];
+  const anyClosed = all.some(d => !d.open);
+  const btn = document.getElementById('toggle-all');
+  if (btn) btn.textContent = anyClosed ? 'Expandir tudo' : 'Recolher tudo';
+}
+
+function fmtUptime(s) {
+  if (s < 60)   return s + 's';
+  if (s < 3600) return Math.floor(s/60) + 'min ' + (s%60) + 's';
+  const h = Math.floor(s/3600), m = Math.floor((s%3600)/60);
+  if (h < 24)   return h + 'h ' + m + 'min';
+  return Math.floor(h/24) + 'd ' + (h%24) + 'h';
+}
+function fmtDate(ms) {
+  if (!ms) return '—';
+  return new Date(ms).toLocaleString('pt-BR', { day:'2-digit', month:'2-digit', year:'2-digit', hour:'2-digit', minute:'2-digit', second:'2-digit' });
+}
+function fmtAgo(ms) {
+  if (!ms) return '—';
+  const s = Math.round((Date.now() - ms) / 1000);
+  if (s < 5)   return 'agora';
+  if (s < 60)  return s + 's atrás';
+  if (s < 3600) return Math.floor(s/60) + 'min atrás';
+  return Math.floor(s/3600) + 'h atrás';
+}
+function set(id, v) { const el = document.getElementById(id); if (el) el.innerHTML = v; }
+function dot(c) { return `<span class="dot ${c}"></span>`; }
+
+let memSeries = [];
+function drawChart() {
+  const canvas = document.getElementById('mem-chart');
+  if (!canvas || !canvas.clientWidth || memSeries.length < 2) return;
+  const dpr = window.devicePixelRatio || 1;
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  canvas.width = w * dpr; canvas.height = h * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, w, h);
+
+  const vals = memSeries.map(p => p.rss);
+  const mn = Math.min(...vals), mx = Math.max(...vals) || 1;
+  const pad = 4;
+  function px(i)  { return pad + (i / (memSeries.length - 1)) * (w - pad * 2); }
+  function py(v)  { return h - pad - ((v - mn) / (mx - mn + 1)) * (h - pad * 2); }
+
+  ctx.beginPath();
+  ctx.moveTo(px(0), py(vals[0]));
+  vals.forEach((v, i) => ctx.lineTo(px(i), py(v)));
+  ctx.lineTo(px(vals.length-1), h); ctx.lineTo(px(0), h); ctx.closePath();
+  ctx.fillStyle = 'rgba(163,230,53,.08)';
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(px(0), py(vals[0]));
+  vals.forEach((v, i) => ctx.lineTo(px(i), py(v)));
+  ctx.strokeStyle = 'rgba(163,230,53,.6)';
+  ctx.lineWidth = 1.5; ctx.stroke();
+  ctx.fillStyle = '#64748b'; ctx.font = `${9 * dpr}px -apple-system,sans-serif`; ctx.scale(1/dpr, 1/dpr);
+  ctx.fillText(mn + ' MB', pad * dpr, (h - pad) * dpr);
+  ctx.fillText(mx + ' MB', pad * dpr, (pad + 10) * dpr);
+}
+
+async function load() {
+  try {
+    const r = await fetch('/api/health', { headers: { Authorization: 'Bearer ' + tk } });
+    if (r.status === 401) { alert('Token inválido'); return; }
+    const d = await r.json();
+
+    set('last-update', 'Atualizado ' + fmtDate(d.ts));
+    set('proc-status', '<span class="pill green"><span class="dot green"></span>Online</span>');
+    set('proc-uptime',  fmtUptime(d.uptime_sec));
+    set('proc-started', fmtDate(d.started_at_ms));
+    set('proc-node',    d.node_version || '—');
+    set('sys-apkver',   d.system?.car_app_version || '—');
+    set('head-proc', dot('green') + ' ' + fmtUptime(d.uptime_sec));
+
+    set('mem-rss',    (d.memory?.rss_mb   || 0) + ' MB');
+    set('mem-heap',   (d.memory?.heap_used_mb  || 0) + ' MB');
+    set('mem-htotal', (d.memory?.heap_total_mb || 0) + ' MB');
+    set('head-mem', (d.memory?.rss_mb || 0) + ' MB');
+
+    // ── Mac ──────────────────────────────────────────────────────────────────
+    const mac = d.mac || {};
+    set('mac-uptime',   fmtUptime(mac.uptime_sec || 0));
+    set('mac-mem-used',  mac.mem?.used_gb  != null ? `${mac.mem.used_gb} / ${mac.mem.total_gb} GB` : '—');
+    set('mac-mem-avail', mac.mem?.avail_gb != null ? `${mac.mem.avail_gb} GB` : '—');
+    set('mac-disk',      mac.disk ? `${mac.disk.avail_gb} / ${mac.disk.total_gb} GB livre` : '—');
+    const ext = mac.disk_ext;
+    set('mac-disk-ext', !ext ? '—'
+      : ext.mounted === false ? `${dot('red')} desmontado`
+      : `${dot(ext.avail_gb < 5 ? 'yellow' : 'green')} ${ext.avail_gb} / ${ext.total_gb} GB livre`);
+    const memTight  = mac.mem?.avail_gb  != null && mac.mem.avail_gb  < 1.5;
+    const diskTight = mac.disk?.avail_gb != null && mac.disk.avail_gb < 15;
+    const extBad    = ext && (ext.mounted === false || (ext.avail_gb != null && ext.avail_gb < 5));
+    set('head-mac', dot(memTight || diskTight || extBad ? 'red' : 'green') + ' '
+      + (mac.mem?.used_gb != null ? `${mac.mem.used_gb}/${mac.mem.total_gb} GB` : '—'));
+
+    // ── Tendência preditiva (slope/ETA) ──────────────────────────────────────
+    const tr = d.trend || {};
+    const etaTxt = (f, floor) => {
+      if (!f) return `${dot('yellow')} coletando…`;
+      if (f.eta_days == null) return `${dot('green')} estável (${f.slope_per_day >= 0 ? '+' : ''}${f.slope_per_day} GB/dia)`;
+      const c = f.eta_days < 10 ? 'red' : f.eta_days < 30 ? 'yellow' : 'green';
+      return `${dot(c)} ~${f.eta_days}d até <${floor}GB (${f.slope_per_day} GB/dia)`;
+    };
+    set('trend-di', tr.disk_int !== undefined ? etaTxt(tr.disk_int, 8) : '—');
+    set('trend-de', tr.disk_ext !== undefined ? (tr.disk_ext ? etaTxt(tr.disk_ext, 5) : `${dot('yellow')} SSD não montado`) : '—');
+    if (!tr.rss) set('trend-rss', `${dot('yellow')} coletando…`);
+    else {
+      const leak = tr.rss.span_h >= 6 && tr.rss.slope_per_day > 60;
+      set('trend-rss', `${dot(leak ? 'red' : 'green')} ${tr.rss.slope_per_day >= 0 ? '+' : ''}${tr.rss.slope_per_day} MB/dia (${tr.rss.span_h}h, atual ${tr.rss.current}MB)`);
+    }
+
+    // ── Processos pm2 (+ Lari, fora do pm2) ──────────────────────────────────
+    const procs = d.processes || [];
+    const lariProcs = (d.lari || []).filter(l => l.up && l.pid);
+    const onlineN = procs.filter(p => p.status === 'online').length + lariProcs.length;
+    const totalN = procs.length + lariProcs.length;
+    const anyDown = procs.some(p => p.status !== 'online');
+    set('head-procs', dot(anyDown ? 'red' : 'green') + ` ${onlineN}/${totalN} online`);
+    const procRows = procs.map(p => {
+      const ok  = p.status === 'online';
+      const hot = p.restarts > 50 ? ' style="color:var(--yellow)"' : '';
+      return `<div class="row">
+        <span class="label">${dot(ok ? 'green' : 'red')} ${p.name}</span>
+        <span class="val" style="font-size:12px;font-weight:500">${p.mem_mb} MB · ${p.cpu ?? 0}% · <span${hot}>${p.restarts}↻</span> · ${fmtUptime(p.uptime_sec || 0)}</span>
+      </div>`;
+    });
+    // Nome do assistente por usuário: Rafael → Mari, Deivid → Lari.
+    const _assistantName = { rafael: 'mari', deivid: 'lari' };
+    const lariRows = lariProcs.map(l => {
+      const u = (l.user || '?').toLowerCase();
+      const name = (_assistantName[u] || 'lari') + '-' + u.replace(/</g,'&lt;');
+      return `<div class="row">
+        <span class="label">${dot(l.connected ? 'green' : 'yellow')} ${name}</span>
+        <span class="val" style="font-size:12px;font-weight:500">${l.mem_mb != null ? l.mem_mb + ' MB' : '?'} · ${l.cpu ?? 0}% · ${fmtUptime(l.uptime_sec || 0)}</span>
+      </div>`;
+    });
+    const allRows = procRows.concat(lariRows);
+    set('proc-list', allRows.length ? allRows.join('') : '<div class="empty">—</div>');
+
+    // ── Clockin ────────────────────────────────────────────────────────────────
+    const ck = d.clockin || {};
+    const ckm = ck.metrics || {};
+    set('clockin-http', ck.up === true
+      ? '<span class="pill green"><span class="dot green"></span>OK</span>'
+      : ck.up === false ? `<span class="pill red"><span class="dot red"></span>${ck.error || 'down'}</span>` : '—');
+    set('clockin-healthy', ck.healthy === true
+      ? '<span class="pill green"><span class="dot green"></span>OK</span>'
+      : ck.healthy === false ? '<span class="pill red"><span class="dot red"></span>Degradado</span>' : '—');
+    set('clockin-ver', ck.version ? 'v' + ck.version : '—');
+    set('clockin-lat', ck.latency_ms != null ? ck.latency_ms + ' ms' : '—');
+    if (ckm.backup_age_hours != null) {
+      const old = ckm.backup_age_hours > 25;
+      set('clockin-backup', `<span style="color:${old ? 'var(--red)' : 'var(--green)'}">${ckm.backup_age_hours}h</span>`);
+    } else { set('clockin-backup', '—'); }
+    set('clockin-emp', ckm.employees_total != null ? ckm.employees_total : '—');
+    set('clockin-push', (ckm.admin_push_subscriptions != null || ckm.device_push_subscriptions != null)
+      ? `${ckm.admin_push_subscriptions ?? '?'} / ${ckm.device_push_subscriptions ?? '?'}` : '—');
+    const ckIssues = ck.issues || [];
+    const issRow = document.getElementById('clockin-issues-row');
+    if (ckIssues.length) {
+      if (issRow) issRow.style.display = 'flex';
+      const sevColor = { critical: 'var(--red)', high: 'var(--red)', medium: 'var(--yellow)', low: 'var(--muted)' };
+      set('clockin-issues', ckIssues.map(i =>
+        `<div style="font-size:11px;color:${sevColor[i.severity] || 'var(--muted)'};padding:2px 0">[${i.severity}] ${(i.message||'').replace(/</g,'&lt;')}</div>`).join(''));
+    } else if (issRow) { issRow.style.display = 'none'; }
+    const ckColor = ck.up === false ? 'red' : ck.healthy === false ? 'yellow' : ck.healthy === true ? 'green' : 'yellow';
+    set('head-clockin', dot(ckColor) + ' '
+      + (ck.up === false ? 'down' : ck.healthy === false ? `${ckIssues.length} probl.` : ck.version ? 'v' + ck.version : '—'));
+
+    // ── Grasi (BYD Song Pro) ─────────────────────────────────────────────────────
+    const gr = d.grasi || {};
+    const grStale = !gr.last_ms || (Date.now() - gr.last_ms) > 30 * 60 * 1000;
+    set('grasi-last', gr.last_ms ? fmtAgo(gr.last_ms) : '<span style="color:var(--muted)">nunca</span>');
+    set('grasi-soc', gr.soc ? gr.soc.toFixed(1) + '%' : '—');
+    set('grasi-power', (gr.power_kw || 0).toFixed(1) + ' kW');
+    set('grasi-charging', gr.charging ? '<span style="color:var(--green)">Sim</span>' : '<span style="color:var(--muted)">Não</span>');
+    set('head-grasi', dot(gr.charging ? 'green' : grStale ? 'yellow' : 'green') + ' '
+      + (gr.soc ? gr.soc.toFixed(0) + '%' : '—'));
+
+    // ── Lari (whats-assistant): 1 bloco por tenant ───────────────────────────────
+    const lari = d.lari || [];
+    if (lari.length) {
+      const rows = lari.map(l => {
+        const name = (l.user || l.url || '?').replace(/</g, '&lt;');
+        const c = !l.up ? 'red' : l.connected ? 'green' : 'yellow';
+        const st = !l.up ? (l.error || 'down') : l.connected ? `conectado${l.me ? ' · ' + l.me : ''}` : (l.qr_pending ? 'aguardando QR' : 'desconectado');
+        const up = l.up && l.uptime_sec != null ? ` · ${fmtUptime(l.uptime_sec)}` : '';
+        return `<div class="row"><span class="label" style="text-transform:capitalize">${name}</span>`
+          + `<span class="val" style="font-size:12px">${dot(c)} ${st}${up}</span></div>`;
+      }).join('');
+      document.getElementById('lari-body').innerHTML = rows;
+      const anyDown = lari.some(l => !l.up || !l.connected);
+      const allConn = lari.every(l => l.up && l.connected);
+      const onCount = lari.filter(l => l.up && l.connected).length;
+      set('head-lari', dot(allConn ? 'green' : anyDown ? 'yellow' : 'green') + ` ${onCount}/${lari.length}`);
+    } else {
+      set('head-lari', '—');
+    }
+
+    // ── iCloud realmente subiu (offsite) ──────────────────────────────────────
+    const ic = d.icloud_sync || {};
+    if (ic.error) set('icloud-sync', `${dot('yellow')} ${ic.error}`);
+    else if (ic.checked_at > 0) {
+      const c = ic.pending > 0 ? 'red' : ic.errors > 0 ? 'yellow' : 'green';
+      set('icloud-sync', `${dot(c)} ${ic.uploaded}/${ic.total} subiram${ic.pending ? ` · ${ic.pending} pendente` : ''}${ic.errors ? ` · ${ic.errors} erro` : ''}`);
+    } else set('icloud-sync', '—');
+
+    // ── Backups ──────────────────────────────────────────────────────────────
+    const bkp = d.backups || [];
+    if (bkp.length) {
+      const rows = bkp.map(b => {
+        const c = b.ok ? 'green' : 'red';
+        const detail = b.error ? b.error
+          : b.age_hours != null ? `${fmtAgo(Date.now() - b.age_hours * 3600000)}` : '—';
+        return `<div class="row"><span class="label">${dot(c)} ${b.name.replace(/</g,'&lt;')}</span>`
+          + `<span class="val" style="font-size:12px">${detail}</span></div>`;
+      }).join('');
+      document.getElementById('bkp-body').innerHTML = rows;
+      const okN = bkp.filter(b => b.ok).length;
+      set('head-bkp', dot(okN === bkp.length ? 'green' : 'red') + ` ${okN}/${bkp.length}`);
+    } else { set('head-bkp', '—'); }
+
+    // ── APNs / Live Activities ─────────────────────────────────────────────────
+    const ap = d.apns || {};
+    set('apns-state', !ap.enabled ? `${dot('yellow')} desativado`
+      : `${dot('green')} ativo`);
+    set('apns-env', ap.env || '—');
+    set('apns-tokens', ap.enabled ? `${ap.start_tokens ?? 0} / ${ap.update_tokens ?? 0} / ${ap.alert_tokens ?? 0}` : '—');
+    set('apns-attrition', ap.enabled
+      ? `${dot((ap.dead_24h || 0) >= 3 ? 'red' : 'green')} ${ap.dead_24h || 0} / ${ap.dead_total || 0}${ap.last_dead_ms ? ' · ' + fmtAgo(ap.last_dead_ms) : ''}`
+      : '—');
+    set('apns-last', ap.last_push_ms ? `${fmtAgo(ap.last_push_ms)} · ${ap.last_sent ?? 0} ok${ap.last_status ? ' · HTTP ' + ap.last_status : ''}` : '—');
+    set('apns-err', ap.last_err ? `${fmtAgo(ap.last_err_ms)}: ${String(ap.last_err).replace(/</g,'&lt;')}` : '—');
+    const apnsBad = ap.enabled && ap.last_err_ms > 0 && ap.last_err_ms > (ap.last_ok_ms || 0);
+    set('head-apns', !ap.enabled ? dot('yellow') + ' off'
+      : dot(apnsBad ? 'yellow' : 'green') + ` ${(ap.start_tokens ?? 0) + (ap.update_tokens ?? 0) + (ap.alert_tokens ?? 0)} tok`);
+
+    // ── Conexões ───────────────────────────────────────────────────────────────
+    const mqttOk = d.mqtt?.connected;
+    set('mqtt-status', mqttOk
+      ? '<span class="pill green"><span class="dot green"></span>Conectado</span>'
+      : '<span class="pill red"><span class="dot red"></span>Desconectado</span>');
+    const mp = d.mqtt_ping || {};
+    set('mqtt-ping', mp.latency_ms != null ? mp.latency_ms + ' ms' : '—');
+    set('mqtt-apk',  fmtAgo(d.mqtt?.last_apk_ms));
+    set('mqtt-apk-key',      d.mqtt?.last_apk_key      || '—');
+    set('mqtt-apk-live',     fmtAgo(d.mqtt?.last_apk_live_ms));
+    set('mqtt-apk-live-key', d.mqtt?.last_apk_live_key || '—');
+    set('mqtt-gwm',  fmtAgo(d.mqtt?.last_gwm_ms));
+    set('ws-clients',    d.ws_clients    ?? '—');
+    set('audio-clients', d.audio_clients ?? '—');
+    set('head-conn', dot(mqttOk ? 'green' : 'red') + ' '
+      + (mqttOk ? (mp.latency_ms != null ? mp.latency_ms + ' ms' : 'OK') : 'offline'));
+
+    // ── Rede ───────────────────────────────────────────────────────────────────
+    const ts = d.tailscale || {};
+    const tsOk = ts.backend === 'Running';
+    set('ts-backend', tsOk
+      ? '<span class="pill green"><span class="dot green"></span>Running</span>'
+      : `<span class="pill red"><span class="dot red"></span>${ts.error || ts.backend || 'Desconhecido'}</span>`);
+
+    const fn = d.funnel || {};
+    set('funnel-status', fn.up === true
+      ? '<span class="pill green"><span class="dot green"></span>OK</span>'
+      : fn.up === false
+        ? `<span class="pill red"><span class="dot red"></span>${fn.error || 'Portas ' + (fn.failed||[]).join(',')}</span>`
+        : '—');
+
+    const mb = d.mqtt_broker || {};
+    const portPill = (ok) => ok === true
+      ? '<span class="pill green"><span class="dot green"></span>OK</span>'
+      : ok === false ? '<span class="pill red"><span class="dot red"></span>Down</span>' : '—';
+    set('broker-1883', portPill(mb.port1883));
+    set('broker-1884', portPill(mb.port1884));
+    set('broker-8883', portPill(mb.port8883));
+
+    const gw = d.gateway || {};
+    set('gw-status', gw.up === true
+      ? `<span class="pill green"><span class="dot green"></span>${gw.latency_ms ?? '?'} ms</span>`
+      : gw.up === false ? '<span class="pill red"><span class="dot red"></span>Offline</span>' : '—');
+
+    const ha = d.ha || {};
+    set('ha-status', ha.up === true
+      ? `<span class="pill green"><span class="dot green"></span>${ha.latency_ms ?? '?'} ms</span>`
+      : ha.up === false ? `<span class="pill red"><span class="dot red"></span>${ha.error || 'Offline'}</span>` : '—');
+
+    // Monitor externo (HA do Sítio) — dead-man's-switch: mostra estado + último ping.
+    const em = d.ext_monitor || {};
+    set('ext-mon-status', em.ok === true
+      ? `<span class="pill green"><span class="dot green"></span>Ativo (${em.age_sec}s)</span>`
+      : em.ok === false
+        ? `<span class="pill red"><span class="dot red"></span>Parado há ${Math.round((em.age_sec || 0) / 60)}min</span>`
+        : `<span class="pill yellow"><span class="dot yellow"></span>Aguardando 1º ping</span>`);
+    set('ext-mon-last', em.last_beat_ms ? fmtAgo(em.last_beat_ms) : '—');
+
+    // ── HA do Sítio (push, IP dinâmico — só dá pra ver por aqui) ──────────────
+    const SERVICE_LABELS = {
+      tailnet: 'Tailnet', ellevar: 'Ellevar', haval: 'Haval', whats: 'Whats', mqtt: 'MQTT',
+      mosquitto: 'Mosquitto', ha_local: 'HA local', gateway: 'Gateway', ssd: 'SSD', duckdns: 'DuckDNS',
+    };
+    const GUARD_LABELS = {
+      mac_inalcancavel: 'Mac inalcançável', bridge_cego: 'Bridge cego (LAN)',
+    };
+    const hw = d.ha_work;
+    if (!hw) {
+      set('head-hawork', dot('yellow') + ' aguardando 1º push');
+      set('hawork-last', '—');
+      set('hawork-guards', '—');
+      set('hawork-services', '—');
+      set('hawork-uptime', '—');
+    } else {
+      const svcEntries = Object.entries(hw.services || {});
+      const anyDown = svcEntries.some(([, v]) => v === false);
+      const anyGuard = Object.values(hw.guards || {}).some(v => v === true);
+      set('head-hawork', dot(hw.stale ? 'yellow' : (anyDown || anyGuard) ? 'red' : 'green') + ' '
+        + (hw.stale ? `sem push há ${Math.round(hw.age_sec / 60)}min` : (anyDown || anyGuard) ? 'atenção' : 'OK'));
+      set('hawork-last', (hw.stale ? '<span class="pill yellow">' : '<span class="pill green">')
+        + fmtAgo(hw.ts) + '</span>');
+      const guardEntries = Object.entries(hw.guards || {});
+      set('hawork-guards', guardEntries.length
+        ? guardEntries.map(([k, v]) => `<span class="pill ${v ? 'red' : 'green'}">${dot(v ? 'red' : 'green')}${GUARD_LABELS[k] || k}</span>`).join(' ')
+        : '—');
+      set('hawork-services', svcEntries.length
+        ? svcEntries.map(([k, v]) => `<span class="pill ${v ? 'green' : 'red'}">${dot(v ? 'green' : 'red')}${SERVICE_LABELS[k] || k}</span>`).join('')
+        : '—');
+      const upEntries = Object.entries(hw.uptime7d || {});
+      set('hawork-uptime', upEntries.length
+        ? upEntries.map(([k, v]) => `<span class="pill" style="color:var(--muted)">${SERVICE_LABELS[k] || k} ${Number(v).toFixed(1)}%</span>`).join('')
+        : '—');
+      const hwEvs = hw.events || [];
+      const hwList = document.getElementById('hawork-ev-list');
+      hwList.innerHTML = hwEvs.length
+        ? hwEvs.map(e => `
+        <li class="ev">
+          <div class="ev-time">${fmtDate(e.ts)}</div>
+          <div class="ev-type">${e.up ? '<span style="color:var(--green)">voltou</span>' : '<span style="color:var(--red)">caiu</span>'}</div>
+          <div class="ev-msg">${SERVICE_LABELS[e.service] || e.service}</div>
+        </li>`).join('')
+        : '<li class="empty">Sem transições registradas ainda.</li>';
+    }
+
+    const net = d.network || {};
+    set('net-pubip',   net.public_ip || '—');
+    set('net-duck',    net.duckdns_ip
+      ? net.duckdns_ip
+      : net.duckdns_ip_cached
+        ? `<span style="color:var(--muted)">${net.duckdns_ip_cached} (cache)</span>`
+        : net.error ? `<span style="color:var(--muted)">${net.error}</span>` : '—');
+    set('net-match',   net.match === true
+      ? '<span class="pill green"><span class="dot green"></span>OK</span>'
+      : net.match === false
+        ? '<span class="pill red"><span class="dot red"></span>Divergente</span>'
+        : net.error
+          ? '<span class="pill yellow"><span class="dot yellow"></span>DuckDNS instável</span>'
+          : '—');
+
+    const cert = d.cert || {};
+    let certOk = null;
+    if (cert.days_left != null) {
+      certOk = cert.days_left > 14;
+      set('cert-status', certOk
+        ? `<span class="pill green"><span class="dot green"></span>${cert.days_left}d</span>`
+        : `<span class="pill red"><span class="dot red"></span>${cert.days_left}d restantes</span>`);
+    } else { set('cert-status', cert.error ? `<span style="color:var(--muted)">${cert.error}</span>` : '—'); }
+    const certB = d.cert_broker || {};
+    let certBOk = null;
+    if (certB.days_left != null) {
+      certBOk = certB.days_left > 14;
+      set('cert-broker-status', certBOk
+        ? `<span class="pill green"><span class="dot green"></span>${certB.days_left}d</span>`
+        : `<span class="pill red"><span class="dot red"></span>${certB.days_left}d restantes</span>`);
+    } else { set('cert-broker-status', certB.error ? `<span style="color:var(--muted)">${certB.error}</span>` : '—'); }
+    const bw = net.bandwidth || {};
+    const fmtBw = k => k == null ? '?' : k >= 1000 ? (k / 1000).toFixed(1) + ' Mbps' : k + ' kbps';
+    set('net-bw', bw.rx_kbps != null
+      ? `<span style="font-size:12px">${fmtBw(bw.rx_kbps)} / ${fmtBw(bw.tx_kbps)}<span style="color:var(--muted)"> · ${bw.iface || ''}</span></span>`
+      : '—');
+    set('net-link', bw.link_mbps != null
+      ? `<span style="font-size:12px">${bw.link_mbps >= 1000 ? (bw.link_mbps / 1000).toFixed(1) + ' Gbps' : bw.link_mbps + ' Mbps'}<span style="color:var(--muted)"> · ${bw.link_type || ''}</span></span>`
+      : '—');
+    set('net-checked', fmtAgo(net.checked_at));
+
+    // headline da rede: pior estado entre os checks principais
+    const netChecks = [tsOk, fn.up, mb.port8883, gw.up, net.match, certOk, certBOk];
+    const anyBad  = netChecks.some(v => v === false);
+    const allGood = netChecks.every(v => v === true || v == null) && netChecks.some(v => v === true);
+    set('head-net', dot(anyBad ? 'red' : allGood ? 'green' : 'yellow') + ' '
+      + (anyBad ? 'atenção' : 'OK'));
+
+    // ── Carro ──────────────────────────────────────────────────────────────────
+    const car = d.car || {};
+    const als = d.alerts || {};
+    set('car-online', car.online
+      ? '<span class="pill green"><span class="dot green"></span>Online</span>'
+      : '<span class="pill red"><span class="dot red"></span>Offline</span>');
+
+    function fmtCarAge(ms) {
+      if (!ms) return '<span style="color:var(--muted)">nunca</span>';
+      const s = Math.round((Date.now() - ms) / 1000);
+      const ago = s < 5 ? 'agora' : s < 60 ? s + 's' : s < 3600 ? Math.floor(s/60) + 'min' : Math.floor(s/3600) + 'h';
+      const color = s < 120 ? 'var(--green)' : s < 1200 ? 'var(--yellow)' : 'var(--red)';
+      return `<span style="color:${color}">${ago}</span>`;
+    }
+    set('car-apk-age',  fmtCarAge(car.last_apk_ms));
+    set('car-gwm-age',  fmtCarAge(car.last_gwm_ms));
+    set('car-awake-age', car.last_awake_ms ? fmtCarAge(car.last_awake_ms) : '<span style="color:var(--muted)">nunca</span>');
+
+    const CAR_ALERT_LABELS = {
+      car_apk_stall:     'APK silente',
+      car_gwm_stall:     'GWM silente',
+      car_total_silence: 'Sem comunicação',
+    };
+    const firingCar = Object.entries(CAR_ALERT_LABELS)
+      .filter(([k]) => als[k]?.firing)
+      .map(([k, label]) => {
+        const notified = als[k]?.notified;
+        const color    = notified ? 'var(--red)' : 'var(--yellow)';
+        return `<span style="color:${color}">${label}${notified ? '' : ' (aguardando)'}</span>`;
+      });
+    set('car-alerts', firingCar.length ? firingCar.join(' · ') : '<span style="color:var(--green)">Nenhum</span>');
+    set('car-last',     car.last_ms ? fmtAgo(car.last_ms) : '<span style="color:var(--muted)">nunca</span>');
+    set('car-soc',      car.soc ? car.soc.toFixed(1) + '%' : '—');
+    set('car-power',    (car.power_kw || 0).toFixed(1) + ' kW');
+    set('car-charging', car.charging ? '<span style="color:var(--green)">Sim</span>' : '<span style="color:var(--muted)">Não</span>');
+    // Executor APK/Shizuku (inferido pelo verify das automações)
+    const ax = d.apk_executor || {};
+    if (ax.last_ok_ms || ax.last_fail_ms) {
+      const okAgo   = ax.last_ok_ms   ? fmtAgo(ax.last_ok_ms)   : 'nunca';
+      const failAgo = ax.last_fail_ms ? fmtAgo(ax.last_fail_ms) : 'nunca';
+      const statusColor = ax.healthy ? 'var(--green)' : 'var(--red)';
+      const statusText  = ax.healthy ? 'ok' : `⚠ ${ax.fail_streak} falhas seguidas`;
+      set('car-apk-exec',  `<span style="color:${statusColor}">${statusText}</span> · últ. ok ${okAgo}`);
+      set('car-apk-stats', `${ax.ok_24h || 0} ok / ${ax.fail_24h || 0} fail · últ. fail ${failAgo}`);
+    } else {
+      set('car-apk-exec', '<span style="color:var(--muted)">sem dados</span>');
+      set('car-apk-stats', '—');
+    }
+    set('head-car', dot(car.online ? (firingCar.length ? 'yellow' : 'green') : 'red') + ' '
+      + (car.online ? 'online' : 'offline'));
+
+    // ── Erros ──────────────────────────────────────────────────────────────────
+    const evs = d.events || [];
+    // "Sério" = qualquer evento que NÃO seja restart planejado (ajuste/deploy).
+    const serious = evs.filter(e => !(e.type === 'restart' && e.planned)).length;
+    set('head-err', dot(serious ? 'red' : 'green') + ' ' + (evs.length ? `${serious}/${evs.length} eventos` : 'limpo'));
+    const list = document.getElementById('ev-list');
+    if (!evs.length) {
+      list.innerHTML = '<li class="empty">Nenhum erro registrado nesta sessão.</li>';
+    } else {
+      list.innerHTML = evs.map(e => {
+        const tag = e.type === 'restart'
+          ? (e.planned ? '<span style="color:var(--muted)">restart · ajuste</span>'
+                       : '<span style="color:var(--red)">restart · queda</span>')
+          : e.type.replace(/</g,'&lt;');
+        return `
+        <li class="ev">
+          <div class="ev-time">${fmtDate(e.ts)}</div>
+          <div class="ev-type">${tag}</div>
+          <div class="ev-msg">${e.msg.replace(/</g,'&lt;')}</div>
+        </li>`;
+      }).join('');
+    }
+
+    if (d.mem_series?.length) { memSeries = d.mem_series; drawChart(); }
+
+    // Número grande = QUEDAS (crashes). Linha menor = ajustes/deploys + erros.
+    const s = d.stats || {};
+    for (const [k, id] of [['h1','s-h1'], ['h24','s-h24'], ['d7','s-d7'], ['d30','s-d30']]) {
+      const w = s[k] || {};
+      const rEl = document.getElementById(id + '-r');
+      const eEl = document.getElementById(id + '-e');
+      const crash = w.restarts_crash ?? w.restarts ?? 0;
+      if (rEl) {
+        rEl.textContent = crash;
+        rEl.className = 'stat-r' + (crash > 0 ? ' hot' : '');
+      }
+      if (eEl) {
+        const parts = [];
+        if (w.restarts_planned) parts.push(w.restarts_planned + ' aj');
+        if (w.errors)           parts.push(w.errors + ' err');
+        eEl.textContent = parts.join(' · ');
+      }
+    }
+  } catch (e) {
+    set('proc-status', '<span class="pill red"><span class="dot red"></span>Sem resposta</span>');
+    set('head-proc', dot('red') + ' sem resposta');
+    set('last-update', 'Falhou em ' + new Date().toLocaleTimeString('pt-BR'));
+  }
+}
+
+async function clearEvents() {
+  if (!confirm('Limpar todos os erros registrados?')) return;
+  // Manda os dois: o token do monitor (que é `read` e sozinho toma 403) e a
+  // sessão admin, se houver. O servidor aceita qualquer um dos dois.
+  const r = await fetch('/api/health/events/clear', {
+    method: 'POST',
+    headers: { Authorization: 'Bearer ' + tk, 'X-Admin-Session': sessionStorage.getItem('admin_session') || '' },
+  });
+  if (r.status === 403 || r.status === 401) {
+    alert('Sem permissão pra limpar: o token do monitor é só-leitura.\n\nEntre no card "Tokens" com senha + 2FA e tente de novo.');
+    return;
+  }
+  load();
+}
+
+// ── Activity Monitor (top processos do sistema) ──────────────────────────────
+let _sysProcSort = { col: 'cpu', dir: 'desc' };
+let _sysProcLast = [];
+function _renderSysProc() {
+  const tb = document.querySelector('#sysproc-table tbody');
+  if (!tb) return;
+  const { col, dir } = _sysProcSort;
+  const sign = dir === 'asc' ? 1 : -1;
+  const sorted = [..._sysProcLast].sort((a, b) => {
+    const va = a[col], vb = b[col];
+    if (typeof va === 'number' && typeof vb === 'number') return (va - vb) * sign;
+    return String(va).localeCompare(String(vb)) * sign;
+  });
+  tb.innerHTML = sorted.map(p => `
+    <tr>
+      <td class="name" title="pid ${p.pid} · ${p.user} · ${p.name.replace(/"/g,'&quot;')}">${p.name.replace(/</g,'&lt;')}</td>
+      <td class="num">${p.cpu.toFixed(1)}</td>
+      <td class="num">${p.rssMb} MB</td>
+    </tr>`).join('') || '<tr><td colspan="3" class="empty">—</td></tr>';
+  document.querySelectorAll('#sysproc-table th').forEach(th => {
+    th.classList.remove('active', 'asc', 'desc');
+    if (th.dataset.sort === col) th.classList.add('active', dir);
+  });
+}
+document.querySelectorAll('#sysproc-table th').forEach(th => {
+  th.addEventListener('click', () => {
+    const c = th.dataset.sort;
+    if (_sysProcSort.col === c) _sysProcSort.dir = _sysProcSort.dir === 'asc' ? 'desc' : 'asc';
+    else _sysProcSort = { col: c, dir: c === 'name' || c === 'user' ? 'asc' : 'desc' };
+    _renderSysProc();
+  });
+});
+async function loadSysProc() {
+  try {
+    const r = await fetch('/api/proc-list', { headers: { Authorization: 'Bearer ' + tk } });
+    const d = await r.json();
+    if (d.ok) {
+      _sysProcLast = d.list || [];
+      _renderSysProc();
+    }
+  } catch (_) {}
+}
+
+async function _paintSolisSystem(sys, prefix, headId) {
+  if (!sys) { set(headId, 'indisponível'); return; }
+  const nowMs = Date.now(), marginMs = 15*60_000;
+  const daytime = (sys.sunrise_ms && sys.sunset_ms)
+    ? nowMs >= sys.sunrise_ms-marginMs && nowMs <= sys.sunset_ms+marginMs
+    : (new Date().getHours() >= 7 && new Date().getHours() < 18);
+  const fmtClock = (ms) => ms ? new Date(ms).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}) : '—';
+  const collOff  = sys.invs.some(i=>i.collector && i.collector !== 'online');
+  const badStatus = sys.invs.find(i=>i.status && !['generating','online'].includes(String(i.status).toLowerCase()));
+  let status;
+  if (!daytime)          status = '<span style="color:#888">🌙 noite (dormindo)</span>';
+  else if (collOff)      status = '<span style="color:#e74c3c">coletor offline</span>';
+  else if (badStatus)    status = `<span style="color:#e74c3c">ALARME (${badStatus.status})</span>`;
+  else if ((sys.ac_power_w||0) > 500) status = '<span style="color:#7bc47f">gerando</span>';
+  else                   status = '<span style="color:#888">sem geração</span>';
+  set(prefix+'-status', status);
+  const kw = (sys.ac_power_w||0) / 1000;
+  const exp = sys.expected;
+  const kwTxt = `${kw.toFixed(2)} kW · ${sys.ac_power_w||0} W`;
+  set(prefix+'-power', kw > 0
+    ? wrapColor(kwTxt, sys.ac_power_w, exp?.median_power) + expectedTip(sys.ac_power_w, exp?.median_power, 'W')
+    : '<span style="color:#888">0 W</span>');
+  set(prefix+'-today', sys.gen_today_kwh != null
+    ? wrapColor(`${sys.gen_today_kwh.toFixed(2)} kWh`, sys.gen_today_kwh, exp?.median_gen) + expectedTip(sys.gen_today_kwh, exp?.median_gen, 'kWh')
+    : '—');
+  set(prefix+'-month', sys.gen_month_kwh != null ? `${sys.gen_month_kwh.toFixed(1)} kWh` : '—');
+  set(prefix+'-total', sys.gen_total_kwh != null ? `${(sys.gen_total_kwh/1000).toFixed(2)} MWh` : '—');
+  set(prefix+'-sun', (sys.sunrise_ms && sys.sunset_ms)
+    ? `🌅 ${fmtClock(sys.sunrise_ms)} · 🌇 ${fmtClock(sys.sunset_ms)}`
+    : '<span style="color:#888">janela fixa 7-18h</span>');
+  sys.invs.forEach((inv, idx) => {
+    const tC = inv.temperature_c ?? 0;
+    const tCol = tC > 80 ? '#e74c3c' : (tC > 70 ? '#e6b800' : '#7bc47f');
+    const collCol = inv.collector === 'online' ? '#7bc47f' : '#e74c3c';
+    const strP = inv.strings.map(s=>`S${s.n}:${s.w||0}W`).join(' · ');
+    const val = `${(inv.ac_power_w/1000).toFixed(2)}kW · ${inv.gen_today_kwh?.toFixed(1)||'?'}kWh · <span style="color:${tCol}">${tC.toFixed(1)}°C</span> · ${inv.grid_v?.toFixed(0)||'?'}V · <span style="color:${collCol};font-size:10px">${inv.collector||'?'}</span><br><span style="color:#888;font-size:10px">${strP}</span>`;
+    set(prefix+'-inv'+(idx+1), val);
+  });
+  // Header do card
+  if (!daytime)        set(headId, `<span style="color:#888">🌙 ${(sys.gen_today_kwh||0).toFixed(1)} kWh hoje</span>`);
+  else if (badStatus)  set(headId, '<span style="color:#e74c3c">⚠️ ALARME</span>');
+  else if (collOff)    set(headId, '<span style="color:#e74c3c">coletor offline</span>');
+  else if (kw > 0.5)   set(headId, headPowerAndGen(kw, sys.gen_today_kwh||0,
+                                                   sys.ac_power_w, exp?.median_power,
+                                                   sys.gen_today_kwh, exp?.median_gen));
+  else                 set(headId, `<span style="color:#888">${(sys.gen_today_kwh||0).toFixed(1)} kWh hoje</span>`);
+}
+async function updateIvonei() {
+  try {
+    const r = await fetch('/api/ivonei-status', { headers: { Authorization: 'Bearer ' + tk } });
+    if (!r.ok) { set('head-iv', 'indisponível'); return; }
+    _paintSolisSystem(await r.json(), 'iv', 'head-iv');
+  } catch (e) { set('head-iv', 'erro'); }
+}
+async function updatePalmeiras() {
+  try {
+    const r = await fetch('/api/palmeiras-status', { headers: { Authorization: 'Bearer ' + tk } });
+    if (!r.ok) { set('head-pm', 'indisponível'); return; }
+    _paintSolisSystem(await r.json(), 'pm', 'head-pm');
+  } catch (e) { set('head-pm', 'erro'); }
+}
+
+// Cor por razão atual/esperado (verde ≥85% · amarelo 60-85% · vermelho <60%).
+// null se sem histórico suficiente — devolve cinza neutro pra não colorir errado.
+function ratioColor(cur, expected) {
+  if (expected == null || expected <= 0 || cur == null) return null;
+  const r = cur / expected;
+  if (r >= 0.85) return '#7bc47f';
+  if (r >= 0.60) return '#e6b800';
+  return '#e74c3c';
+}
+function wrapColor(txt, cur, expected) {
+  const c = ratioColor(cur, expected);
+  return c ? `<span style="color:${c}">${txt}</span>` : txt;
+}
+// Header "X kW · Y kWh hoje" com cada métrica na cor do PRÓPRIO ratio: a
+// potência contra a mediana de potência, o kWh contra a mediana de geração.
+// Antes um único wrapColor envolvia a linha toda usando só o ratio de potência,
+// então uma nuvem passando na frente pintava de vermelho também o kWh do dia,
+// que podia estar perfeitamente em linha com o histórico. O separador fica
+// neutro pra não sugerir que os dois estão no mesmo estado.
+function headPowerAndGen(kw, kwhToday, curPower, expPower, curGen, expGen) {
+  const pot = wrapColor(`${kw.toFixed(2)} kW`, curPower, expPower);
+  const gen = wrapColor(`${kwhToday.toFixed(1)} kWh hoje`, curGen, expGen);
+  return `${pot} <span style="color:#888">·</span> ${gen}`;
+}
+function expectedTip(cur, expected, unit) {
+  if (expected == null || expected <= 0) return '';
+  const pct = Math.round((cur / expected) * 100);
+  return ` <span style="color:#888;font-size:10px">(${pct}% da mediana ${expected.toFixed(unit==='kWh'?1:0)} ${unit})</span>`;
+}
+
+async function updateSolar() {
+  try {
+    const r = await fetch('/api/solar-status', { headers: { Authorization: 'Bearer ' + tk } });
+    if (!r.ok) { set('head-solar', 'indisponível'); return; }
+    const d = await r.json();
+    const p = d.plant;
+    const exp = d.expected;   // { median_power, median_gen, samples, hour }
+    const online = p.online !== false;
+    // Alarme só é REAL se algum inversor reporta alarm_count > 0. O campo
+    // status da planta SAJ vive cravado em "alarm" mesmo sem problema real.
+    const invAlarms = (d.invs||[]).reduce((a,i)=>a+(i.alarm_count||0), 0);
+    const alarm  = String(p.status||'').toLowerCase() === 'alarm' && invAlarms > 0;
+    const stale  = (d.stale_min ?? 0) > 20;
+    // Preferência: sunrise/sunset real vindo da API. Fallback fixo 7-18h se null.
+    const nowMs = Date.now();
+    const marginMs = 15 * 60_000;
+    let daytime;
+    if (d.sunrise_ms && d.sunset_ms) {
+      daytime = nowMs >= (d.sunrise_ms - marginMs) && nowMs <= (d.sunset_ms + marginMs);
+    } else {
+      const h = new Date().getHours(); daytime = h >= 7 && h < 18;
+    }
+    const fmtClock = (ms) => ms ? new Date(ms).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '—';
+    // Status semântico
+    let statusStr;
+    if (!daytime)        statusStr = '<span style="color:#888">🌙 noite (dormindo)</span>';
+    else if (!online)    statusStr = '<span style="color:#e74c3c">offline (sem cloud SAJ)</span>';
+    else if (alarm)      statusStr = `<span style="color:#e74c3c">ALARME no inversor (${invAlarms})</span>`;
+    else if (stale)      statusStr = '<span style="color:#e6b800">dados atrasados</span>';
+    else if ((p.pv_power||0) > 100) statusStr = '<span style="color:#7bc47f">gerando</span>';
+    else                 statusStr = '<span style="color:#888">sem geração</span>';
+    set('sol-status', statusStr);
+    // Números planta — colore potência atual e kWh hoje por comparação com mediana histórica
+    const kw = (p.pv_power||0) / 1000;
+    const kwTxt = `${kw.toFixed(2)} kW · ${p.pv_power||0} W`;
+    set('sol-pv-now', wrapColor(kwTxt, p.pv_power, exp?.median_power) + expectedTip(p.pv_power, exp?.median_power, 'W'));
+    const dir = p.pv_direction === 'exporting' ? '<span style="color:#7bc47f">exportando</span>'
+              : p.pv_direction === 'importing' ? '<span style="color:#e6b800">importando</span>'
+              : `<span style="color:#888">${p.pv_direction||'—'}</span>`;
+    set('sol-direction', dir);
+    set('sol-today',  p.energy_today != null
+      ? wrapColor(`${p.energy_today.toFixed(2)} kWh`, p.energy_today, exp?.median_gen) + expectedTip(p.energy_today, exp?.median_gen, 'kWh')
+      : '—');
+    set('sol-peak',   p.peak_power_today != null ? `${(p.peak_power_today/1000).toFixed(2)} kW` : '—');
+    set('sol-hours',  p.hours_equivalent != null ? `${p.hours_equivalent.toFixed(1)} h` : '—');
+    set('sol-month',  p.energy_month != null ? `${p.energy_month.toFixed(1)} kWh` : '—');
+    set('sol-total',  p.energy_total != null ? `${(p.energy_total/1000).toFixed(2)} MWh` : '—');
+    set('sol-co2',    p.co2_kg_today != null ? `${p.co2_kg_today.toFixed(1)} kg (${(p.trees_today||0).toFixed(2)} árv.)` : '—');
+    set('sol-stale',  d.stale_min != null ? (d.stale_min > 20 && daytime
+      ? `<span style="color:#e6b800">há ${d.stale_min} min</span>`
+      : `há ${d.stale_min} min`) : '—');
+    set('sol-sun', (d.sunrise_ms && d.sunset_ms)
+      ? `🌅 ${fmtClock(d.sunrise_ms)} · 🌇 ${fmtClock(d.sunset_ms)}`
+      : '<span style="color:#888">janela fixa 7-18h</span>');
+    // Inversores
+    const paintInv = (prefix, i) => {
+      if (!i) return;
+      const w = i.power||0;
+      set(prefix+'-power', w > 100
+        ? `<span style="color:#f6c343">${w} W</span>`
+        : (w > 0 ? `${w} W` : '<span style="color:#888">0 W</span>'));
+      set(prefix+'-today', i.energy_today != null ? `${i.energy_today.toFixed(2)} kWh` : '—');
+      const t = i.temperature||0;
+      const tColor = t > 65 ? '#e74c3c' : (t > 55 ? '#e6b800' : '#7bc47f');
+      set(prefix+'-temp',  `<span style="color:${tColor}">${t.toFixed(1)}°C</span>`);
+      set(prefix+'-grid',  `${i.grid_v!=null?i.grid_v.toFixed(0):'—'} V · ${i.grid_power||0} W`);
+      const s1 = i.strings?.[0], s2 = i.strings?.[1];
+      set(prefix+'-s1', s1 ? `${s1.watts||0} W @ ${s1.pv_v!=null?s1.pv_v.toFixed(0):'—'} V` : '—');
+      set(prefix+'-s2', s2 ? `${s2.watts||0} W @ ${s2.pv_v!=null?s2.pv_v.toFixed(0):'—'} V` : '—');
+      const alarms = i.alarm_count||0;
+      set(prefix+'-alarms', alarms > 0
+        ? `<span style="color:#e74c3c">${alarms}</span>`
+        : `<span style="color:#7bc47f">0</span>`);
+    };
+    paintInv('sol-a', d.invs?.[0]); paintInv('sol-b', d.invs?.[1]);
+    // Header: cor por ratio quando há histórico; padrão (sem span) quando não.
+    if (!daytime)                  set('head-solar', `<span style="color:#888">🌙 ${(p.energy_today||0).toFixed(1)} kWh hoje</span>`);
+    else if (alarm)                set('head-solar', '<span style="color:#e74c3c">⚠️ ALARME</span>');
+    else if (!online)              set('head-solar', '<span style="color:#e74c3c">offline</span>');
+    else if (stale)                set('head-solar', '<span style="color:#e6b800">dados atrasados</span>');
+    else if ((p.pv_power||0) > 100) set('head-solar', headPowerAndGen((p.pv_power||0)/1000, p.energy_today||0,
+                                                                     p.pv_power, exp?.median_power,
+                                                                     p.energy_today, exp?.median_gen));
+    else                           set('head-solar', `<span style="color:#888">${(p.energy_today||0).toFixed(1)} kWh hoje</span>`);
+  } catch (e) { set('head-solar', 'erro'); }
+}
+
+async function starlinkReset() {
+  if (!confirm('Zerar os contadores de queda/tempo fora do ar da Starlink?\n\nPassa a contar de AGORA em diante. O histórico do HA não é apagado (fica pra comparação) e a nossa série temporal é arquivada, não deletada.')) return;
+  const b = document.getElementById('sl-reset');
+  if (b) { b.disabled = true; b.textContent = 'zerando...'; }
+  try {
+    const r = await fetch('/api/starlink/reset-counters', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + tk, 'X-Admin-Session': sessionStorage.getItem('admin_session') || '' },
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) { alert('Falhou: ' + (j.error || r.status)); return; }
+    alert('Contadores zerados.' + (j.archived ? '\nHistórico anterior salvo em ' + j.archived : ''));
+    await updateStarlink();
+  } finally {
+    if (b) { b.disabled = false; b.textContent = 'Zerar contadores (mudança de local)'; }
+  }
+}
+
+async function updateStarlink() {
+  try {
+    const r = await fetch('/api/starlink-status', { headers: { Authorization: 'Bearer ' + tk } });
+    if (r.status === 503) { set('head-starlink', '<span style="color:#666">não configurado</span>'); return; }
+    if (!r.ok) { set('head-starlink', 'indisponível'); return; }
+    const s = await r.json();
+    const d = s.data;
+    const n = (v, dig = 0) => (v == null ? '—' : (+v).toFixed(dig));
+    // Sem dados: o caminho passa pela própria Starlink, então isto é a queda do
+    // link (ou do HA do sítio, ou do túnel).
+    if (!d || s.stale_s == null || s.stale_s > 300) {
+      set('head-starlink', '<span style="color:#e74c3c">sem dados</span>');
+      set('sl-conn', '<span style="color:#e74c3c">sem comunicação</span>');
+      set('sl-age', s.stale_s == null ? 'nunca' : Math.round(s.stale_s / 60) + 'min atrás');
+      set('sl-diag', s.error ? `<span style="color:#e74c3c">${s.error}</span>` : '—');
+      return;
+    }
+    set('sl-conn', d.stowed ? '<span style="color:#e74c3c">antena recolhida</span>'
+      : d.conn === true ? '<span style="color:#7bc47f">conectado</span>'
+      : d.integration_ok === false ? '<span style="color:#e74c3c">dish sem resposta</span>'
+      : '<span style="color:#e74c3c">offline</span>');
+    const pingCol = d.ping_ms > 150 ? '#e6b800' : '#ddd';
+    set('sl-ping', `<span style="color:${pingCol}">${n(d.ping_ms, 0)} ms</span>`);
+    set('sl-drop', (d.ping_drop > 5 ? '<span style="color:#e74c3c">' : '<span>') + n(d.ping_drop, 1) + '%</span>');
+    set('sl-thr', `${n(d.down_mbps, 2)} / ${n(d.up_mbps, 2)} Mbit/s`);
+    set('sl-traffic', `${n(d.dl_gb, 2)} / ${n(d.ul_gb, 2)} GB`);
+    set('sl-power', `${n(d.power_w, 0)} W · ${n(d.energy_kwh, 2)} kWh`);
+    const NAMES = { obstructed: 'obstruído', thermal: 'throttle térmico', mast: 'mastro torto', motors: 'motores presos', unexpected_loc: 'local inesperado', eth: 'ethernet lenta' };
+    const probs = (d.problems || []).map(p => NAMES[p] || p);
+    const extra = [];
+    if (d.roaming) extra.push('roaming');
+    if (d.sleeping) extra.push('sleep');
+    if (d.update) extra.push('update pendente');
+    set('sl-diag', probs.length ? `<span style="color:#e74c3c">${probs.join(', ')}</span>`
+      : `<span style="color:#7bc47f">OK</span>${extra.length ? ' <span style="color:#888">· ' + extra.join(', ') + '</span>' : ''}`);
+    set('sl-drops', d.drops_today == null ? '—' : String(d.drops_today));
+    set('sl-offline', d.offline_today == null ? '—' : (d.offline_today < 1 ? Math.round(d.offline_today * 60) + 'min' : n(d.offline_today, 1) + 'h'));
+    set('sl-uptime', d.uptime_h == null ? '—' : (d.uptime_h >= 24 ? (d.uptime_h / 24).toFixed(1) + 'd' : n(d.uptime_h, 1) + 'h'));
+    // Agregados de 7d/30d: vêm do recorder do HA (soma de incrementos dos sensores
+    // "hoje", que resetam à meia-noite). Atualizam a cada 6h, não a cada minuto.
+    const fmtH = (h) => h == null ? '—' : (h < 1 ? Math.round(h * 60) + 'min' : (h >= 24 ? (h / 24).toFixed(1) + 'd' : h.toFixed(1) + 'h'));
+    const o = s.outages;
+    if (o) {
+      set('sl-drops7',  o.d7?.drops == null ? '—' : String(o.d7.drops));
+      set('sl-off7',    fmtH(o.d7?.offline_h));
+      // Se o recorder cobre menos que a janela, o número mente — então diz quanto cobre.
+      // Duas razões diferentes pro 30d não cobrir 30 dias: marco de corte (você
+      // clicou em zerar) ou retenção curta do recorder. O rótulo diz qual é.
+      const epochD = o.epoch ? new Date(o.epoch) : null;
+      const short = o.covered_days != null && o.covered_days < 29;
+      const nota = epochD ? ` <span style="color:#888">(desde ${epochD.toLocaleDateString('pt-BR')})</span>`
+        : short ? ` <span style="color:#e6b800">(recorder cobre ${o.covered_days}d)</span>` : '';
+      set('sl-epoch', epochD
+        ? `${epochD.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })} · ${o.covered_days}d`
+        : '<span style="color:#888">sem corte (recorder inteiro)</span>');
+      set('sl-drops30', (o.d30?.drops == null ? '—' : String(o.d30.drops)) + nota);
+      set('sl-off30',   fmtH(o.d30?.offline_h) + nota);
+    } else {
+      // Sem agregado (1º boot ou consulta falhou): limpa em vez de deixar o valor
+      // anterior na tela — número velho com rótulo novo é pior que travessão.
+      ['sl-drops7', 'sl-off7', 'sl-drops30', 'sl-off30'].forEach(i => set(i, '—'));
+    }
+    set('sl-age', s.stale_s < 90 ? 'agora' : Math.round(s.stale_s / 60) + 'min atrás');
+    // Header: pior notícia primeiro.
+    if (d.stowed)                 set('head-starlink', '<span style="color:#e74c3c">recolhida</span>');
+    else if (d.conn === false)    set('head-starlink', '<span style="color:#e74c3c">⚠️ offline</span>');
+    else if (probs.length)        set('head-starlink', `<span style="color:#e6b800">${probs[0]}</span>`);
+    else if (d.ping_drop > 5)     set('head-starlink', '<span style="color:#e6b800">perdendo pacote</span>');
+    else set('head-starlink', `<span style="color:#7bc47f">${n(d.ping_ms, 0)}ms · ${d.drops_today ?? '?'} queda(s) hoje</span>`);
+  } catch (e) { set('head-starlink', 'erro'); }
+}
+
+async function updateBluetti() {
+  try {
+    const r = await fetch('/api/bluetti-status', { headers: { Authorization: 'Bearer ' + tk } });
+    if (!r.ok) { set('head-bluetti', 'indisponível'); return; }
+    const d = await r.json();
+    const fmtMin = (m) => {
+      if (m == null) return '—';
+      const h = Math.floor(m/60), r = m % 60;
+      return h > 0 ? `${h}h${String(r).padStart(2,'0')}min` : `${m}min`;
+    };
+    const paint = (prefix, s) => {
+      if (!s || !s.reachable) {
+        set(prefix+'-status', '<span style="color:#e74c3c">sem comunicação</span>');
+        ['battery','eta','mode','grid','pv','ac','dc'].forEach(k => set(prefix+'-'+k, '—'));
+        return;
+      }
+      // Status resumo (semântico)
+      const grid = s.grid_in_w ?? 0;
+      const batt = s.battery_pct ?? 0;
+      let status;
+      if (s.ac_on === false && s.dc_on === false) status = '<span style="color:#e74c3c">saídas desligadas</span>';
+      else if (grid > 0)                          status = '<span style="color:#7bc47f">recebendo rede</span>';
+      else if (batt <= 10)                        status = '<span style="color:#e74c3c">bateria CRÍTICA</span>';
+      else if (batt <= 30)                        status = '<span style="color:#e6b800">na bateria (baixa)</span>';
+      else                                        status = '<span style="color:#e6b800">na bateria</span>';
+      set(prefix+'-status', status);
+      // Bateria colorida
+      const battColor = batt <= 20 ? '#e74c3c' : (batt <= 40 ? '#e6b800' : '#7bc47f');
+      set(prefix+'-battery', `<span style="color:${battColor}">${batt}%</span>`);
+      // Autonomia / tempo pra cheia
+      if (grid > 0) {
+        if (batt >= 100) set(prefix+'-eta', '<span style="color:#7bc47f">cheia</span>');
+        else set(prefix+'-eta', s.full_charge_min > 0 ? `${fmtMin(s.full_charge_min)} p/ cheia` : 'carregando…');
+      } else {
+        set(prefix+'-eta', fmtMin(s.battery_time_min));
+      }
+      // Modo (Standard UPS / PV Priority / Custom UPS…)
+      set(prefix+'-mode', s.working_mode || '—');
+      // Entrada rede (grid input)
+      set(prefix+'-grid', grid > 0
+        ? `<span style="color:#7bc47f">${grid} W</span>`
+        : `<span style="color:#e6b800">0 W</span>`);
+      // Entrada solar
+      set(prefix+'-pv', (s.pv_in_w||0) > 0 ? `<span style="color:#f6c343">${s.pv_in_w} W</span>` : '0 W');
+      // Saída AC (com ECO)
+      const acOn  = s.ac_on === true;
+      const acEco = s.ac_eco_on === true;
+      set(prefix+'-ac', acOn
+        ? `${s.ac_out_w||0} W${acEco?' <span style="color:#7bc47f;font-size:10px">ECO</span>':''}`
+        : `<span style="color:#e74c3c">desligada</span>`);
+      // Saída DC
+      const dcOn  = s.dc_on === true;
+      const dcEco = s.dc_eco_on === true;
+      set(prefix+'-dc', dcOn
+        ? `${s.dc_out_w||0} W${dcEco?' <span style="color:#7bc47f;font-size:10px">ECO</span>':''}`
+        : `<span style="color:#666">desligada</span>`);
+    };
+    paint('bl-casa', d.casa); paint('bl-sitio', d.sitio);
+    // Faixa de reauth: o link vem no payload só pra quem manda o token do bridge.
+    const a = d.auth || {};
+    const band = document.getElementById('bl-reauth');
+    if (band) {
+      if (a.needs_login && a.reauth_url) {
+        band.href = a.reauth_url;
+        set('bl-reauth-txt', !a.has_token ? 'Bluetti sem login'
+          : a.needs_reauth ? `login vence em ${a.expires_in_days} dia(s) e o refresh está falhando`
+          : `login da Bluetti vence em ${a.expires_in_days} dia(s)`);
+        band.style.display = 'block';
+      } else band.style.display = 'none';
+    }
+    // Header resumo
+    const critical  = (s) => s && s.reachable && (s.ac_on === false || (s.grid_in_w === 0 && (s.battery_pct||0) <= 10));
+    const attention = (s) => s && s.reachable && s.grid_in_w === 0;
+    const gone      = (s) => s && !s.reachable;
+    if (d.auth && d.auth.needs_login)                 set('head-bluetti', '<span style="color:#e6b800">🔑 refazer login</span>');
+    else if (gone(d.casa) || gone(d.sitio))           set('head-bluetti', '<span style="color:#e74c3c">sem comunicação</span>');
+    else if (critical(d.casa) || critical(d.sitio))    set('head-bluetti', '<span style="color:#e74c3c">⚠️ CRÍTICO</span>');
+    else if (attention(d.casa) || attention(d.sitio))  set('head-bluetti', '<span style="color:#e6b800">na bateria</span>');
+    else set('head-bluetti', `<span style="color:#7bc47f">Casa ${d.casa.battery_pct||'?'}% · Sítio ${d.sitio.battery_pct||'?'}%</span>`);
+  } catch (e) { set('head-bluetti', 'erro'); }
+}
+
+async function updateFamily() {
+  try {
+    const r = await fetch('/api/family-locations', { headers: { Authorization: 'Bearer ' + tk } });
+    if (!r.ok) { set('head-family', 'indisponível'); return; }
+    const d = await r.json();
+    const el = document.getElementById('family-list');
+    if (!d.members || !d.members.length) { el.innerHTML = '<div class="empty">—</div>'; set('head-family','—'); return; }
+    const fmtAge = (ms) => {
+      if (ms == null) return '—';
+      const s = Math.max(0, ms/1000);
+      if (s < 90) return 'agora';
+      const m = Math.round(s/60);
+      if (m < 60) return `há ${m}min`;
+      const h = Math.floor(m/60); const rm = m % 60;
+      if (h < 24) return rm ? `há ${h}h${rm}min` : `há ${h}h`;
+      return `há ${Math.floor(h/24)}d`;
+    };
+    const accColor = (acc) => acc == null ? '#888' : (acc <= 50 ? '#7bc47f' : (acc <= 200 ? '#e6b800' : '#e74c3c'));
+    const battColor = (b) => b == null ? '#888' : (b <= 20 ? '#e74c3c' : (b <= 40 ? '#e6b800' : '#7bc47f'));
+    // Lag do HA (icloud3 rate-limita quando iPhone em low-power). Escala 3 níveis:
+    //  <=10min = fresh (cinza padrão)
+    //  10-30min = lag suave (amarelo)
+    //  >30min = HA travado (vermelho + aviso explícito)
+    const ageInfo = (ms) => {
+      if (ms == null) return { color: '#888', warn: '' };
+      const min = ms / 60000;
+      if (min <= 10) return { color: '#888', warn: '' };
+      if (min <= 30) return { color: '#e6b800', warn: '' };
+      return { color: '#e74c3c', warn: ' <span title="icloud3 do HA não atualizou. iPhone em low-power e/ou HA VM lag.">⚠ HA lag</span>' };
+    };
+    let stale = 0;
+    const rows = d.members.map(m => {
+      const ai = ageInfo(m.age_ms);
+      const isStale = m.age_ms == null || m.age_ms > 30*60*1000;
+      if (isStale) stale++;
+      const age = fmtAge(m.age_ms);
+      const zonePart = m.zone ? `<span style="color:#888"> · ${m.zone}</span>` : '';
+      const addr = m.address
+        ? `${m.address}${zonePart}`
+        : (m.zone || '<span style="color:#888">sem localização</span>');
+      const batt = m.battery_pct != null
+        ? `<span style="color:${battColor(m.battery_pct)}">${m.battery_pct}%</span>` : '—';
+      const accTxt = m.accuracy_m != null
+        ? `<span style="color:${accColor(m.accuracy_m)}">±${Math.round(m.accuracy_m)}m</span>` : '';
+      return `
+        <div class="row" style="border-bottom:1px solid #333;padding:6px 0;flex-wrap:wrap">
+          <span style="width:100%;font-weight:600">${m.name} <span style="font-weight:400;color:#888;font-size:11px">· ${m.device}</span></span>
+          <span style="width:100%;color:#ddd;font-size:13px;padding-top:2px">${addr} ${accTxt}</span>
+          <span style="width:100%;color:${ai.color};font-size:11px;padding-top:2px">${age}${ai.warn} · bateria ${batt}</span>
+        </div>`;
+    });
+    el.innerHTML = rows.join('');
+    const total = d.members.length;
+    if (stale === total) set('head-family', '<span style="color:#e6b800">sem dados recentes</span>');
+    else if (stale)      set('head-family', `<span style="color:#7bc47f">${total} pessoas</span> <span style="color:#e6b800">· ${stale} stale</span>`);
+    else                 set('head-family', `<span style="color:#7bc47f">${total} pessoas</span>`);
+  } catch (e) { set('head-family', 'erro'); }
+}
+
+// ── Tokens do bridge ────────────────────────────────────────────────────────
+// Sessão admin fica em sessionStorage (não localStorage): morre ao fechar a aba,
+// e é curta no servidor. É a porta de emissão de credencial — não deve persistir
+// como o token do monitor persiste.
+const AKEY = 'admin_session';
+const aSid = () => sessionStorage.getItem(AKEY) || '';
+const aHdr = (extra = {}) => ({ 'Content-Type': 'application/json', 'X-Admin-Session': aSid(), ...extra });
+const aPost = (p, body) => fetch('/api/admin' + p, { method: 'POST', headers: aHdr(), body: JSON.stringify(body || {}) })
+  .then(async r => ({ status: r.status, body: await r.json().catch(() => ({})) }));
+
+function tokShow(which) {
+  for (const id of ['tok-setup', 'tok-totp', 'tok-login', 'tok-area']) {
+    const el = document.getElementById(id);
+    if (el) el.style.display = (id === which) ? 'block' : 'none';
+  }
+}
+
+async function updateTokens() {
+  try {
+    const r = await fetch('/api/admin/state', { headers: { 'X-Admin-Session': aSid() } });
+    if (!r.ok) { set('head-tok', 'indisponível'); return; }
+    const d = await r.json();
+    if (d.session)          { set('head-tok', '<span style="color:#7bc47f">autenticado</span>'); tokShow('tok-area'); await tokList(); }
+    else if (!d.configured) {
+      // Sem senha ainda → setup. Com senha mas sem 2FA → só falta o TOTP.
+      const semSenha = !d.totpPending && !d.configured;
+      set('head-tok', '<span style="color:#e6b800">configurar</span>');
+      tokShow(semSenha ? 'tok-setup' : 'tok-totp');
+    }
+    else                    { set('head-tok', '<span style="color:#888">bloqueado</span>'); tokShow('tok-login'); }
+  } catch (e) { set('head-tok', 'erro'); }
+}
+
+async function tokList() {
+  const box = document.getElementById('tok-list');
+  if (!box) return;
+  const r = await fetch('/api/admin/tokens', { headers: { 'X-Admin-Session': aSid() } });
+  if (!r.ok) { box.innerHTML = ''; return; }
+  const { tokens } = await r.json();
+  if (!tokens.length) { box.innerHTML = '<div class="row"><span class="label">nenhum token emitido</span></div>'; return; }
+  const fmt = ms => ms ? new Date(ms).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : 'nunca';
+  const cor = { read: '#7bc47f', write: '#e6b800', admin: '#e74c3c' };
+  box.innerHTML = tokens.map(t => `
+    <div class="row" style="align-items:flex-start">
+      <span class="label" style="flex:1">
+        ${t.revokedMs ? '<s style="color:#666">' : ''}${t.name}${t.revokedMs ? '</s>' : ''}
+        <span style="color:${cor[t.scope]||'#888'};font-size:10px"> ${t.scope}</span><br>
+        <span style="color:#888;font-size:10px">criado ${fmt(t.createdMs)} · usado ${fmt(t.lastUsedMs)}</span>
+      </span>
+      <span class="val">${t.revokedMs
+        ? `<button class="btn" data-del="${t.id}" style="color:#666">apagar</button>`
+        : `<button class="btn" data-rev="${t.id}" style="color:#e74c3c">revogar</button>`}</span>
+    </div>`).join('');
+  box.querySelectorAll('[data-rev]').forEach(b => b.onclick = async () => {
+    if (!confirm('Revogar este token? Quem usa ele perde acesso na hora.')) return;
+    await aPost(`/tokens/${b.dataset.rev}/revoke`); tokList();
+  });
+  box.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => {
+    await fetch(`/api/admin/tokens/${b.dataset.del}`, { method: 'DELETE', headers: aHdr() }); tokList();
+  });
+}
+
+// Zerar a contagem depois de corrigir um retardatário: sem isso os acessos de
+// antes da correção mascaram os novos e não dá pra saber se resolveu.
+function wireHostReset() {
+  const b = document.getElementById('cf-reset');
+  if (!b) return;
+  b.onclick = async () => {
+    const r = await fetch('/api/host-hits/reset', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + tk, 'X-Admin-Session': sessionStorage.getItem('admin_session') || '' },
+    });
+    if (r.status === 403 || r.status === 401) {
+      alert('Sem permissão: o token do monitor é só-leitura.\n\nEntre no card "Tokens" com senha + 2FA.');
+      return;
+    }
+    const j = await r.json().catch(() => ({}));
+    b.textContent = 'zerado'; setTimeout(() => b.textContent = 'zerar', 1500);
+    console.log('[host-hits] zerado, havia', j.cleared_legacy, 'acessos no Funnel');
+    updateCloudflare();
+  };
+}
+
+function wireTokens() {
+  const $ = id => document.getElementById(id);
+  $('tok-setpw').onclick = async () => {
+    const r = await aPost('/setup-password', { password: $('tok-newpw').value });
+    if (r.status !== 200) return alert(r.body.error === 'senha_curta' ? 'Senha muito curta (mín. 10)' : ('Erro: ' + r.body.error));
+    $('tok-newpw').value = ''; tokShow('tok-totp');
+  };
+  $('tok-totpbegin').onclick = async () => {
+    const r = await aPost('/totp/begin', { password: $('tok-totppw').value });
+    if (r.status !== 200) return alert('Erro: ' + (r.body.error || r.status));
+    $('tok-qrbox').style.display = 'flex';
+    $('tok-secret').textContent = 'segredo: ' + r.body.secret;
+    // O QR vem do bridge, que monta a partir do segredo pendente guardado no
+    // servidor. Não mando o URI na query de propósito: ele contém o segredo e
+    // acabaria em log de acesso/proxy.
+    $('tok-qr').src = '/api/admin/totp/qr?t=' + Date.now();
+  };
+  $('tok-totpconfirm').onclick = async () => {
+    const r = await aPost('/totp/confirm', { code: $('tok-totpcode').value });
+    if (r.status !== 200) return alert('Código inválido');
+    alert('2FA ativado. Agora entre com senha + código.');
+    tokShow('tok-login'); updateTokens();
+  };
+  $('tok-dologin').onclick = async () => {
+    $('tok-loginmsg').textContent = '';
+    const r = await aPost('/login', { password: $('tok-pw').value, code: $('tok-code').value });
+    if (r.status !== 200) {
+      $('tok-loginmsg').textContent = r.body.error === 'muitas_tentativas'
+        ? 'Muitas tentativas — espere alguns minutos.' : 'Senha ou código inválido.';
+      return;
+    }
+    sessionStorage.setItem(AKEY, r.body.session);
+    $('tok-pw').value = ''; $('tok-code').value = '';
+    set('tok-sess', 'expira ' + new Date(r.body.expiresMs).toLocaleTimeString('pt-BR'));
+    tokShow('tok-area'); updateTokens();
+  };
+  $('tok-gen').onclick = async () => {
+    const name = $('tok-name').value.trim();
+    if (!name) return alert('Dê um nome ao token (pra saber o que revogar depois).');
+    const r = await aPost('/tokens', { name, scope: $('tok-scope').value });
+    if (r.status !== 200) return alert('Erro: ' + (r.body.error || r.status));
+    $('tok-new').style.display = 'block';
+    $('tok-newval').textContent = r.body.token;
+    $('tok-name').value = '';
+    tokList();
+  };
+  $('tok-copy').onclick = () => {
+    navigator.clipboard?.writeText($('tok-newval').textContent)
+      .then(() => { $('tok-copy').textContent = 'copiado'; setTimeout(() => $('tok-copy').textContent = 'Copiar', 1500); });
+  };
+  $('tok-logout').onclick = async () => {
+    await aPost('/logout'); sessionStorage.removeItem(AKEY); updateTokens();
+  };
+}
+
+// Cloudflare: processo local + status oficial da API. As duas fontes porque o
+// cloudflared pode estar vivo e desconectado — aí o processo diz "ok" e só a
+// API revela que não há conexão de edge nenhuma.
+async function updateCloudflare() {
+  try {
+    const r = await fetch('/api/cloudflare-status', { headers: { Authorization: 'Bearer ' + tk } });
+    if (!r.ok) { set('head-cf', 'indisponível'); return; }
+    const d = await r.json();
+    const api = d.api || {};
+    const proc = d.process || {};
+    const conns = api.connections || 0;
+
+    // Verde exige as duas pontas de acordo: túnel healthy E processo vivo.
+    const okApi  = api.status === 'healthy' && conns > 0;
+    const degrad = api.status === 'degraded' || (conns > 0 && conns < 4);
+    let head;
+    if (api.error)        head = `<span style="color:#e6b800">API: ${api.error}</span>`;
+    else if (!proc.running) head = '<span style="color:#e74c3c">cloudflared parado</span>';
+    else if (okApi && !degrad) head = `<span style="color:#7bc47f">healthy · ${conns} conn</span>`;
+    else if (degrad)      head = `<span style="color:#e6b800">${api.status||'degradado'} · ${conns} conn</span>`;
+    else                  head = `<span style="color:#e74c3c">${api.status || 'sem conexão'}</span>`;
+    set('head-cf', head);
+
+    const stCol = api.status === 'healthy' ? '#7bc47f'
+                : api.status === 'degraded' ? '#e6b800' : '#e74c3c';
+    set('cf-status', api.status
+      ? `<span style="color:${stCol}">${api.status}</span>${api.name ? ` <span style="color:#888">(${api.name})</span>` : ''}`
+      : (api.error ? `<span style="color:#e6b800">${api.error}</span>` : '—'));
+    set('cf-conns', conns
+      ? `<span style="color:${conns >= 4 ? '#7bc47f' : '#e6b800'}">${conns}</span>` +
+        (api.colos?.length ? ` <span style="color:#888">${api.colos.join(' · ')}</span>` : '')
+      : '<span style="color:#e74c3c">0</span>');
+    set('cf-proc', proc.running
+      ? `<span style="color:#7bc47f">pid ${proc.pid}</span>${proc.uptime ? ` <span style="color:#888">· ${proc.uptime}</span>` : ''}`
+      : '<span style="color:#e74c3c">parado</span>');
+    set('cf-hosts', (d.hostnames||[]).length
+      ? `<span style="color:#888">${d.hostnames.join('<br>')}</span>`
+      : '—');
+    set('cf-url', d.public_url ? `<span style="color:#888">${d.public_url}</span>` : '—');
+    set('cf-carurl', d.car_url ? `<span style="color:#888">${d.car_url}</span>` : '—');
+
+    // Retardatários no hostname antigo. Verde = ninguém mais usa, pode desligar
+    // o Funnel; amarelo = ainda tem cliente batendo lá.
+    try {
+      const hr = await fetch('/api/host-hits', { headers: { Authorization: 'Bearer ' + tk } });
+      if (hr.ok) {
+        const hj = await hr.json();
+        const leg = hj.legacy_hits || 0;
+        const cli = hj.clientes_no_funnel || [];
+        const desde = hj.reset_ms
+          ? ' <span style="color:#666;font-size:10px">(desde ' + new Date(hj.reset_ms).toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'}) + ')</span>'
+          : '';
+        // Quem decide o desligamento é a LISTA de clientes conhecidos, não a
+        // contagem: agents/paths são conjuntos por host, então um cliente real
+        // fazia o host inteiro (bots incluídos) contar como "seu" — 38 hits
+        // quando só o app do sogro importava.
+        set('cf-legacy', cli.length === 0
+          ? '<span style="color:#7bc47f">nenhum cliente</span>' + desde
+          : `<span style="color:#e6b800">${cli.length} cliente(s)</span><br>`
+            + `<span style="color:#888;font-size:10px">${cli.join('<br>')}</span>`);
+        const fmtH = ms => new Date(ms).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+        // Mostra os endpoints só do host do Funnel: é o que diz ONDE reconfigurar
+        // quem ainda bate lá. duckdns aparece como fallback esperado, sem alarme.
+        document.getElementById('cf-hosts-list').innerHTML = (hj.hosts || [])
+          .map(h => {
+            const tag = h.legacy ? '<span style="color:#e6b800">⚠ </span>'
+                      : h.fallback ? '<span style="color:#888">↩ </span>' : '';
+            let l = `${tag}${h.host} — ${h.hits} (últ. ${fmtH(h.lastMs)})`;
+            if (h.agents.length) l += `<br><span style="color:#666;padding-left:12px">${h.agents.join(' · ')}</span>`;
+            if (h.legacy && h.paths?.length)
+              l += `<br><span style="color:#666;padding-left:12px">${h.paths.map(p => p.n + 'x ' + p.path).join('<br>' + ' '.repeat(0) + '<span style="padding-left:12px"></span>')}</span>`;
+            return l;
+          })
+          .join('<br>') || '—';
+      }
+    } catch (_) { /* contador é acessório: não derruba o card */ }
+  } catch (e) { set('head-cf', 'erro'); }
+}
+
+loadOpenState();
+load();
+loadSysProc();
+wireTokens();
+wireHostReset();
+updateTokens();
+updateCloudflare();
+updateBluetti();
+updateStarlink();
+updateSolar();
+updateIvonei();
+updatePalmeiras();
+updateFamily();
+setInterval(load, 5_000);
+setInterval(loadSysProc, 5_000);
+setInterval(updateCloudflare, 45_000);   // casa com o cache do endpoint
+setInterval(updateBluetti, 30_000);
+setInterval(updateStarlink, 60_000);
+setInterval(updateSolar, 60_000);
+setInterval(updateIvonei, 60_000);
+setInterval(updatePalmeiras, 60_000);
+setInterval(updateFamily, 60_000);
+window.addEventListener('resize', drawChart);
+</script>
+</body>
+</html>

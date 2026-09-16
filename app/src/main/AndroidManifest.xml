@@ -68,6 +68,12 @@
             android:name=".services.DestinoOverlayService"
             android:exported="false" />
 
+        <!-- Popup de sugestão de destino. Serviço PRÓPRIO, separado do botão flutuante:
+             ligar um nunca liga o outro. -->
+        <service
+            android:name=".services.SugestaoOverlayService"
+            android:exported="false" />
+
         <service
             android:name=".services.CarTelemetryService"
             android:exported="false"
@@ -93,6 +99,10 @@
                 <action android:name="android.intent.action.QUICKBOOT_POWERON" />
                 <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <!-- Ligar o carro nem sempre é boot (sleep→wake não dispara
+                     BOOT_COMPLETED). Sem este, o app morto continuava morto. -->
+                <action android:name="android.intent.action.ACTION_POWER_CONNECTED" />
+                <action android:name="br.com.redesurftank.ecotrip.VIGIA" />
             </intent-filter>
         </receiver>
 

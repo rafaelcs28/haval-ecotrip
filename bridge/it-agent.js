@@ -228,6 +228,11 @@ async function collectContext(id) {
       const which = /casa/.test(id) ? 'casa' : /sitio/.test(id) ? 'sitio' : null;
       out.bluetti = which ? d[which] : d;
     }
+  } else if (/^starlink_/.test(id)) {
+    // Contexto pro agente decidir se é o dish, o HA do sítio ou o túnel: o dado
+    // vem pelo próprio link, então "sem dados" é ambíguo por natureza.
+    const d = await get('/api/starlink-status');
+    if (d) out.starlink = { ok: d.ok, stale_s: d.stale_s, fail_streak: d.fail_streak, error: d.error, mode: d.mode, data: d.data };
   } else if (/^solar_/.test(id)) {
     const d = await get('/api/solar-status');
     if (d) out.solar = { plant: d.plant, invs: d.invs?.map(i => ({ label: i.label, power: i.power, temperature: i.temperature, alarm_count: i.alarm_count, energy_today: i.energy_today })), stale_min: d.stale_min, sunset_ms: d.sunset_ms };

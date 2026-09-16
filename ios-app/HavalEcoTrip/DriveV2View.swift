@@ -59,6 +59,7 @@ struct DriveV2View: View {
                 topRow
                 if let m = route.maneuver { maneuverBanner(m) }
                 Spacer(minLength: 0)
+                if store.hasMedia { nowPlayingPill }
                 overlayCard
             }
             .padding(.horizontal, 12)
@@ -127,10 +128,13 @@ struct DriveV2View: View {
     }
 
     private var destination: (name: String, eta: Int, dist: Double)? {
-        if let a = store.arrivalRaw, let name = a["name"] as? String, !name.isEmpty {
+        if let a = store.arrivalRaw {
+            let name = (a["name"] as? String) ?? ""
             let eta = (a["etaMin"] as? Int) ?? Int((a["etaMin"] as? Double) ?? 0)
             let dist = (a["distKm"] as? Double) ?? Double((a["distKm"] as? Int) ?? 0)
-            return (name, eta, dist)
+            // Nome vazio é caso legítimo: navegação do AA dá tempo e distância, não o
+            // destino. Antes o `!name.isEmpty` descartava a chegada inteira por isso.
+            if !name.isEmpty || eta > 0 || dist > 0 { return (name, eta, dist) }
         }
         if mock { return ("Escritório", 8, 8.2) }
         return nil
@@ -201,7 +205,10 @@ struct DriveV2View: View {
     private var etaInfo: (clock: String, min: Int, km: Double)? {
         if mock { return (clockString(Date().addingTimeInterval(8 * 60)), 8, 3.9) }
         guard let d = destination else { return nil }
+        // `etaClock` do arrival vem primeiro: na navegação do AA é o relógio do próprio
+        // Waze. Sem ele, legs (rota nossa) e, por último, recalcula pelos minutos.
         let clock = (store.arrivalRaw?["legs"] as? [[String: Any]])?.last?["etaClock"] as? String
+            ?? (store.arrivalRaw?["etaClock"] as? String)
             ?? clockString(Date().addingTimeInterval(Double(d.eta) * 60))
         return (clock, d.eta, d.dist)
     }
@@ -276,7 +283,12 @@ struct DriveV2View: View {
                     .overlay(Capsule().stroke(DS.teal.opacity(0.35), lineWidth: 1))
                 }
             } else {
-                Text("→ \(d.name)")
+                // Sem coordenada E sem nome: é a navegação do Android Auto, que dá tempo
+                // e distância mas não o destino. Mostra a chegada em vez de uma seta
+                // apontando pra lugar nenhum.
+                Text(d.name.isEmpty
+                     ? "chegada em \(d.eta) min · faltam \(Fmt.dec1(d.dist)) km"
+                     : "→ \(d.name)")
                     .font(.system(size: 12, weight: .bold)).foregroundStyle(DS.text)
                     .lineLimit(1).minimumScaleFactor(0.8)
                     .padding(.horizontal, 12).padding(.vertical, 7)
@@ -284,6 +296,28 @@ struct DriveV2View: View {
                     .overlay(Capsule().stroke(DS.border, lineWidth: 1))
             }
         }
+    }
+
+    /// Faixa tocando, flutuando sobre o mapa logo acima do card — igual à página
+    /// compartilhada. Some quando não há faixa, em vez de deixar a anterior congelada.
+    private var nowPlayingPill: some View {
+        HStack(spacing: 7) {
+            Image(systemName: store.mediaSF)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(store.mediaMuted ? DS.muted : DS.teal)
+            Text(store.mediaTitle)
+                .font(.system(size: 12.5, weight: .bold)).foregroundStyle(DS.text)
+                .lineLimit(1)
+            if !store.mediaArtist.isEmpty {
+                Text("— " + store.mediaArtist)
+                    .font(.system(size: 12.5)).foregroundStyle(DS.text2)
+                    .lineLimit(1).layoutPriority(-1)   // o artista cede espaço antes do título
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12).padding(.vertical, 9)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(DS.border, lineWidth: 1))
     }
 
     // MARK: coluna flutuante (injetada no FollowMap sob o follow)

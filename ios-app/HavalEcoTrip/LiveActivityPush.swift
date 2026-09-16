@@ -20,6 +20,41 @@ final class LiveActivityPush {
     // (às vezes ANTES do login); guardamos e re-registramos quando logar/abrir.
     private var ptsCache: [String: String] = [:]
 
+    /// Encerra localmente uma LA de viagem que ficou órfã. Chamar a cada vez que o
+    /// app volta pro primeiro plano.
+    ///
+    /// O `track()` do observe() só roda uma vez por atividade, então uma LA presa em
+    /// "viagem em curso" não ganhava segunda chance: o dono tinha que MATAR o app e
+    /// abrir de novo pra ela sumir (foi o que aconteceu em 01/08). E o bridge não
+    /// resolve sozinho — sem update token vivo, o `isFinal` que ele manda não tem
+    /// destinatário; o token só nasce quando o app roda.
+    func sanearViagemOrfa() {
+        for a in Activity<TripActivityAttributes>.activities where a.activityState == .active {
+            Task { await endTripIfInactive(a) }
+        }
+        for a in Activity<MotorActivityAttributes>.activities where a.activityState == .active {
+            Task { await endMotorIfOff(a) }
+        }
+    }
+
+    /// Encerra o lembrete de "motor ligado" quando o motor já está desligado.
+    /// Mesma razão do trajeto: sem update token o bridge não alcança a LA, e ela
+    /// fica contando sozinha (02/08: 26 min com o motor desligado havia tempo).
+    private func endMotorIfOff<T: ActivityAttributes>(_ activity: Activity<T>) async {
+        guard Settings.isConfigured, let url = URL(string: Settings.apiBase + "/api/state") else { return }
+        var req = URLRequest(url: url, timeoutInterval: 8)
+        req.addValue("Bearer " + Settings.bridgeToken, forHTTPHeaderField: "Authorization")
+        guard let (data, resp) = try? await URLSession.shared.data(for: req),
+              (resp as? HTTPURLResponse)?.statusCode == 200,
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+        let st = (obj["state"] as? [String: Any]) ?? obj
+        // Só encerra com prova de motor desligado. Ausência do campo não conta —
+        // seria o mesmo erro de tratar default como medição.
+        if let e = st["engine_state"], String(describing: e) == "0" {
+            await activity.end(nil, dismissalPolicy: .immediate)
+        }
+    }
+
     /// Reenvia os push-to-start tokens cacheados (chamar após login e ao abrir o app).
     func reregisterAll() {
         guard Settings.isConfigured, !ptsCache.isEmpty else { return }

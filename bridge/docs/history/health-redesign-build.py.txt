@@ -1,0 +1,539 @@
+#!/usr/bin/env python3
+# ─────────────────────────────────────────────────────────────────────────────
+# APOSENTADO — NÃO RODA MAIS. Mantido só como registro das decisões do
+# redesenho de 30/07/2026 (o agrupamento dos 21 cards em 6 seções, os 5 estados
+# de valor, a carência de 30min da geração, cada armadilha comentada).
+#
+# Por que aposentou: os insumos (`cards.json`, `old_script.js`, `statsgrid.html`,
+# `health-mock.html`) moravam no scratchpad daquela sessão, que é temporário e
+# foi limpo. Sem eles não há o que montar. E mesmo antes disso a cadeia de ~60
+# `js.replace()` já estava divergindo em silêncio quando dois patches encostavam
+# na mesma linha — o pior modo de falha pra uma ferramenta cuja única função era
+# reproduzir o arquivo byte a byte.
+#
+# A FONTE DA VERDADE é `bridge/public/health.html`, editado direto.
+# ─────────────────────────────────────────────────────────────────────────────
+import sys
+sys.exit('aposentado: edite bridge/public/health.html direto (ver cabeçalho deste arquivo)')
+
+#!/usr/bin/env python3
+# Monta o novo public/health.html a partir de:
+#   - CSS do mock do Claude Design (tokens + 5 estados + 2 esquemas + 900px)
+#   - corpos dos 21 cards atuais, reagrupados em 6 seções (228 ids preservados)
+#   - o <script> atual, com patches (set() deriva data-state, cores → var(), rollup)
+import io, json, re
+
+SCRATCH = '/private/tmp/claude-501/-Users-consorciolimpagyn/c190cd66-5b2b-47ae-acfc-176b7ca60bce/scratchpad'
+cards = json.load(io.open(SCRATCH + '/cards.json'))
+old_js = io.open(SCRATCH + '/old_script.js').read()
+statsgrid = io.open(SCRATCH + '/statsgrid.html').read()
+mock = io.open(SCRATCH + '/redesign/handoff/health-mock.html', encoding='utf-8').read()
+mock_css = mock[mock.index('<style>') + 7:mock.index('</style>')]
+
+# ── sub-bloco: cada card antigo vira um <details> interno, corpo intacto ──────
+def sub(k, label=None, open_default=False):
+    c = cards[k]
+    head = c['head'] or ('head-sub-' + k)
+    return f'''        <details class="sub" id="sub-{k}" data-k="sub-{k}"{' open' if open_default else ''}>
+          <summary><span class="grp">{label or c['title']}</span>
+            <span class="sub-head" id="{head}">—</span><span class="chev">&rsaquo;</span></summary>
+          <div class="sub-body">
+{c['inner']}
+          </div>
+        </details>'''
+
+def section(sid, name, order, dots, subs, extra_head='', open_attr=' open'):
+    return f'''    <details class="sec" id="sec-{sid}" data-k="sec-{sid}" data-state="ok" style="order:{order}"{open_attr}>
+      <summary>
+        <span class="sq"></span>
+        <span class="nm">{name}</span>
+        <span class="sum" id="sec-{sid}-sum">—</span>
+        <span class="dots" id="sec-{sid}-dots">{'<span class="dot"></span>' * dots}</span>
+        <span class="age" id="sec-{sid}-age"></span>
+        <span class="chev">&rsaquo;</span>
+      </summary>
+      <div class="body">
+{extra_head}
+{chr(10).join(subs)}
+      </div>
+    </details>'''
+
+# 01 CONECTIVIDADE — chips derivados das linhas + KPIs da Starlink
+conect_head = '''        <div class="chips" id="conect-chips"></div>
+        <div class="kpis">
+          <div class="kpi"><b><span id="kpi-sl-ping">—</span></b><span>ping starlink</span></div>
+          <div class="kpi"><b><span id="kpi-sl-drop">—</span></b><span>perda</span></div>
+          <div class="kpi"><b><span id="kpi-sl-drops">—</span></b><span>quedas hoje</span></div>
+          <div class="kpi-side">
+            <div><span id="kpi-sl-7d">—</span> <span>7d</span></div>
+            <div><span id="kpi-sl-30d">—</span> <span>30d</span></div>
+          </div>
+        </div>'''
+sec_conect = section('conect', 'Conectividade', 1, 5, [
+    sub('conn', 'Conexões · MQTT e carro'), sub('net', 'Rede · portas e certificados'),
+    sub('starlink', 'Starlink · Sítio'), sub('cf', 'Cloudflare'), sub('hawork', 'HA do Sítio'),
+], conect_head)
+
+# 02 ENERGIA — tabela comparável das 3 plantas + cards das estações
+energia_head = '''        <div class="grp-row"><span class="grp">Plantas solares</span><b id="solar-fleet">—</b></div>
+        <table class="tbl" id="solar-table">
+          <thead><tr><th>Planta</th><th>Agora</th><th>Hoje</th><th>Mês</th><th>Temp</th><th></th></tr></thead>
+          <tbody>
+            <tr id="tr-sol"><td>Catalão</td><td id="t-sol-now">—</td><td id="t-sol-today">—</td><td class="mut" id="t-sol-month">—</td><td id="t-sol-temp">—</td><td class="go">&rsaquo;</td></tr>
+            <tr id="tr-iv"><td>Ivonei</td><td id="t-iv-now">—</td><td id="t-iv-today">—</td><td class="mut" id="t-iv-month">—</td><td id="t-iv-temp">—</td><td class="go">&rsaquo;</td></tr>
+            <tr id="tr-pm"><td>Palmeiras</td><td id="t-pm-now">—</td><td id="t-pm-today">—</td><td class="mut" id="t-pm-month">—</td><td id="t-pm-temp">—</td><td class="go">&rsaquo;</td></tr>
+          </tbody>
+          <tfoot><tr id="tr-total"><td>Total</td><td id="t-all-now">—</td><td id="t-all-today">—</td><td class="mut" id="t-all-month">—</td><td></td><td></td></tr></tfoot>
+        </table>
+        <div class="pair" style="margin-top:12px">
+          <div class="card" id="sub-bl-casa"><div class="card-hd"><b>Casa</b><span class="r" id="c-bl-casa">—</span></div>
+            <div class="bar" id="bar-bl-casa"><i style="width:0"></i></div>
+            <div class="card-note">Mac Mini + roteador</div></div>
+          <div class="card" id="sub-bl-sitio"><div class="card-hd"><b>Sítio</b><span class="r" id="c-bl-sitio">—</span></div>
+            <div class="bar" id="bar-bl-sitio"><i style="width:0"></i></div>
+            <div class="card-note">Starlink</div></div>
+        </div>'''
+sec_energia = section('energia', 'Energia', 2, 5, [
+    sub('bluetti', 'Estações portáteis · detalhe'), sub('solar', 'Solar Catalão'),
+    sub('solis-ivonei', 'Solar Ivonei'), sub('solis-palmeiras', 'Solar Palmeiras'),
+], energia_head)
+
+# 03 MÁQUINA
+maquina_head = '''        <div class="kpis" style="gap:16px">
+          <div class="kpi"><span>bridge</span><b class="kpi-sm" id="kpi-bridge">—</b></div>
+          <div class="kpi"><span>mac</span><b class="kpi-sm" id="kpi-mac">—</b></div>
+          <div class="kpi kpi-side"><span>node · apk</span><span id="kpi-vers">—</span></div>
+        </div>'''
+MEM_SUB = '''        <details class="sub" id="sub-mem" data-k="mem">
+          <summary><span class="grp">Memória do bridge</span>
+            <span class="sub-head" id="head-mem">—</span><span class="chev">&rsaquo;</span></summary>
+          <div class="sub-body">
+            <div class="row"><span class="label">RSS</span><span class="val" id="mem-rss">—</span></div>
+            <div class="row"><span class="label">Heap usado</span><span class="val" id="mem-heap">—</span></div>
+            <div class="row"><span class="label">Heap total</span><span class="val" id="mem-htotal">—</span></div>
+            <canvas id="mem-chart" aria-hidden="true"></canvas>
+          </div>
+        </details>'''
+sec_maquina = section('maquina', 'Máquina', 3, 4, [
+    sub('proc', 'Processo do bridge'), sub('mac', 'Mac · memória e disco'), MEM_SUB, sub('procs', 'Processos · top 30'),
+], maquina_head)
+
+# 04 VEÍCULOS
+sec_veiculos = section('veiculos', 'Veículos', 4, 2, [sub('car', 'Haval'), sub('grasi', 'Grasi (BYD)')])
+
+# 05 SERVIÇOS
+sec_servicos = section('servicos', 'Serviços', 5, 5, [
+    sub('clockin', 'Clockin'), sub('lari', 'Assistentes (WhatsApp)'),
+    sub('apns', 'APNs / Live Activities'), sub('bkp', 'Backups'), sub('family', 'Família'),
+])
+
+# 06 DIAGNÓSTICO — os 4 stat boxes descem pra cá (histórico, não estado)
+diag_head = f'''        <div class="win" id="win-grid">{statsgrid}</div>'''
+sec_diag = section('diag', 'Diagnóstico', 6, 2, [sub('err', 'Erros / crashes')], diag_head)
+
+# Tokens: gaveta em tela cheia, markup e os 27 ids inalterados
+drawer = f'''<div id="tok-drawer" hidden>
+  <div class="drawer-top"><span class="brand">Tokens e acesso</span>
+    <span class="stamp" id="head-tok">—</span>
+    <button class="btn" id="tok-close">Fechar</button></div>
+  <div class="drawer-body">
+{cards['tokens']['inner']}
+  </div>
+</div>'''
+
+CSS_EXTRA = '''
+/* Aliases dos tokens antigos: o JS ainda usa var(--green|red|yellow) em 19 pontos.
+   Sem isto a cor é inválida e o valor perde o destaque nos DOIS esquemas.
+   --warn-soft = âmbar apagado da carência de 30min; de propósito NÃO casa com o
+   regex var(--warn) do rowState, então não escala pra aviso. */
+:root{--green:var(--ok);--red:var(--crit);--yellow:var(--warn);--warn-soft:#a8842f}
+@media (prefers-color-scheme: light){:root{--warn-soft:#8a6a1c}}
+
+/* ---------- pontes com o markup herdado dos 21 cards ---------- */
+.sub{border-top:1px solid var(--line)}
+.sub:first-of-type{border-top:0}
+.sub>summary{display:flex;align-items:center;gap:9px;padding:10px 0;cursor:pointer;list-style:none}
+.sub>summary::-webkit-details-marker{display:none}
+.sub>summary .grp{margin:0}
+.sub-head{margin-left:auto;font-size:11.5px;color:var(--muted);overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.sub-body{padding:2px 0 12px}
+.sub[data-state="warn"]>summary .sub-head{color:var(--warn);font-weight:600}
+.sub[data-state="crit"]>summary .sub-head{color:var(--crit);font-weight:600}
+/* classes antigas → tokens novos (o corpo dos cards veio inteiro) */
+.row .label{font-size:11.5px;color:var(--muted)}
+.row .val{font-size:12.5px;font-weight:600}
+.row .val small,.row .val .sub-note{display:block;font-size:10.5px;font-weight:400;color:var(--muted)}
+.dot.green{background:var(--ok)} .dot.red{background:var(--crit)} .dot.yellow{background:var(--warn)}
+canvas{display:block;width:100%;height:56px;margin-top:8px}
+.topbar-row{display:flex;align-items:center;gap:8px;padding:4px 0}
+.topbar-row .tname{font-size:11.5px;width:38%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.topbar-row .tbar{flex:1;height:4px;background:var(--track)}
+.topbar-row .tbar>span{display:block;height:100%;background:var(--ok)}
+.topbar-row .tmb{font-size:10.5px;color:var(--muted);width:58px;text-align:right}
+.event-list{list-style:none;margin:0;padding:0}
+.ev{padding:8px 0;border-bottom:1px solid var(--line)}
+.ev:last-child{border-bottom:0}
+.ev-time{font-size:10px;color:var(--dim)}
+.ev-type{font-size:11px;font-weight:800;color:var(--crit)}
+.ev-msg{font-size:10px;color:var(--muted);margin-top:3px;white-space:pre-wrap;word-break:break-word;max-height:60px;overflow:hidden}
+.empty{font-size:11.5px;color:var(--dim);text-align:center;padding:14px 0}
+.proc-table{width:100%;border-collapse:collapse;font-size:11px}
+.proc-table th,.proc-table td{padding:4px 6px;text-align:left;border-bottom:1px solid var(--line)}
+.proc-table th{color:var(--dim);font-weight:700;cursor:pointer;white-space:nowrap;text-transform:uppercase;font-size:10px;letter-spacing:.06em}
+.stats-grid{display:contents}
+.stat-box{background:var(--panel);padding:9px 12px}
+.stat-label{display:block;font-size:10px;letter-spacing:.08em;color:var(--dim)}
+.stat-r{font-size:17px;font-weight:800}
+.stat-e{font-size:10px;color:var(--muted)}
+.kpi-sm{font-size:12.5px;font-weight:600}
+.kpi>b{white-space:nowrap}
+/* gaveta de Tokens */
+#tok-drawer{position:fixed;inset:0;background:var(--bg);z-index:20;overflow-y:auto;
+            padding-bottom:env(safe-area-inset-bottom)}
+#tok-drawer[hidden]{display:none}
+.drawer-top{display:flex;align-items:center;gap:10px;position:sticky;top:0;background:var(--bg);
+            padding:calc(14px + env(safe-area-inset-top)) 14px 11px;border-bottom:2px solid var(--rule)}
+.drawer-top .btn{margin-left:auto}
+.drawer-body{padding:14px;max-width:620px}
+.drawer-body .row{padding:7px 0}
+/* As 3 plantas apareciam 2x: na tabela comparável e no cabeçalho de cada sub-bloco.
+   A tabela é a fonte de resumo; o sub-bloco fica só como "abrir detalhe". */
+#sub-solar>summary .sub-head,
+#sub-solis-ivonei>summary .sub-head,
+#sub-solis-palmeiras>summary .sub-head{display:none}
+.tbl tbody tr{cursor:pointer}
+.tbl tbody tr:hover{background:var(--warn-tint)}
+.tbl td.go{width:14px;text-align:right;color:var(--dim);font-weight:400}
+/* Sub-bloco com problema se marca no PRÓPRIO cabeçalho, não só no texto da direita:
+   com a seção aberta, é isso que responde "qual das 3 plantas / qual estação". */
+.sub[data-state="warn"]>summary,.sub[data-state="crit"]>summary{
+  border-left:3px solid transparent;margin-left:-14px;padding-left:11px}
+.sub[data-state="warn"]>summary{border-left-color:var(--warn);background:var(--warn-tint)}
+.sub[data-state="crit"]>summary{border-left-color:var(--crit);background:var(--crit-tint)}
+.sub[data-state="warn"]>summary .grp{color:var(--warn)}
+.sub[data-state="crit"]>summary .grp{color:var(--crit)}
+/* linha da tabela comparável: a planta culpada fica óbvia sem abrir nada */
+.tbl tr[data-state="warn"]{background:var(--warn-tint)}
+.tbl tr[data-state="warn"] td{color:var(--warn)}
+.tbl tr[data-state="crit"]{background:var(--crit-tint)}
+.tbl tr[data-state="crit"] td{color:var(--crit);font-weight:800}
+.tbl tr[data-state] td:first-child::before{content:"■ ";font-size:9px;vertical-align:2px}
+/* linha de total: régua de 2px separa soma de parcela, e o rótulo não compete
+   com os números — é a mesma hierarquia do cabeçalho da tabela. */
+.tbl tfoot td{border-top:2px solid var(--rule);border-bottom:0;padding-top:8px;font-weight:800}
+.tbl tfoot td:first-child{font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.tbl tfoot td small{display:block;font-size:9.5px;font-weight:400;color:var(--dim)}
+/* min-width:0 — sem isso ellipsis não encolhe em flex e a linha vaza da viewport */
+.sec>summary .sum{min-width:0;flex:1 1 auto}
+.sec>summary{overflow:hidden}
+.chip{min-width:0}
+.chip span:not(.sq):not(.arr){min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.tri-head{flex-wrap:wrap}
+.sub>summary{overflow:hidden}
+.sub-head{min-width:0}
+@media (max-width:560px){
+  .tri-when{display:none}        /* a hora já está no cabeçalho */
+  #triage-headline{font-size:24px}
+}
+/* cabeçalho: em 390px o título quebrava em 2 linhas e o último botão saía da tela */
+.top{flex-wrap:wrap}
+.brand{white-space:nowrap}
+.top .stamp{margin-left:auto;text-align:right;line-height:1.35}
+@media (max-width:560px){
+  .top{gap:7px;padding-left:12px;padding-right:12px}
+  .top .stamp{order:3;flex:1 0 100%;margin:0;text-align:left}
+  .btn{padding:5px 8px}
+  #open-tokens{display:none}   /* tem o do rodapé */
+}
+/* celular: seção fechada nasce fechada mesmo; nada de scroll infinito */
+@media (max-width:899px){
+  .kpis{gap:14px}
+  .kpi>b{font-size:18px}
+  .proc-table th:nth-child(n+5),.proc-table td:nth-child(n+5){display:none}
+}
+
+/* ============================================================
+   REVISÃO better-interface (02/08). Cada bloco cita o achado.
+   ============================================================ */
+
+/* [1] .pill.red NÃO tinha regra. Todo crachá de falha do JS — "Desconectado",
+   "Offline", "Down", "Degradado", "Sem resposta" (15 pontos de injeção) —
+   herdava o verde do .pill base: fundo verde, tinta verde, barra verde.
+   Numa página de monitoramento é o pior defeito possível. */
+.pill.red{background:var(--crit-tint);color:var(--crit);border-left-color:var(--crit)}
+.pill.yellow{background:var(--warn-tint);color:var(--warn);border-left-color:var(--warn)}
+.pill.green{background:var(--ok-tint);color:var(--ok-ink);border-left-color:var(--ok)}
+
+/* [3] A rampa neutra reprovava contraste nos DOIS esquemas: --dim media 2,66:1
+   no escuro e 2,72:1 no claro, em 10-12px, e é o token de .grp (título de
+   sub-bloco), .chev, .stamp (o carimbo de frescor) e do cabeçalho da tabela de
+   processos. Rampa reescrita mantendo os 3 degraus:
+     escuro  text 15,6 · muted 7,3 · dim 5,0
+     claro   text 15,9 · muted 7,1 · dim 4,7                       (AA em todos) */
+:root{--muted:#a3a39d; --dim:#85857f}
+@media (prefers-color-scheme: light){
+  :root{--muted:#565452; --dim:#726f6b;
+        --ok:#3d6f0f;   --warn:#8a5c00}   /* eram 3,45:1 e 3,94:1 no claro */
+}
+
+/* [6] O hover de botão, de cabeçalho de seção e de linha da tabela usava
+   --warn-tint: passar o mouse em qualquer linha a pintava de aviso. Token
+   próprio, sem significado semântico. */
+:root{--hover:rgba(255,255,255,.055)}
+@media (prefers-color-scheme: light){:root{--hover:rgba(32,30,29,.05)}}
+.btn:hover{background:var(--hover);border-color:var(--muted);color:var(--text)}
+.sec>summary:hover{background:var(--hover)}
+.tbl tbody tr:hover{background:var(--hover)}
+
+/* [13] --accent é vermelho (#ec3013). Como anel de foco e como fundo de :active
+   ele colide com --crit numa página onde vermelho quer dizer "crítico".
+   Foco passa a ser o próprio --text: alto contraste nos dois esquemas e
+   legível também por cima da faixa vermelha de crítico. */
+:focus-visible{outline:2px solid var(--text);outline-offset:2px}
+#triage[data-state="crit"] :focus-visible{outline-color:var(--on-accent)}
+.btn:active{background:var(--hover);border-color:var(--text);color:var(--text)}
+
+/* [14] Os botões mediam 23px de altura — 1px abaixo da linha de base de
+   24x24 da WCAG 2.5.8. */
+.btn{min-height:26px;display:inline-flex;align-items:center;justify-content:center}
+@media (max-width:560px){.btn{min-height:26px}}
+
+/* [15] 10px é o tamanho mais frequente da página (597 elementos). Não mexo na
+   densidade em geral, mas subo os quatro que carregam navegação e frescor. */
+.grp{font-size:11px}
+.stamp{font-size:11.5px;color:var(--muted)}   /* --dim dava 3,97:1 sobre --bg no claro */
+.tri-when{font-size:11px}
+.ev-msg{font-size:11px}
+
+/* [7] <h1> real no lugar do <span class="brand">. */
+h1.brand{margin:0;font-size:15px;font-weight:800;letter-spacing:-.01em}
+@media (min-width:900px){h1.brand{font-size:16px}}
+
+/* [9] Linha de planta solar e cabeçalho de ordenação da tabela de processos
+   respondem ao clique mas não existiam para o teclado. */
+.tbl tbody tr:focus-visible,.proc-table th:focus-visible{outline:2px solid var(--text);outline-offset:-2px}
+.proc-table th{padding-top:7px;padding-bottom:7px}   /* 20,5px → 26px como alvo de toque */
+
+/* [2] Estado de erro da própria página: quando o fetch do bridge falha, a
+   faixa vira campo vermelho e diz que os números abaixo são os últimos
+   conhecidos. Antes o carimbo mudava para "Falhou em 11:01" em 10,5px a
+   2,81:1 e o veredito seguia dizendo "1 atenção · 0 críticos". */
+body[data-offline="1"] .stamp{color:var(--crit);font-weight:700}
+/* ---------- overlay de gráfico (clique na potência ou na temperatura) ------- */
+/* [1] Cores de série como token. Cravadas em hex elas mediam 1,67:1 (verde) e
+   2,63:1 (azul) contra o painel do modo claro — o gráfico inteiro sumia. */
+:root{--s1:#9ad34a; --s2:#5cb3e8}
+@media (prefers-color-scheme: light){:root{--s1:#356210; --s2:#0f4d80}}
+/* [4] role="button" num <td> substitui o papel de célula e a tabela deixa de ser
+   tabela pra leitor de tela. O controle agora é um <button> dentro do <td>. */
+.tbl button[data-chart]{font:inherit;color:inherit;background:none;border:0;padding:0;
+  cursor:pointer;text-decoration:underline;text-decoration-style:dotted;
+  text-decoration-color:var(--dim);text-underline-offset:3px;
+  font-variant-numeric:tabular-nums;min-height:24px}
+.tbl td:has(button[data-chart]){padding:0}
+.tbl button[data-chart]:hover{text-decoration-color:var(--text)}
+.tbl button[data-chart]:focus-visible{outline:2px solid var(--text);outline-offset:1px}
+#chart-modal{position:fixed;inset:0;background:var(--bg);z-index:30;overflow-y:auto;
+  padding-bottom:env(safe-area-inset-bottom)}
+#chart-modal[hidden]{display:none}
+#chart-modal .drawer-body{max-width:none;padding:14px}
+.ch-tabs{display:flex;gap:2px;margin-left:auto}
+.ch-tabs .btn[aria-pressed="true"]{background:var(--text);border-color:var(--text);color:var(--bg)}
+.ch-kpis{display:flex;gap:20px;flex-wrap:wrap;margin-bottom:10px}
+.ch-kpis .kpi>b{font-size:19px}
+.ch-wrap{position:relative;touch-action:pan-y}
+.ch-wrap svg{display:block;background:var(--panel);border-top:2px solid var(--rule);outline-offset:-2px}
+.ch-wrap svg:focus-visible{outline:2px solid var(--text)}
+.ch-grid{stroke:var(--line);stroke-width:1}
+.ch-ref{stroke:var(--warn);stroke-width:1;stroke-dasharray:5 4;opacity:.75}
+.ch-ref2{stroke:var(--crit);stroke-width:1;stroke-dasharray:2 3;opacity:.8}
+.ch-ln{fill:none;stroke-width:1.7;stroke-linejoin:round}
+.ch-band{stroke:none;opacity:.16}
+.ch-ax{font-size:9.5px;fill:var(--dim)}
+.ch-cross{stroke:var(--text);stroke-width:1;opacity:.55}
+.ch-dot{stroke:var(--panel);stroke-width:1.5}
+.ch-tip{position:absolute;pointer-events:none;z-index:2;background:var(--panel);
+  border:1px solid var(--rule);padding:7px 9px;font-size:11.5px;white-space:nowrap;
+  box-shadow:0 4px 14px rgba(0,0,0,.35);opacity:0;transition:opacity .08s}
+.ch-tip b{display:block;font-size:10px;font-weight:700;letter-spacing:.06em;
+  text-transform:uppercase;color:var(--dim);margin-bottom:4px}
+.ch-tip s{display:block;text-decoration:none;font-weight:600}
+.ch-tip i{display:inline-block;width:8px;height:8px;margin-right:6px}
+.ch-empty{padding:40px 0;text-align:center;font-size:12px;color:var(--dim)}
+@media (max-width:560px){.ch-tabs .btn{padding:5px 7px;font-size:10px}}
+
+
+/* [16] Item de grade tem min-width:auto: o log de "Acessos por host" (tokens
+   longos como HavalEcoTrip/2607301601 CFNetwork/3892.1) fazia a 1ª coluna medir
+   656px num grid de 3×465 e a PÁGINA INTEIRA rolava na horizontal — a 3ª coluna
+   perdia os valores fora da tela. Medido a 1400px: scrollWidth 1656.
+   Pré-existente: repetiu igual com os tamanhos desta revisão desfeitos. */
+@media (min-width:900px){
+  .cols{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .col{min-width:0}
+}
+#cf-hosts-list,.mono{overflow-wrap:anywhere}
+/* [16b] Mesma armadilha no chip da triagem: #triage-chips é flex:1 dentro de
+   #triage, e com min-width:auto ele não encolhia abaixo do conteúdo. Um chip
+   de valor longo ("5.55kW · 10.2kWh · 70.6°C · 240V · online…") empurrava a
+   página 240px pra fora a 1024px, apesar do ellipsis já configurado no span. */
+#triage-chips,#triage .tri-head{min-width:0}
+
+
+'''
+
+HEAD = f'''<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0d0d0d">
+<link rel="manifest" href="/health.webmanifest">
+<link rel="apple-touch-icon" href="/health-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Bridge">
+<title>Bridge Health</title>
+<style>{mock_css}{CSS_EXTRA}</style>
+</head>
+<body>
+
+<header class="top">
+  <h1 class="brand">Bridge Health</h1>
+  <span class="stamp" id="last-update">carregando…</span>
+  <button class="btn" id="toggle-all" onclick="toggleAll()">Recolher tudo</button>
+  <button class="btn" id="open-tokens">Tokens</button>
+  <button class="btn btn-icon" onclick="load()" aria-label="Atualizar">&#8635;</button>
+</header>
+
+<main id="conteudo">
+<section id="triage" data-state="ok">
+  <div class="tri-head">
+    <div role="status" aria-live="polite" aria-atomic="true">
+      <div id="triage-headline">verificando…</div>
+      <div id="triage-sub">—</div>
+    </div>
+    <div class="tri-when">atualizado<b id="triage-when">—</b></div>
+  </div>
+  <div id="triage-chips"></div>
+</section>
+
+<div class="subbar">
+  <span class="subbar-lbl" id="subbar-lbl">6 seções</span>
+  <button class="btn" onclick="toggleAll()">Expandir tudo</button>
+</div>
+
+<div class="cols">
+  <div class="col">
+{sec_conect}
+{sec_diag}
+  </div>
+  <div class="col">
+{sec_energia}
+{sec_veiculos}
+  </div>
+  <div class="col">
+{sec_maquina}
+{sec_servicos}
+  </div>
+</div>
+</main>
+
+<footer class="foot">
+  <span id="foot-info">—</span>
+  <button class="btn" id="open-tokens-2">Tokens</button>
+</footer>
+
+<div id="chart-modal" role="dialog" aria-modal="true" aria-labelledby="ch-title" hidden>
+  <div class="drawer-top">
+    <span class="brand" id="ch-title">—</span>
+    <div class="ch-tabs" id="ch-tabs">
+      <button class="btn" data-range="day" aria-pressed="true">Dia</button>
+      <button class="btn" data-range="week" aria-pressed="false">Semana</button>
+      <button class="btn" data-range="month" aria-pressed="false">Mês</button>
+    </div>
+    <button class="btn" id="ch-close">Fechar</button>
+  </div>
+  <div class="drawer-body">
+    <div class="ch-kpis" id="ch-kpis"></div>
+    <div class="ch-wrap" id="ch-wrap"><div class="ch-tip" id="ch-tip"></div></div>
+    <div class="chips" id="ch-legend" style="margin-top:12px"></div>
+    <p class="note" id="ch-note"></p>
+  </div>
+</div>
+
+{drawer}
+'''
+
+# ── script ───────────────────────────────────────────────────────────────────
+# Era `old_js` + ~60 js.replace() em cadeia. Isso deu o que tinha que dar: cada
+# correção nova em public/health.html exigia inventar um patch equivalente aqui, e
+# dois patches encostando na mesma linha faziam o rebuild divergir em silêncio —
+# o pior modo de falha possível pra um montador cuja única função é reproduzir o
+# arquivo. E a derivação já não era reproduzível de todo jeito: `old_script.js` e
+# `cards.json` moram no scratchpad da sessão do redesenho de 30/07.
+#
+# Agora o script é um snapshot versionado ao lado deste arquivo. A página segue
+# sendo a fonte da verdade; pra atualizar o snapshot:
+#     python3 -c "import io;p=io.open('public/health.html',encoding='utf-8').read();\
+#     i=p.index('<script>');j=p.rindex('</script>')+9;\
+#     io.open('docs/health.script.js','w',encoding='utf-8').write(p[i:j]+chr(10))"
+js = io.open('/Users/consorciolimpagyn/haval-ecotrip/bridge/docs/health.script.js',
+             encoding='utf-8').read().rstrip('\n')
+
+js = js.replace('</body>', '').replace('</html>', '')
+out = HEAD + '\n' + js + '\n</body>\n</html>\n'
+
+# ── pós-processo do markup (revisão better-interface) ────────────────────────
+# [4] Ilhas de hex cru vindas dos 21 cards antigos. No claro elas mediam 1,08:1
+#     (#eee), 1,28:1 (#ffd966) e 1,49:1 (#e6b800) — duas delas em texto de ALERTA.
+#     A troca é feita depois da montagem porque o hex vem de cards.json, não do JS.
+_head, _body = out.split('</style>', 1)      # o bloco de tokens fica intacto
+for _a, _b in [
+    ('color:#888', 'color:var(--muted)'),
+    ('border-bottom:1px solid #333', 'border-bottom:1px solid var(--line)'),
+    ('border:1px solid #333', 'border:1px solid var(--line)'),
+    ('background:#111', 'background:var(--bg)'),
+    ('color:#eee', 'color:var(--text)'),
+    ('color:#e6b800', 'color:var(--warn)'),
+    ('color:#ffd966', 'color:var(--warn)'),
+    ('color:#e74c3c', 'color:var(--crit)'),
+    ('color:#7bc47f', 'color:var(--text)'),   # em cima de --ok-tint media 4,27:1
+    ('background:#3a2a00', 'background:var(--warn-tint)'),
+    ('border:1px solid #e6b800', 'border:1px solid var(--warn)'),
+    ('background:#0c2b22', 'background:var(--ok-tint)'),
+    ('border:1px solid #1c6b52', 'border:1px solid var(--ok)'),
+    ('border-radius:6px', 'border-radius:var(--radius)'),  # a página é raio 0
+    ('border-radius:8px', 'border-radius:var(--radius)'),
+]:
+    _body = _body.replace(_a, _b)
+
+# Linha do ventilador no card do Ivonei (o corpo do card vem de cards.json).
+_ivrow = '        <div class="row"><span class="label">Inv 2</span><span class="val" id="iv-inv2">—</span></div>\n'
+assert _body.count(_ivrow) == 1
+_body = _body.replace(_ivrow, _ivrow + '        <div class="row"><span class="label">Ventilador</span><span class="val" id="iv-fan">—</span></div>\n')
+
+# Células clicáveis que abrem o gráfico (potência e temperatura das 3 plantas).
+for _k, _id in [('sol:power','t-sol-now'), ('iv:power','t-iv-now'), ('pm:power','t-pm-now'),
+                ('sol:temp','t-sol-temp'), ('iv:temp','t-iv-temp'), ('pm:temp','t-pm-temp')]:
+    _a = f'<td id="{_id}">—</td>' if _id.endswith('now') else f'<td id="{_id}">—</td>'
+    _b = f'<td><button type="button" id="{_id}" data-chart="{_k}">—</button></td>'
+    assert _body.count(_a) == 1, _a
+    _body = _body.replace(_a, _b)
+
+# [10] Quem alimenta o slot 3 quando a seção está ok. Sem isto o resumo pegava a
+#      primeira linha do corpo e saía "Status recebendo rede".
+for _a, _b in [
+    ('id="sl-ping"',        'id="sl-ping" data-glance="starlink"'),
+    ('id="solar-fleet"',    'id="solar-fleet" data-glance="solar"'),
+    ('id="mac-mem-used"',   'id="mac-mem-used" data-glance="memória"'),
+    ('id="proc-uptime"',    'id="proc-uptime" data-glance="no ar"'),
+    ('id="car-online"',     'id="car-online" data-glance="carro"'),
+    ('id="clockin-backup"', 'id="clockin-backup" data-glance="backup"'),
+    ('id="s-h24-r"',        'id="s-h24-r" data-glance="crashes 24h"'),
+]:
+    assert _body.count(_a) == 1, (_a, _body.count(_a))
+    _body = _body.replace(_a, _b)
+out = _head + '</style>' + _body
+io.open('/Users/consorciolimpagyn/haval-ecotrip/bridge/public/health.html', 'w', encoding='utf-8').write(out)
+print('escrito: %d linhas' % out.count('\n'))

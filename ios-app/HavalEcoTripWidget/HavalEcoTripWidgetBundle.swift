@@ -1,7 +1,6 @@
 //
 //  HavalEcoTripWidgetBundle.swift
-//  Bundle do Widget Extension. Por enquanto só hospeda a Live Activity de
-//  recarga; pode ganhar widgets de home screen no futuro.
+//  Bundle do Widget Extension: Live Activities + widgets de home/lock screen.
 //
 import SwiftUI
 import WidgetKit
@@ -20,5 +19,7 @@ struct HavalEcoTripWidgetBundle: WidgetBundle {
         LockBatteryWidget()
         if #available(iOS 17.0, *) { ControlsWidget() }
         DepartureAskLiveActivity()
+        MonitorWidget()
+        LockMonitorWidget()
     }
 }
