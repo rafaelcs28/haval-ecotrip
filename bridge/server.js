@@ -5343,8 +5343,7 @@ if (fs.existsSync(path.join(WEB3D_DIR, 'index.html'))) {
         + 'send:function(){},readyState:3,addEventListener:function(){}};}return new W(u,p);};'
         + 'window.WebSocket.prototype=W.prototype;})();</script>';
       const html = fs.readFileSync(path.join(WEB3D_DIR, 'index.html'), 'utf8')
-        .replace('</body>', cfg + '<script src="/ecotrip-3d-shim.js"></script>'
-                                + '<script src="/ecotrip-3d-placa.js"></script></body>');
+        .replace('</body>', cfg + '<script src="/ecotrip-3d-shim.js"></script></body>');
       res.type('html').set('Cache-Control', 'no-store').send(html);
     } catch (e) { res.status(500).send('viewer indisponível: ' + e.message); }
   });
