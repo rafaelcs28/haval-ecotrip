@@ -127,16 +127,23 @@
     renderer.setSize(l, a, false);
   }
 
-  var precisaDesenhar = true;
+  var precisaDesenhar = true, tAnterior = 0;
   function pede() { precisaDesenhar = true; }
-  function laco() {
+  function laco(t) {
     requestAnimationFrame(laco);
-    if (!precisaDesenhar || document.hidden) return;   // parado = nada de GPU
+    if (document.hidden) { tAnterior = 0; return; }
+    // Enquanto uma peça se move, o quadro é contínuo — porta abrindo aos saltos
+    // não é animação, é defeito. Parada a peça, volta a desenhar só sob demanda:
+    // loop a 60 fps num app aberto o dia todo é bateria queimada à toa.
+    var dt = tAnterior ? Math.min(0.05, (t - tAnterior) / 1000) : 0.016;
+    tAnterior = t;
+    var movendo = animaPecas(dt);
+    if (!precisaDesenhar && !movendo) return;
     precisaDesenhar = false;
     enquadra();
     renderer.render(scene, camera);
   }
-  laco();
+  requestAnimationFrame(laco);
 
   window.addEventListener('resize', pede);
   document.addEventListener('visibilitychange', pede);
@@ -287,6 +294,7 @@
       scene.add(sombra);
     })();
 
+    montaPecas();
     reaplica();   // estado que chegou durante o carregamento
 
     // ── Aro ───────────────────────────────────────────────────────────────────
@@ -387,6 +395,78 @@
     document.documentElement.setAttribute('data-erro', String(err && (err.message || err.type || err)));
     console.error('[carro]', err);
   });
+
+  // ── Peças que MEXEM ────────────────────────────────────────────────────────
+  //
+  // O GLB já vem rigado: `Hinge_FL/FR/RL/RR` e `Hinge_TRUNK` são nós reais, com
+  // as malhas certas como filhas e o pivô no lugar. Não precisa montar dobradiça
+  // nenhuma em tempo de carga — é só girar. (O viewer do netseek monta as dele em
+  // runtime porque nasceu antes desse export; aqui o trabalho já está feito.)
+  //
+  // Ângulos e eixos vêm de lá, que é onde foram calibrados: porta 0,7 rad (~40°)
+  // em Y, com sinal invertido do lado esquerdo; tampa 1,05 rad (~60°) em Z, que
+  // joga ela pra cima e pra trás em vez de pra dentro da cabine.
+  var GIRO_PORTA = 0.7, GIRO_TAMPA = 1.05;
+  var dobr = {}, vidros = [];
+  var metas = { fl: 0, fr: 0, rl: 0, rr: 0, trunk: 0, vfl: 0, vfr: 0, vrl: 0, vrr: 0 };
+  var atual = { fl: 0, fr: 0, rl: 0, rr: 0, trunk: 0, vfl: 0, vfr: 0, vrl: 0, vrr: 0 };
+
+  function montaPecas() {
+    var mapa = { hingefl: 'fl', hingefr: 'fr', hingerl: 'rl', hingerr: 'rr',
+                 hingetrunk: 'trunk' };
+    carro.traverse(function (o) {
+      var k = mapa[norm(o.name)];
+      if (k) dobr[k] = o;
+    });
+    // Vidro desce, não gira: o curso é a própria altura do painel de vidro. 0,92 e
+    // não 1,0 porque vidro descido de verdade deixa uma lasca na linha de cintura.
+    //
+    // A caixa é medida em MUNDO e `position.y` é do espaço do pai — o modelo carrega
+    // escala, então usar a medida crua afundaria o vidro pelo chão. Rebate pela
+    // inversa do pai; com as portas fechadas nesse instante, a conta é exata.
+    var nomes = { vfl: 'windowfl', vfr: 'windowfr', vrl: 'windowbl', vrr: 'windowbr' };
+    carro.updateMatrixWorld(true);
+    var inv = new THREE.Matrix4();
+    Object.keys(nomes).forEach(function (k) {
+      var alvoNo = null;
+      carro.traverse(function (o) {
+        if (!alvoNo && norm(o.name).indexOf(nomes[k]) === 0) alvoNo = o;
+      });
+      if (!alvoNo || !alvoNo.parent) return;
+      var cx = new THREE.Box3().setFromObject(alvoNo);
+      if (cx.isEmpty()) return;
+      cx.applyMatrix4(inv.copy(alvoNo.parent.matrixWorld).invert());
+      vidros.push({ k: k, no: alvoNo, y0: alvoNo.position.y,
+                    curso: (cx.max.y - cx.min.y) * 0.92 });
+    });
+  }
+
+  function aplicaPecas() {
+    // Sinal invertido em relação ao viewer do netseek: ele monta as dobradiças em
+    // runtime, este GLB já traz as dele, e a orientação do nó é a oposta. Com o
+    // sinal deles a porta girava pra DENTRO da carroceria — some por trás da
+    // lataria e o desenho fica idêntico ao de porta fechada. (Mesma pegadinha do
+    // ângulo de câmera, que também estava documentado ao contrário.)
+    if (dobr.fl) dobr.fl.rotation.y =  atual.fl * GIRO_PORTA;
+    if (dobr.rl) dobr.rl.rotation.y =  atual.rl * GIRO_PORTA;
+    if (dobr.fr) dobr.fr.rotation.y = -atual.fr * GIRO_PORTA;
+    if (dobr.rr) dobr.rr.rotation.y = -atual.rr * GIRO_PORTA;
+    if (dobr.trunk) dobr.trunk.rotation.z = atual.trunk * GIRO_TAMPA;
+    vidros.forEach(function (v) { v.no.position.y = v.y0 - v.curso * atual[v.k]; });
+  }
+
+  /** Anda um passo em direção ao alvo. Devolve true enquanto algo se move. */
+  function animaPecas(dt) {
+    var passo = Math.min(1, dt * 1.6), mexeu = false;   // ~0,6 s de ponta a ponta
+    for (var k in metas) {
+      if (atual[k] === metas[k]) continue;
+      atual[k] = atual[k] < metas[k] ? Math.min(metas[k], atual[k] + passo)
+                                    : Math.max(metas[k], atual[k] - passo);
+      mexeu = true;
+    }
+    if (mexeu) aplicaPecas();
+    return mexeu;
+  }
 
   // ── Estado do carro desenhado no modelo ───────────────────────────────────
   // Abrir a porta de verdade exigiria o rig do viewer; num carro do tamanho de um
@@ -492,15 +572,11 @@
     estadoNorm = estadoNorm || {};
     for (var q in o) estadoNorm[q] = o[q];
     if (!carro) return;
-    var b = { porta_fl: 'doorfl', porta_fr: 'doorfr', porta_rl: 'doorbl',
-              porta_rr: 'doorbr', porta_malas: 'hingetrunk',
-              vidro_fl: 'windowfl', vidro_fr: 'windowfr',
-              vidro_rl: 'windowbl', vidro_rr: 'windowbr' };
-    for (var k in b) if (o[k] !== undefined && o[k] !== null) {
-      (function (pref, on) {
-        marca(function (n) { return n.indexOf(pref) === 0; }, !!on);
-      })(b[k], o[k]);
-    }
+    // Porta, tampa e vidro MEXEM (o GLB traz o rig); teto e farol acendem.
+    var m = { porta_fl: 'fl', porta_fr: 'fr', porta_rl: 'rl', porta_rr: 'rr',
+              porta_malas: 'trunk', vidro_fl: 'vfl', vidro_fr: 'vfr',
+              vidro_rl: 'vrl', vidro_rr: 'vrr' };
+    for (var k in m) if (o[k] !== undefined && o[k] !== null) metas[m[k]] = o[k] ? 1 : 0;
     if (o.teto !== undefined && o.teto !== null)
       marca(function (n) { return n.indexOf('sunroof') === 0; }, !!o.teto);
     if (o.farol !== undefined && o.farol !== null)
@@ -519,21 +595,20 @@
         // acendia. E o porta-malas é o índice 4, não o 5 (o 5 é a posição no
         // vetor do VIEWER, outro contrato).
         var d = csv(v);
-        ['doorfl', 'doorfr', 'doorbl', 'doorbr'].forEach(function (nome, i) {
+        ['fl', 'fr', 'rl', 'rr'].forEach(function (nome, i) {
           if (d[i] === null) return;
-          marca(function (n) { return n.indexOf(nome) === 0; }, d[i] > 0);
+          metas[nome] = d[i] > 0 ? 1 : 0;
         });
-        if (d[4] !== null && d[4] !== undefined)
-          marca(function (n) { return n.indexOf('hingetrunk') === 0; }, d[4] > 0);
+        if (d[4] !== null && d[4] !== undefined) metas.trunk = d[4] > 0 ? 1 : 0;
 
       } else if (chave === 'car.basic.window_status') {
         // 1=fechado, 2=aberto, 3=entreaberto. Fechado é 1 — tratar 0 como fechado
         // é o erro clássico aqui. E 0 não é fechado nem aberto: é leitura em
         // trânsito, então não desenha nada em vez de acusar vidro aberto à toa.
         var w = csv(v);
-        ['windowfl', 'windowfr', 'windowbl', 'windowbr'].forEach(function (nome, i) {
+        ['vfl', 'vfr', 'vrl', 'vrr'].forEach(function (nome, i) {
           if (!w[i]) return;
-          marca(function (n) { return n.indexOf(nome) === 0; }, w[i] !== 1);
+          metas[nome] = w[i] !== 1 ? 1 : 0;
         });
 
       } else if (chave === 'car.basic.sunroof_status' || chave === 'car.basic.sunshade_status') {
@@ -567,7 +642,7 @@
   // depender do carro estar naquele estado.
   var teste = qs.get('teste');
   if (teste) setTimeout(function () {
-    var m = { porta:  ['car.basic.door_status',   '1,1,1,1,0,1'],
+    var m = { porta:  ['car.basic.door_status',   qs.get('portas') || '{1,1,1,1,1}'],
               vidro:  ['car.basic.window_status', '1,2,1,2'],
               teto:   ['car.basic.sunroof_status', '60'],
               farol:  ['car.basic.low_beam_light_status', '1'],
@@ -576,7 +651,7 @@
       window.setCarState({ porta_fl: true, porta_malas: true, vidro_rl: true,
                            teto: true, farol: true, destrancado: true });
     } else if (teste === 'tudo') {
-      window.onCarDataUpdate('car.basic.door_status', '1,0,0,0,0,1');
+      window.onCarDataUpdate('car.basic.door_status', '{1,0,0,0,1}');
       window.onCarDataUpdate('car.basic.window_status', '2,1,2,1');
       window.onCarDataUpdate('car.basic.sunroof_status', '60');
       window.onCarDataUpdate('car.basic.low_beam_light_status', '1');
