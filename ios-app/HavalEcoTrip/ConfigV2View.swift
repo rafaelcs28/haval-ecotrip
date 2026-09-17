@@ -125,15 +125,6 @@ struct ConfigV2View: View {
                         .buttonStyle(.plain)
                         div
                         NavigationLink {
-                            Viewer3DView()
-                        } label: {
-                            rowLabel(icon: "cube.transparent", tint: DS.teal,
-                                     title: "Carro em 3D",
-                                     value: "Visualizador do head unit", chevron: true)
-                        }
-                        .buttonStyle(.plain)
-                        div
-                        NavigationLink {
                             ZonasSilencioView()
                         } label: {
                             rowLabel(icon: "mappin.slash", tint: DS.orange,
