@@ -221,22 +221,65 @@
         // `Wheel_#0` na cena. Casar com o nome cru não encontrava nada e o aro
         // simplesmente não era montado, sem erro nenhum.
         carro.traverse(function (o) { if (/^wheel/i.test(o.name || '')) rodas.push(o); });
-        // Escala o aro pelo PNEU daquela roda: os dois GLBs podem ter sido
-        // exportados em unidades diferentes, e chutar 1:1 dá aro flutuando ou
-        // engolido pelo pneu.
-        var bp = new THREE.Box3().setFromObject(proto);
-        var tp = bp.getSize(new THREE.Vector3());
-        var dAro = Math.max(tp.x, tp.y, tp.z) || 1;
+        // Entra como FILHO do nó da roda, sem escala minha: o nó já carrega o
+        // transform (posição, rotação e escala) daquela roda, e aplicar uma escala
+        // por cima multiplicava duas vezes — o aro nascia minúsculo dentro do pneu,
+        // presente na cena e invisível na tela. `escalaAro` fica por parâmetro pra
+        // ajustar no olho se o export do aro estiver noutra unidade.
+        // Escala medida DEPOIS de encaixar, não antes: só com o aro já filho do nó
+        // da roda é que a medida inclui o transform do pai. Tentei os dois palpites
+        // antes — calcular pelo pneu sem o pai (aro microscópico dentro do pneu) e
+        // usar 1:1 (aro do tamanho do carro, pra fora da caixa de roda).
+        var kMan = qs.get('escalaAro');
+        var cx = new THREE.Box3(), tv = new THREE.Vector3();
         rodas.forEach(function (w) {
-          var bw = new THREE.Box3().setFromObject(w), tw = bw.getSize(new THREE.Vector3());
-          var dRoda = Math.max(tw.x, tw.y, tw.z) || dAro;
+          // Diâmetro do PNEU daquela roda — é a referência física do aro.
+          var pneu = null;
+          // SEM exigir isMesh: `Tire_#000_1` é um grupo, e a malha dentro dele tem
+          // outro nome. Com o filtro de mesh o pneu nunca era encontrado e a escala
+          // silenciosamente não era aplicada.
+          w.traverse(function (x) { if (!pneu && /tire/i.test(x.name || '')) pneu = x; });
           var c = proto.clone(true);
-          c.scale.setScalar((dRoda * 0.62) / dAro);   // aro ocupa ~62% do pneu
           c.name = '__aro';
           w.add(c);
+          if (kMan) { c.scale.setScalar(parseFloat(kMan)); return; }
+          if (!pneu) return;
+          // Box3.setFromObject lê matrixWorld, que continua VELHA logo depois do
+          // add(). Sem este update a medida sai do lugar antigo e a escala nunca
+          // corrige — foi por isso que o aro continuou gigante duas tentativas.
+          // Escala E POSIÇÃO. Só escalar não resolvia: em 1,0 o aro aparecia FORA e
+          // ABAIXO da roda, ou seja o pivô dele não está no centro do cubo. Alinho
+          // os centros das duas caixas depois de escalar — vale pra qualquer aro do
+          // catálogo, sem constante medida à mão que envelhece no próximo export.
+          w.updateMatrixWorld(true);
+          cx.setFromObject(c); cx.getSize(tv);
+          var dAro = Math.max(tv.x, tv.y, tv.z) || 1;
+          cx.setFromObject(pneu); cx.getSize(tv);
+          var dPneu = Math.max(tv.x, tv.y, tv.z) || dAro;
+          c.scale.setScalar((dPneu * 0.66) / dAro);
+
+          w.updateMatrixWorld(true);
+          var ca = cx.setFromObject(c).getCenter(new THREE.Vector3());
+          var cp = cx.setFromObject(pneu).getCenter(new THREE.Vector3());
+          // Diferença em MUNDO convertida pro espaço do pai — somar direto em
+          // position ignoraria rotação e escala do nó da roda.
+          var d = cp.sub(ca);
+          var inv = new THREE.Matrix4().copy(w.matrixWorld).invert();
+          var origem = new THREE.Vector3(0, 0, 0).applyMatrix4(inv);
+          c.position.add(d.applyMatrix4(inv).sub(origem));
         });
         pede();
-        document.documentElement.setAttribute('data-aro', rodas.length + ' rodas');
+        if (qs.get('diag') === '1') {
+          var nomes = [];
+          carro.traverse(function (o) {
+            if (/wheel|tire|hub|rim/i.test(o.name || '')) nomes.push(o.name + (o.isMesh ? '*' : ''));
+          });
+          var d = document.createElement('div');
+          d.style.cssText = 'position:fixed;left:8px;top:120px;z-index:9;background:#000c;color:#ff0;'
+            + 'font:10px monospace;padding:6px;max-width:95%;white-space:pre-wrap';
+          d.textContent = 'aro em ' + rodas.length + ' rodas | nós roda: ' + nomes.slice(0, 22).join(', ');
+          document.body.appendChild(d);
+        }
       }, undefined, function (e) { console.warn('[carro] aro falhou', e); });
     }
 
