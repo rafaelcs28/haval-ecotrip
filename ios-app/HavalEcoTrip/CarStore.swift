@@ -427,6 +427,10 @@ final class CarStore: ObservableObject {
     }
 
     private static let lanPassthrough: Set<String> = [
+        // `car` e `car_raw` são os blocos de chaves CRUAS do CarConstants que o APK
+        // exporta pro viewer 3D. Passam inteiros e ninguém mais os lê — o painel
+        // nativo continua usando os campos normalizados de sempre.
+        "car", "car_raw",
         "speed_kmh", "motor_power_kw", "engine_rpm", "batt_power_pct", "steering_angle",
         "gear", "odometer_km", "soc_pct", "battery_current_a", "batt_12v_pct",
         "charge_power_kw", "charge_remaining_min", "outside_temp", "inside_temp",

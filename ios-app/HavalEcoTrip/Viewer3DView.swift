@@ -72,9 +72,15 @@ private struct WebViewer3D: UIViewRepresentable {
         cfg.mediaTypesRequiringUserActionForPlayback = []
         // Config ANTES de qualquer script da página: o shim é injetado no fim do
         // body pelo servidor e lê estas globais na primeira linha que executa.
+        // __ECOTRIP_NATIVE__ manda o shim ficar só como receptor: quem alimenta é
+        // este lado, pelo CarStore, que já está em LAN direta com o carro. Duas
+        // rotas pro mesmo campo discordam mais cedo ou mais tarde — e a página,
+        // servida por HTTPS, nem alcançaria o carro em http: o WebKit barra como
+        // mixed content, e não há chave pública no WKWebView pra liberar.
         let js = """
         window.__ECOTRIP_TOKEN__ = \(jsonString(token));
         window.__ECOTRIP_BASE__  = \(jsonString(base));
+        window.__ECOTRIP_NATIVE__ = true;
         """
         cfg.userContentController.addUserScript(
             WKUserScript(source: js, injectionTime: .atDocumentStart, forMainFrameOnly: true))
@@ -86,6 +92,7 @@ private struct WebViewer3D: UIViewRepresentable {
         wv.scrollView.backgroundColor = .black
         wv.scrollView.bounces = false          // o viewer trata o próprio gesto
         wv.load(URLRequest(url: url))
+        context.coordinator.comecaAlimentar(wv)
         return wv
     }
 
@@ -100,10 +107,60 @@ private struct WebViewer3D: UIViewRepresentable {
 
     final class Coord: NSObject, WKNavigationDelegate {
         private let pai: WebViewer3D
+        private var timer: Timer?
+        private weak var wv: WKWebView?
+        private var pronto = false
+        private var ultimo: [String: String] = [:]
         init(_ p: WebViewer3D) { pai = p }
+        deinit { timer?.invalidate() }
+
+        /// Empurra as chaves cruas do carro pro viewer a 4 Hz.
+        ///
+        /// 4 Hz e não os 10 Hz que a LAN entrega: cada push redesenha, e o olho não
+        /// vê a diferença num modelo 3D — o que ele veria é a bateria do iPad
+        /// acabando. Só chave que MUDOU é enviada, pelo mesmo motivo.
+        func comecaAlimentar(_ w: WKWebView) {
+            wv = w
+            timer?.invalidate()
+            timer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
+                self?.empurra()
+            }
+        }
+
+        private func empurra() {
+            guard pronto, let w = wv else { return }
+            let r = CarStore.shared.raw
+            var pares: [(String, String)] = []
+            // `car` traz o que tem campo normalizado; `car_raw` o resto, direto do
+            // barramento. `car` por último: em conflito, vence o valor curado.
+            for bloco in ["car_raw", "car"] {
+                guard let d = r[bloco] as? [String: Any] else { continue }
+                for (k, v) in d {
+                    if v is NSNull { continue }
+                    let s = String(describing: v)
+                    if ultimo[k] == s { continue }
+                    ultimo[k] = s
+                    pares.append((k, s))
+                }
+            }
+            guard !pares.isEmpty else { return }
+            // Uma avaliação só por lote: cada evaluateJavaScript cruza a ponte
+            // pro processo do WebView, e 40 chaves viravam 40 travessias.
+            let js = pares.map { k, v in
+                "window.onCarDataUpdate&&window.onCarDataUpdate(\(quote(k)),\(quote(v)));"
+            }.joined()
+            w.evaluateJavaScript(js, completionHandler: nil)
+        }
+
+        private func quote(_ s: String) -> String {
+            (try? String(data: JSONSerialization.data(withJSONObject: [s]), encoding: .utf8))
+                .map { String($0.dropFirst().dropLast()) } ?? "\"\""
+        }
 
         func webView(_ w: WKWebView, didFinish navigation: WKNavigation!) {
             pai.carregando = false
+            pronto = true
+            ultimo.removeAll()   // recarregou: o viewer esqueceu tudo, reenvia
         }
         func webView(_ w: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
             pai.carregando = false

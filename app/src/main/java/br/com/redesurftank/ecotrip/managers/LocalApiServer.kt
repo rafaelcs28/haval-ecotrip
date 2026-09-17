@@ -424,6 +424,38 @@ class LocalApiServer(
             "steer_mode"        to m.lastPublishedSteerMode.takeIf { it >= 0 },
             "one_pedal"         to m.lastPublishedOnePedal.takeIf { it >= 0 },
             "esp_enable"        to m.lastPublishedEsp.takeIf { it >= 0 },
+            // ── Chaves CRUAS do barramento, no nome do próprio CarConstants ──
+            //
+            // Pro viewer 3D (Haval-H6-3D), que fala esse vocabulário nativamente.
+            // Mandar o valor CRU e não o nosso normalizado 'on'/'off' evita um
+            // round-trip que perde informação: `door_status` e `window_status` são
+            // vetores por slot (o porta-malas é o slot 5, não o 4) e vidro tem
+            // quatro estados (0=movendo 1=fechado 2=aberto 3=parcial), não dois.
+            // Traduzir pra booleano e traduzir de volta erra nos dois sentidos.
+            //
+            // Sub-objeto separado de propósito: o `state` de cima é o contrato do
+            // iPad e não muda: quem não conhece `car` simplesmente ignora.
+            // Chaves que o viewer pede e que não têm campo normalizado nosso —
+            // luzes, EPB, auto-hold, espelhos, médias de consumo. Saem do mapa CRU
+            // do CarDataManager, então basta a chave existir no CarConstants: não
+            // precisa de campo nem de case novo aqui quando o viewer pedir mais.
+            "car_raw" to CarDataManager.getInstance().rawCarValues,
+            "car" to linkedMapOf<String, Any?>(
+                "car.basic.door_status"          to m.latestDoorStatusRaw.ifEmpty { null },
+                "car.basic.window_status"        to m.latestWindowStatusRaw.ifEmpty { null },
+                "car.basic.door_lock_status"     to m.latestLockStatus,
+                // Teto e cortina já vêm em percentual do CAN (0=fechado, 200=vent,
+                // 1..100=%), que é exatamente a escala que o viewer desenha.
+                "car.basic.sunroof_status"       to cachedSkylight(),
+                "car.basic.sunshade_status"      to cachedShade(),
+                "car.basic.vehicle_speed"        to m.latestSpeedKmh,
+                "car.basic.gear_status"          to m.latestGear.ifEmpty { null },
+                "car.basic.driving_ready_state"  to m.latestDrivingReadyState,
+                "car.basic.steering_wheel_angle" to m.latestSteeringAngle,
+                "car.basic.seat_belt_warning"    to m.latestSeatBeltWarning,
+                "car.basic.tpms_warning"         to m.latestTpmsWarning.takeIf { it >= 0 },
+                "car.basic.low_beam_light_status" to m.latestFrontLight,
+            ),
         )
         return gson.toJson(data)
     }

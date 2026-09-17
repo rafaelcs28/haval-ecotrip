@@ -156,4 +156,25 @@ enum class CarConstants(val value: String) {
 
     // Steering wheel assist mode — writable. 0=Normal, 1=Sport, 2=Conforto
     CAR_DRIVE_SETTING_STEER_MODE("car.drive_setting.steering_wheel_assist_mode"),
+
+    // ── Chaves do viewer 3D (Haval-H6-3D) que ainda não capturávamos ──────────
+    // O iPad renderiza aquele app inteiro e lê tudo pela LAN, então o que o APK
+    // não captura fica apagado no desenho do carro. São de leitura: entram no
+    // snapshot do LocalApiServer e não mudam nada do que já existe.
+    //
+    // NÃO incluí `car.ipk_light.tpms_warning` nem `car.basic.tpms_status/units`:
+    // o comentário lá em cima registra que o SDK não expõe pneu por roda neste
+    // carro, e `car.basic.tpms_warning` (que já temos) é o agregado que sobra.
+    // Adicionar chave que o barramento não responde só polui o log de leitura.
+    CAR_BASIC_EPB_STATE("car.basic.epb_state"),
+    CAR_BASIC_HAND_BRAKE_STATUS("car.basic.hand_brake_status"),
+    CAR_BASIC_HAZARD_LIGHT_STATUS("car.basic.hazard_light_status"),
+    CAR_BASIC_HIGH_BEAM_LIGHT_STATUS("car.basic.high_beam_light_status"),
+    CAR_BASIC_REAR_FOG_LIGHT_STATUS("car.basic.rear_fog_light_status"),
+    CAR_BASIC_AVG_FUEL_CONSUMPTION("car.basic.avg_fuel_consumption"),
+    CAR_BASIC_CUR_JOURNEY_AVG_FUEL_CONSUME("car.basic.cur_journey_avg_fuel_consume"),
+    CAR_EV_INFO_AVG_ENERGY_SINCE_STARTUP("car.ev_info.avg_energy_consume_info_since_startup"),
+    CAR_INTELLIGENT_AUTO_HOLD_STATE("car.intelligent_driving_info.auto_hold_state"),
+    CAR_DRIVE_SETTING_OUTLINE_LAMPS_STATE("car.drive.setting.outline_lamps_state"),
+    CAR_DRIVE_SETTING_MIRROR_FOLD_STATE("car.drive.setting.outside_view_mirror_fold_state"),
 }

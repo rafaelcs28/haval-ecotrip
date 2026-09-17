@@ -38,8 +38,19 @@ class CarDataManager private constructor() {
 
     val isConnected: Boolean get() = controlService != null
 
+    /** Último valor CRU de cada chave do CarConstants, como o barramento entregou.
+     *
+     *  Existe pro viewer 3D, que fala o vocabulário do CarConstants nativamente:
+     *  exportar o cru evita o round-trip pelos nossos campos normalizados, que
+     *  perde informação (vetor de portas vira 5 booleanos, vidro de 4 estados vira
+     *  2). E é um mapa, não campo por chave, pra não precisar mexer aqui toda vez
+     *  que o viewer quiser mais uma. */
+    private val rawValues = java.util.concurrent.ConcurrentHashMap<String, String>()
+    val rawCarValues: Map<String, String> get() = rawValues
+
     private val remoteListener = object : IListener.Stub() {
         override fun onDataChanged(key: String, value: String) {
+            if (value.isNotEmpty()) rawValues[key] = value
             synchronized(lock) { dataListeners.toList() }.forEach { it(key, value) }
         }
     }

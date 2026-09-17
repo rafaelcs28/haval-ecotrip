@@ -143,6 +143,17 @@
     setTimeout(conecta, espera);
   }
 
+  // Dentro do app iOS quem alimenta é o NATIVO, que já fala LAN direta com o carro
+  // (ws://<carro>:8088/ws/state) e tem o dado mais cru e mais rápido. O shim então
+  // não abre rede nenhuma: duas rotas pro mesmo campo é a receita de discordância,
+  // e a página, servida por HTTPS, nem conseguiria alcançar o carro em http — o
+  // WebKit barra como mixed content. Aqui ele fica só como receptor.
+  if (window.__ECOTRIP_NATIVE__) {
+    window.__ecotripShim = { aplica: aplica, estado: function () { return ultimo; },
+                             modo: 'nativo' };
+    return;
+  }
+
   puxaEstado();
   conecta();
   setInterval(puxaEstado, 30000);   // rede de segurança se o WS ficar meio-aberto
