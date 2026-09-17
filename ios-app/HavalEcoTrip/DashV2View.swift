@@ -29,6 +29,7 @@ struct DashV2View: View {
     @State private var showArrival = false
     @State private var showParking = false
     @State private var showShare = false
+    @State private var showCarro3D = false
     @State private var showDestCost = false
     @State private var showTimeline = false
     @State private var showAssistant = false
@@ -179,6 +180,9 @@ struct DashV2View: View {
         .sheet(isPresented: $showArrival) { ArrivalSheet(trips: trips.trips) }
         .sheet(isPresented: $showParking) { ParkingSheet() }
         .sheet(isPresented: $showShare) { ShareStatusSheet() }
+        // Tela cheia, não sheet: o desenho precisa da tela inteira pra o destaque
+        // de porta/vidro/teto se ler — foi o tamanho que matou o bloco no topo.
+        .fullScreenCover(isPresented: $showCarro3D) { Carro3DTela() }
         .sheet(isPresented: $showDestCost) { DestinationsCostSheet() }
         .sheet(isPresented: $showTimeline) { EventsTimelineSheet() }
         .sheet(isPresented: $showAssistant) { AssistantSheet() }
@@ -1074,6 +1078,12 @@ struct DashV2View: View {
             quickTile("parkingsign", "Estacionei", DS.green) { showParking = true }
             quickTile("square.and.arrow.up", "Compartilhar", DS.blue) { showShare = true }
             quickTile("dollarsign.arrow.circlepath", "Custo", DS.green) { showDestCost = true }
+            // Carro 3D entra AQUI e não em `actionsGrid`: aquela grade é de comandos
+            // que tocam o carro, esta fileira é de telas do app. E é toque pra abrir,
+            // não bloco fixo: a 190pt no topo do Painel o desenho não pagava o
+            // espaço, e um WebView desenhando numa home aberta o dia todo é bateria
+            // à toa.
+            quickTile("cube.transparent", "Carro 3D", DS.orange) { showCarro3D = true }
         }
     }
 
