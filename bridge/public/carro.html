@@ -442,15 +442,15 @@
   }
 
   function aplicaPecas() {
-    // Sinal invertido em relação ao viewer do netseek: ele monta as dobradiças em
-    // runtime, este GLB já traz as dele, e a orientação do nó é a oposta. Com o
-    // sinal deles a porta girava pra DENTRO da carroceria — some por trás da
-    // lataria e o desenho fica idêntico ao de porta fechada. (Mesma pegadinha do
-    // ângulo de câmera, que também estava documentado ao contrário.)
-    if (dobr.fl) dobr.fl.rotation.y =  atual.fl * GIRO_PORTA;
-    if (dobr.rl) dobr.rl.rotation.y =  atual.rl * GIRO_PORTA;
-    if (dobr.fr) dobr.fr.rotation.y = -atual.fr * GIRO_PORTA;
-    if (dobr.rr) dobr.rr.rotation.y = -atual.rr * GIRO_PORTA;
+    // Sinal NEGATIVO do lado esquerdo, igual ao viewer. Cheguei a inverter achando
+    // que a porta girava pra dentro da lataria; era eu lendo mal a captura — com o
+    // sinal invertido ela abre pra FRENTE, tipo porta suicida, e de 3/4 fica quase
+    // de perfil: some da silhueta e lê como "carro sem porta". Com este sinal a
+    // porta sai pro lado, com o espelho junto, e a fresta aparece na borda traseira.
+    if (dobr.fl) dobr.fl.rotation.y = -atual.fl * GIRO_PORTA;
+    if (dobr.rl) dobr.rl.rotation.y = -atual.rl * GIRO_PORTA;
+    if (dobr.fr) dobr.fr.rotation.y =  atual.fr * GIRO_PORTA;
+    if (dobr.rr) dobr.rr.rotation.y =  atual.rr * GIRO_PORTA;
     if (dobr.trunk) dobr.trunk.rotation.z = atual.trunk * GIRO_TAMPA;
     vidros.forEach(function (v) { v.no.position.y = v.y0 - v.curso * atual[v.k]; });
   }
