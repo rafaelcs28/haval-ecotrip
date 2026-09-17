@@ -5314,9 +5314,17 @@ if (fs.existsSync(path.join(WEB3D_DIR, 'index.html'))) {
     // isso é bateria à toa; (2) liga o tier _perfMobile, que por comentário do
     // próprio autor "não muda o que o carro parece"; (3) só abre mão do GLTFExporter,
     // que é recurso de desktop. O shim é quem entrega os dados no lugar do WS deles.
-    if (!cru.endsWith('/') || req.query.android === undefined) {
+    // `?hq=1` desliga o modo mobile pra comparar qualidade × fluidez no iPad.
+    // ATENÇÃO à direção: `?android` NÃO reduz fps, ele AUMENTA — é o tier de
+    // performance. Entre outras coisas ele deixa `preserveDrawingBuffer` falso, e
+    // o comentário do autor explica que preservá-lo "derrota o caminho rápido de
+    // descarte que GPUs móveis usam" e é "custo puro por quadro" ali. Em hq o
+    // desenho ganha alguns detalhes que o autor descreve como invisíveis à
+    // distância de visão, e o custo por quadro sobe. Quem julga é o olho no iPad.
+    const hq = req.query.hq === '1';
+    if (!cru.endsWith('/') || (!hq && req.query.android === undefined)) {
       const q = new URLSearchParams(req.query);
-      q.set('android', '1');
+      if (!hq) q.set('android', '1'); else q.delete('android');
       return res.redirect(302, '/3d/?' + q.toString());
     }
     try {
@@ -5325,9 +5333,18 @@ if (fs.existsSync(path.join(WEB3D_DIR, 'index.html'))) {
       // histórico) — por isso a injeção aqui só acontece se vier e for válido.
       const t = String(req.query.token || '');
       const ok = t && (!BRIDGE_TOKEN_HASH || t === BRIDGE_TOKEN_HASH || sha256hex(t) === BRIDGE_TOKEN_HASH);
-      const cfg = ok ? `<script>window.__ECOTRIP_TOKEN__=${JSON.stringify(t)};</script>` : '';
+      let cfg = ok ? `<script>window.__ECOTRIP_TOKEN__=${JSON.stringify(t)};</script>` : '';
+      // Sem `?android`, o telemetryClient deles volta a tentar ws://127.0.0.1:8888
+      // — endereço do carro, inexistente aqui — e reconecta a cada 3s pra sempre.
+      // Neutralizo só ESSE endereço, antes de qualquer script rodar; todo o resto
+      // (inclusive o WS do shim) segue normal.
+      if (hq) cfg += '<script>(function(){var W=window.WebSocket;window.WebSocket='
+        + 'function(u,p){if(String(u).indexOf("127.0.0.1:8888")>=0){return {close:function(){},'
+        + 'send:function(){},readyState:3,addEventListener:function(){}};}return new W(u,p);};'
+        + 'window.WebSocket.prototype=W.prototype;})();</script>';
       const html = fs.readFileSync(path.join(WEB3D_DIR, 'index.html'), 'utf8')
-        .replace('</body>', cfg + '<script src="/ecotrip-3d-shim.js"></script></body>');
+        .replace('</body>', cfg + '<script src="/ecotrip-3d-shim.js"></script>'
+                                + '<script src="/ecotrip-3d-placa.js"></script></body>');
       res.type('html').set('Cache-Control', 'no-store').send(html);
     } catch (e) { res.status(500).send('viewer indisponível: ' + e.message); }
   });
