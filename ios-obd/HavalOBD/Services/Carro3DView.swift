@@ -59,14 +59,14 @@ struct Carro3DWeb: UIViewRepresentable {
         // `native=1` faz o SERVIDOR marcar que quem alimenta é o app — o shim da
         // página então não abre fetch nem WebSocket. Injetar isso do lado do app
         // correria com o carregamento; pelo servidor a ordem é garantida.
-        // `hq=1` TIRA a flag `android` que a rota força. Ela some porque é ela que
-        // esconde a barra de ferramentas do visualizador (`dayNightDisplay` vai a
-        // 'none' quando `_androidApp`) — no carro isso é certo, o launcher do carro
-        // põe a barra dele; aqui deixava o iPad sem engrenagem e sem como adicionar
-        // widget. `debug=1` liga o shell preview, que é o que traz os quadros de
-        // widget de volta sem se declarar Android.
+        // `android=1` fica LIGADA: é ela que faz a página calcular e entregar os
+        // cards da barra inferior (`_syncDockIndicators` só dispara com ela). O
+        // efeito colateral é esconder a barra de ferramentas do viewer — certo no
+        // carro, onde o launcher põe a dele —, e o shim devolve a engrenagem por
+        // CSS. `demo=0` desliga o modo demonstração: sem ele o clima mostra
+        // "DEMO · 22°" e um roteiro de portas abre e fecha sozinho.
         let base = baseUrl.hasSuffix("/") ? String(baseUrl.dropLast()) : baseUrl
-        if let url = URL(string: base + "/3d/?native=1&hq=1&debug=1") {
+        if let url = URL(string: base + "/3d/?native=1&android=1&demo=0") {
             web.load(URLRequest(url: url))
         }
         context.coordinator.web = web

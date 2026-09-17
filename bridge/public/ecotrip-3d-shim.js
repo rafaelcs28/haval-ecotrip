@@ -251,6 +251,107 @@
     }, 12000);
   })();
 
+  // ── Barra inferior (o "dock" que o Android desenha) ───────────────────────
+  //
+  // No carro essa barra NÃO é da página: o app Android do netseek desenha ela, e a
+  // página só calcula o conteúdo e entrega por `AppLauncherBridge.updateDockIndicators`
+  // — daí ela não existir no iPad, onde não há app Android nenhum.
+  //
+  // Em vez de reimplementar em Swift, a barra é montada aqui com o MESMO payload:
+  // basta existir um `AppLauncherBridge` pra a página passar a mandar. Toque volta
+  // pelo `dockCommand`, que é por onde o Android também responde — os popups que
+  // abrem são os da própria página.
+  //
+  // `_syncDockIndicators` só dispara com a flag `android`, então ela precisa estar
+  // ligada; é ela também que esconde a barra de ferramentas do viewer, e por isso
+  // o CSS abaixo devolve a engrenagem.
+  function montaBarraInferior() {
+    var ALTURA = 92;
+    // Cada card do payload já vem completo — id, title, action e os campos de
+    // conteúdo (`primary`, `secondary`, `metricA`). Esta tabela só traduz o
+    // título; card que ela não conhecer usa o nome original em vez de sumir.
+    var PT = {
+      navigation: 'Navegação', climate: 'Clima', consumption: 'Energia',
+      media: 'Mídia', range: 'Autonomia', power: 'Fluxo', status: 'Veículo',
+      clock: 'Relógio', desktops: 'Áreas', driveMode: 'Condução',
+      powerMode: 'Tração', regen: 'Regeneração'
+    };
+
+    var barra = document.createElement('div');
+    barra.id = 'ecotrip-dock';
+    barra.style.cssText = 'position:fixed;left:0;right:0;bottom:0;height:' + ALTURA + 'px;'
+      + 'display:flex;gap:8px;padding:8px 10px;box-sizing:border-box;overflow-x:auto;'
+      + 'background:rgba(10,14,20,.82);backdrop-filter:blur(12px);'
+      + 'border-top:1px solid rgba(255,255,255,.10);z-index:40;'
+      + '-webkit-overflow-scrolling:touch;scrollbar-width:none';
+    document.body.appendChild(barra);
+
+    var estilo = document.createElement('style');
+    estilo.textContent = '#ecotrip-dock::-webkit-scrollbar{display:none}'
+      + '#ecotrip-dock .c{flex:0 0 auto;min-width:132px;padding:8px 11px;border-radius:12px;'
+      + 'background:rgba(255,255,255,.055);border:1px solid rgba(255,255,255,.10);'
+      + 'color:#e8eef5;font:11px/1.25 system-ui,sans-serif;text-align:left;cursor:pointer}'
+      + '#ecotrip-dock .c:active{background:rgba(255,255,255,.12)}'
+      + '#ecotrip-dock .t{font-size:8px;letter-spacing:.14em;opacity:.5;text-transform:uppercase}'
+      + '#ecotrip-dock .p{display:block;margin-top:3px;font-size:15px;font-weight:600}'
+      + '#ecotrip-dock .s{display:block;margin-top:1px;font-size:10px;opacity:.62}';
+    document.head.appendChild(estilo);
+
+    function pinta(payload) {
+      var cards = payload.bottomCards || [];
+      barra.textContent = '';
+      cards.forEach(function (c) {
+        if (!c || !c.id) return;
+        var b = document.createElement('button');
+        b.className = 'c';
+        b.innerHTML = '<span class="t"></span><span class="p"></span><span class="s"></span>';
+        b.children[0].textContent = PT[c.id] || c.title || c.id;
+        b.children[1].textContent = c.primary || c.value || '—';
+        b.children[2].textContent = c.secondary || c.metricA || '';
+        b.onclick = function () {
+          try { window.__app && window.__app.dockCommand(c.action || ''); } catch (e) {}
+        };
+        barra.appendChild(b);
+      });
+      barra.style.display = cards.length ? 'flex' : 'none';
+    }
+
+    // A página já reserva espaço pro dock do Android por `--hv-launcher-bottom`:
+    // declarar a altura aqui mantém o chrome dela ACIMA da barra em vez de embaixo.
+    function reservaEspaco() {
+      if (typeof window.onAndroidShellLayout !== 'function') return;
+      window.onAndroidShellLayout({
+        right: 'idle', left: false,
+        safeTop: 22, safeLeft: 16, safeRight: 16,
+        safeBottom: ALTURA, launcherBottom: ALTURA
+      });
+    }
+
+    window.AppLauncherBridge = window.AppLauncherBridge || {};
+    window.AppLauncherBridge.updateDockIndicators = function (json) {
+      try { pinta(typeof json === 'string' ? JSON.parse(json) : (json || {})); } catch (e) {}
+    };
+    // Stubs: sem eles a página cai no catch a cada chamada. `loadWidgets` fica de
+    // fora de propósito — ausente, ela usa localStorage, que é onde os widgets do
+    // iPad devem morar mesmo.
+    ['setShellMode', 'setSplitRatio', 'setSlotUse', 'setChromeOnTop', 'updateCenterFill',
+     'revealLauncher', 'reportDesktopSwitcherHit', 'beginSplashFade', 'endSplashOverlay',
+     'launchAppInPopup', 'launchAppInSlot', 'saveShellBackground', 'captureDesktopSnapshot'
+    ].forEach(function (m) {
+      if (!window.AppLauncherBridge[m]) window.AppLauncherBridge[m] = function () {};
+    });
+    window.AppLauncherBridge.getInstalledApps = function () { return '[]'; };
+    window.AppLauncherBridge.getAppIcon = function () { return ''; };
+    window.AppLauncherBridge.getShellLayout = function () { return ''; };
+
+    var t = 0;
+    (function espera() {
+      if (window.__app) { reservaEspaco(); return; }
+      if (++t > 60) return;
+      setTimeout(espera, 300);
+    })();
+  }
+
   if (window.__ECOTRIP_NATIVE__) {
     // ── Comandos do visualizador → hospedeiro nativo ────────────────────────
     //
@@ -277,6 +378,63 @@
     // `right:'idle'` faz o viewer se declarar hospedado em Android e esconder a
     // própria barra de ferramentas — que no carro é certo (o launcher do carro põe
     // a dele) e aqui não: sem a engrenagem não há como adicionar widget nenhum.
+    // ── Quadro de widgets: semente de primeira abertura ────────────────────
+    //
+    // O layout de fábrica do visualizador tem UM widget (o card de mídia) — era
+    // isso, e não um defeito, o "não aparece widget". No carro o quadro está cheio
+    // porque foi montado à mão ao longo do tempo, e aquilo mora no localStorage do
+    // WebView do carro; o iPad começa do zero.
+    //
+    // Semente só quando NÃO existe layout salvo: a partir da primeira edição o
+    // arranjo é do dono e nunca mais é tocado. As colunas 3..5 ficam livres de
+    // propósito — é a faixa onde o viewer enquadra o carro (`_carGapColumns`), e
+    // ocupar tudo faria ele desenhar o carro por cima dos cards.
+    // ── Quadro de widgets: semente de primeira abertura ────────────────────
+    //
+    // O layout de fábrica do visualizador tem UM widget (o card de mídia) — era
+    // isso, e não um defeito, o "não aparece widget". No carro o quadro está cheio
+    // porque foi montado à mão ao longo do tempo, e aquilo mora no armazenamento
+    // do WebView do carro; o iPad começa do zero.
+    //
+    // A semente entra pela persistência do PRÓPRIO viewer (`_persistWidgets`), não
+    // escrevendo `h6_widgets` na mão: aquela chave só é lida quando ainda não
+    // existe nenhuma área salva, e da segunda abertura em diante ela é ignorada
+    // em favor do layout guardado dentro da área ativa.
+    //
+    // Só age uma vez, e só se o layout ainda for o de fábrica. Quem já montou o
+    // quadro tem mais de um card, ou outro tipo, e passa batido pra sempre.
+    function semeiaWidgets() {
+      var app = window.__app;
+      if (!app || !app._widgetsReady || typeof app._persistWidgets !== 'function') return false;
+      try {
+        if (localStorage.getItem('ecotrip_widgets_semeado')) return true;
+        var L = app._widgetLayout, itens = L && L.appCar && L.appCar.left && L.appCar.left.items;
+        var defabrica = !Array.isArray(itens) || itens.length === 0
+          || (itens.length === 1 && itens[0].type === 'media');
+        localStorage.setItem('ecotrip_widgets_semeado', '1');
+        if (!defabrica) return true;
+        // Colunas 3..5 ficam livres de propósito: é a faixa onde o viewer enquadra
+        // o carro (`_carGapColumns`), e ocupar tudo faz ele desenhar por cima.
+        app._widgetLayout = { version: 2, appCar: { left: { use: 'widgets', items: [
+          { id: 'w-range',  type: 'range',  x: 0, y: 0, w: 2, h: 1 },
+          { id: 'w-power',  type: 'power',  x: 2, y: 0, w: 1, h: 1 },
+          { id: 'w-status', type: 'status', x: 0, y: 1, w: 2, h: 1 },
+          { id: 'w-media',  type: 'media',  x: 2, y: 1, w: 1, h: 1 }
+        ] } } };
+        app._pendingSlotSync = true;
+        app._persistWidgets();
+        app.setState({ widgetRev: (app.state.widgetRev || 0) + 1 });
+      } catch (e) {}
+      return true;
+    }
+    var ts = 0;
+    (function tentaSemente() {
+      if (semeiaWidgets() || ++ts > 80) return;
+      setTimeout(tentaSemente, 400);
+    })();
+
+    montaBarraInferior();
+
     var estiloBarra = document.createElement('style');
     estiloBarra.textContent = '.hv-toolbar{display:flex !important}';
     document.head.appendChild(estiloBarra);
