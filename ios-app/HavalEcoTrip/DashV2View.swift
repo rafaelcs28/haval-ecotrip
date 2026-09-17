@@ -92,7 +92,6 @@ struct DashV2View: View {
 
     /// Desligável: é a tela mais aberta do app, e um WebView aqui tem custo real
     /// de partida. Quem não quiser paga zero.
-    @AppStorage("carro_3d_painel") private var carro3D = true
 
     var body: some View {
         ScrollView {
@@ -105,10 +104,6 @@ struct DashV2View: View {
                 LiveRouteBanner()
                 if hasAnomaly { anomalyCard }
                 Group {
-                    // Carro em 3D acima do bloco de energia. Entra aqui e não no
-                    // topo absoluto porque endereço e estado do carro são o que se
-                    // lê primeiro; o desenho é contexto, não manchete.
-                    if carro3D { Carro3DHero() }
                     heroEnergia
                     barsBlock
                     stateChips
