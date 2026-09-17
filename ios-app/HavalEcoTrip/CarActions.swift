@@ -90,7 +90,10 @@ enum CarActions {
 
     // ── State fetch + change detection ───────────────────────────────────────
 
-    private static func fetchState() async -> [String: Any]? {
+    /// Estado cru do bridge. Interno (não privado) porque os App Intents leem o
+    /// mesmo estado que as ações leem — duas rotas pro mesmo dado é a receita de
+    /// discordância.
+    static func fetchState() async -> [String: Any]? {
         guard let url = URL(string: BridgeRouter.shared.currentURL + "/api/state") else { return nil }
         var req = URLRequest(url: url)
         req.timeoutInterval = 6

@@ -140,7 +140,7 @@ struct LockCarIntent: AppIntent {
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let ok = await CarIntentAPI.action("lock_close")
         WidgetCenter.shared.reloadAllTimelines()
-        return .result(dialog: ok ? "Carro trancado." : "Não consegui trancar agora.")
+        return .result(dialog: ok ? "Mandei trancar. O carro leva alguns segundos." : "O servidor não aceitou o comando.")
     }
 }
 
@@ -149,9 +149,10 @@ struct UnlockCarIntent: AppIntent {
     static var title: LocalizedStringResource = "Destrancar o carro"
     static var description = IntentDescription("Destranca o Haval remotamente.")
     func perform() async throws -> some IntentResult & ProvidesDialog {
+        try await requestConfirmation(result: .result(dialog: "Destrancar o carro?"))
         let ok = await CarIntentAPI.action("lock_open")
         WidgetCenter.shared.reloadAllTimelines()
-        return .result(dialog: ok ? "Carro destrancado." : "Não consegui destrancar agora.")
+        return .result(dialog: ok ? "Mandei destrancar. O carro leva alguns segundos." : "O servidor não aceitou o comando.")
     }
 }
 
@@ -161,7 +162,7 @@ struct FindCarIntent: AppIntent {
     static var description = IntentDescription("Pisca os faróis e buzina o Haval pela nuvem (funciona com o carro dormindo).")
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let ok = await CarIntentAPI.action("find_car")
-        return .result(dialog: ok ? "Piscando os faróis do carro." : "Não consegui acionar agora.")
+        return .result(dialog: ok ? "Mandei piscar os faróis." : "O servidor não aceitou o comando.")
     }
 }
 
@@ -170,8 +171,9 @@ struct EngineOnIntent: AppIntent {
     static var title: LocalizedStringResource = "Ligar o motor"
     static var description = IntentDescription("Liga o motor do Haval remotamente (climatiza a cabine).")
     func perform() async throws -> some IntentResult & ProvidesDialog {
+        try await requestConfirmation(result: .result(dialog: "Ligar o motor do carro?"))
         let ok = await CarIntentAPI.action("engine_on")
-        return .result(dialog: ok ? "Motor ligado." : "Não consegui ligar o motor.")
+        return .result(dialog: ok ? "Mandei ligar o motor. Leva alguns segundos." : "O servidor não aceitou o comando.")
     }
 }
 
@@ -181,7 +183,7 @@ struct EngineOffIntent: AppIntent {
     static var description = IntentDescription("Desliga o motor do Haval remotamente.")
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let ok = await CarIntentAPI.action("engine_off")
-        return .result(dialog: ok ? "Motor desligado." : "Não consegui desligar o motor.")
+        return .result(dialog: ok ? "Mandei desligar o motor." : "O servidor não aceitou o comando.")
     }
 }
 
@@ -192,7 +194,7 @@ struct PreclimaIntent: AppIntent {
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let ok = await CarIntentAPI.action("ac_on")
         WidgetCenter.shared.reloadAllTimelines()
-        return .result(dialog: ok ? "Pré-climatização ligada." : "Não consegui ligar o ar agora.")
+        return .result(dialog: ok ? "Mandei ligar a pré-climatização." : "O servidor não aceitou o comando.")
     }
 }
 
@@ -252,6 +254,38 @@ struct ShareLiveIntent: AppIntent {
 }
 
 @available(iOS 16.0, *)
+@available(iOS 16.0, *)
+struct WindowsOpenIntent: AppIntent {
+    static var title: LocalizedStringResource = "Abrir os vidros"
+    static var description = IntentDescription("Abre todos os vidros do Haval.")
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        try await requestConfirmation(result: .result(dialog: "Abrir todos os vidros?"))
+        let ok = await CarIntentAPI.action("windows_open")
+        return .result(dialog: ok ? "Mandei abrir os vidros." : "O servidor não aceitou o comando.")
+    }
+}
+
+@available(iOS 16.0, *)
+struct WindowsCloseIntent: AppIntent {
+    static var title: LocalizedStringResource = "Fechar os vidros"
+    static var description = IntentDescription("Fecha todos os vidros do Haval.")
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        let ok = await CarIntentAPI.action("windows_close")
+        return .result(dialog: ok ? "Mandei fechar os vidros." : "O servidor não aceitou o comando.")
+    }
+}
+
+@available(iOS 16.0, *)
+struct TrunkOpenIntent: AppIntent {
+    static var title: LocalizedStringResource = "Abrir o porta-malas"
+    static var description = IntentDescription("Abre o porta-malas do Haval.")
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        try await requestConfirmation(result: .result(dialog: "Abrir o porta-malas?"))
+        let ok = await CarIntentAPI.action("trunk_open")
+        return .result(dialog: ok ? "Mandei abrir o porta-malas." : "O servidor não aceitou o comando.")
+    }
+}
+
 struct EcotripShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
         AppShortcut(intent: LockCarIntent(), phrases: [
@@ -274,6 +308,23 @@ struct EcotripShortcuts: AppShortcutsProvider {
             "Quanto de bateria no \(.applicationName)",
             "Bateria do carro no \(.applicationName)",
         ], shortTitle: "Bateria", systemImageName: "bolt.fill")
+        AppShortcut(intent: EngineOffIntent(), phrases: [
+            "Desligar o motor no \(.applicationName)",
+        ], shortTitle: "Desligar motor", systemImageName: "moon.zzz.fill")
+        AppShortcut(intent: PreclimaIntent(), phrases: [
+            "Pré-climatizar no \(.applicationName)",
+            "Ligar o ar do carro no \(.applicationName)",
+        ], shortTitle: "Pré-climatizar", systemImageName: "snowflake")
+        // Abrir vidros fica FORA das frases: o teto é 10 atalhos por app, e entre
+        // abrir e fechar o que se pede por voz é fechar — "esqueci o vidro aberto"
+        // acontece, "abre o vidro do carro parado na rua" não. O intent continua
+        // existindo pro app Atalhos; só não gasta uma das dez vagas de voz.
+        AppShortcut(intent: WindowsCloseIntent(), phrases: [
+            "Fechar os vidros no \(.applicationName)",
+        ], shortTitle: "Fechar vidros", systemImageName: "rectangle.compress.vertical")
+        AppShortcut(intent: TrunkOpenIntent(), phrases: [
+            "Abrir o porta-malas no \(.applicationName)",
+        ], shortTitle: "Porta-malas", systemImageName: "shippingbox.fill")
         AppShortcut(intent: ShareLiveIntent(), phrases: [
             "Compartilhar ao vivo no \(.applicationName)",
             "Compartilhar meu trajeto no \(.applicationName)",
