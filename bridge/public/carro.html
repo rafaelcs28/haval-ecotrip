@@ -138,16 +138,24 @@
     // céu). Medir a cena inteira dava caixa 309×1,8×309 e o enquadramento ia parar
     // a 270 unidades de distância — carro invisível, tela branca. Esconde e ignora
     // qualquer malha grande demais pra ser carro; um H6 tem 4,6 m.
-    var LIMITE = 15, escondidas = [];
+    var LIMITE = 15, ignoradas = 0;
     var box = new THREE.Box3();
     var bm = new THREE.Box3(), tm = new THREE.Vector3();
     carro.traverse(function (o) {
       if (!o.isMesh) return;
       bm.setFromObject(o); bm.getSize(tm);
-      if (Math.max(tm.x, tm.z) > LIMITE) {
-        o.visible = false; escondidas.push(o.name + ' ' + tm.x.toFixed(0) + 'x' + tm.z.toFixed(0));
-        return;
-      }
+      // DUAS decisões diferentes, que eu tinha juntado numa só e paguei caro:
+      //   > 50 un  → é cenário mesmo (BuildingMesh de milhares), esconde.
+      //   > 15 un  → não entra no enquadramento, mas CONTINUA visível.
+      // Juntar as duas sumiu com o painel da lateral traseira e deixou o interior
+      // do porta-malas à mostra — o "faltando pedaços do carro".
+      // NÃO esconde nada. Aprendi errando duas vezes: `BuildingMesh-00010_1` e
+      // `_2` medem 118.961 unidades por bounding box e são PEÇAS DO CARRO (material
+      // Plastic Black, a lateral traseira). A caixa da cena inteira dá 309, então
+      // essas medidas por malha são mentira — vértice degenerado na geometria, não
+      // tamanho real. Esconder por elas arrancava painel do carro, que foi o
+      // "faltando pedaços". O filtro fica SÓ pra decidir o enquadramento.
+      if (Math.max(tm.x, tm.z) > LIMITE) { ignoradas++; return; }
       box.union(bm);
     });
     if (box.isEmpty()) box.setFromObject(carro);   // nada sobrou: volta ao ingênuo
@@ -160,10 +168,37 @@
     // Pintura. O material da lataria se chama `Body` no GLB. Troco a cor dele e
     // NÃO a de tudo: `car_black_plastic`, vidro e roda também são materiais, e
     // pintar por varredura deixaria o carro inteiro monocromático.
+    // ?mats=1 pinta por MATERIAL pra eu enxergar quem é quem: vermelho = Body,
+    // verde = Roof (os dois que o viewer trata como pintura no HEV), azul =
+    // Plastic Black. Enxergar vence deduzir.
+    if (qs.get('mats') === '1') {
+      var CORES = { 'Body': 0xff3333, 'Roof': 0x33ff33, 'Plastic Black': 0x3366ff };
+      carro.traverse(function (o) {
+        if (!o.isMesh || !o.material) return;
+        var c = CORES[o.material.name];
+        if (c === undefined) return;
+        var m = o.material.clone(); m.color = new THREE.Color(c);
+        if ('emissive' in m) m.emissive = new THREE.Color(c * 0);
+        o.material = m;
+      });
+    }
+    // ?portas=1 pinta as malhas sob os nós Door_*/Hinge_TRUNK, pra localizar de
+    // onde vem a área escura sem ficar adivinhando por formato.
+    if (qs.get('portas') === '1') {
+      carro.traverse(function (o) {
+        if (!/^(Door_|Hinge_TRUNK)/i.test(o.name || '')) return;
+        o.traverse(function (x) {
+          if (!x.isMesh || !x.material) return;
+          var m = x.material.clone(); m.color = new THREE.Color(0xff2222); x.material = m;
+        });
+      });
+    }
     var cor = qs.get('cor');
     if (cor) {
       carro.traverse(function (o) {
-        if (!o.isMesh || !o.material || o.material.name !== 'Body') return;
+        // O perfil HEV do viewer trata `Body` E `Roof` como pintura
+        // (bodyPaintRe: /^(body|roof)$/i). Só `Body` deixava o teto de outra cor.
+        if (!o.isMesh || !o.material || !/^(body|roof)$/i.test(o.material.name || '')) return;
         // Clona: o material é compartilhado entre as peças da lataria, e mexer no
         // original vaza pra qualquer outra instância que venha a usá-lo.
         var m = o.material.clone();
@@ -172,6 +207,39 @@
       });
     }
     scene.add(carro);
+
+    // ── Aro ───────────────────────────────────────────────────────────────────
+    // O corpo vem com pneu e cubo, mas SEM aro: o viewer monta o aro de um GLB do
+    // catálogo conforme a versão (phev34 → HavalPHEV34-wheel.glb). Sem esse passo
+    // a roda fica um disco preto, que é o que aparecia.
+    var ARO = qs.get('aro') || '/3d/assets/wheels/HavalPHEV34-wheel.glb';
+    if (ARO !== 'nenhum') {
+      loader.load(ARO, function (g) {
+        var proto = g.scene;
+        var rodas = [];
+        // O GLTFLoader SANITIZA nome de nó: `Wheel_#0` no arquivo não chega como
+        // `Wheel_#0` na cena. Casar com o nome cru não encontrava nada e o aro
+        // simplesmente não era montado, sem erro nenhum.
+        carro.traverse(function (o) { if (/^wheel/i.test(o.name || '')) rodas.push(o); });
+        // Escala o aro pelo PNEU daquela roda: os dois GLBs podem ter sido
+        // exportados em unidades diferentes, e chutar 1:1 dá aro flutuando ou
+        // engolido pelo pneu.
+        var bp = new THREE.Box3().setFromObject(proto);
+        var tp = bp.getSize(new THREE.Vector3());
+        var dAro = Math.max(tp.x, tp.y, tp.z) || 1;
+        rodas.forEach(function (w) {
+          var bw = new THREE.Box3().setFromObject(w), tw = bw.getSize(new THREE.Vector3());
+          var dRoda = Math.max(tw.x, tw.y, tw.z) || dAro;
+          var c = proto.clone(true);
+          c.scale.setScalar((dRoda * 0.62) / dAro);   // aro ocupa ~62% do pneu
+          c.name = '__aro';
+          w.add(c);
+        });
+        pede();
+        document.documentElement.setAttribute('data-aro', rodas.length + ' rodas');
+      }, undefined, function (e) { console.warn('[carro] aro falhou', e); });
+    }
+
     msg.style.display = 'none';
     pede();
     window.__carroPronto = true;
@@ -186,7 +254,7 @@
         + '\ncam ' + camera.position.x.toFixed(1) + ',' + camera.position.y.toFixed(1)
         + ',' + camera.position.z.toFixed(1)
         + '\nmalhas ' + (function(){var n=0;carro.traverse(function(x){if(x.isMesh)n++;});return n;})()
-        + '\nescondi ' + escondidas.length + ': ' + escondidas.slice(0,4).join(' | ');
+        + '\nfora do enquadramento: ' + ignoradas;
       document.body.appendChild(d);
     }
   }, function (p) {
