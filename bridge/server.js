@@ -5334,6 +5334,11 @@ if (fs.existsSync(path.join(WEB3D_DIR, 'index.html'))) {
       const t = String(req.query.token || '');
       const ok = t && (!BRIDGE_TOKEN_HASH || t === BRIDGE_TOKEN_HASH || sha256hex(t) === BRIDGE_TOKEN_HASH);
       let cfg = ok ? `<script>window.__ECOTRIP_TOKEN__=${JSON.stringify(t)};</script>` : '';
+      // `?native=1`: o hospedeiro nativo alimenta o viewer e o shim fica só como
+      // receptor. Injetado pelo SERVIDOR e não por WKUserScript porque aqui a ordem
+      // é garantida — o shim lê esta global na primeira linha que executa, e
+      // qualquer injeção do lado do app corre com o carregamento da página.
+      if (req.query.native === '1') cfg += '<script>window.__ECOTRIP_NATIVE__=true;</script>';
       // Sem `?android`, o telemetryClient deles volta a tentar ws://127.0.0.1:8888
       // — endereço do carro, inexistente aqui — e reconecta a cada 3s pra sempre.
       // Neutralizo só ESSE endereço, antes de qualquer script rodar; todo o resto
@@ -5349,7 +5354,10 @@ if (fs.existsSync(path.join(WEB3D_DIR, 'index.html'))) {
   });
   // Assets são ~92MB e imutáveis entre atualizações — cache longo é o que torna
   // a segunda abertura instantânea no iPad.
-  app.use('/3d', express.static(WEB3D_DIR, { maxAge: '7d', immutable: true }));
+  // 1 ano + immutable: o conteúdo só muda quando a cópia local muda, e é isso que
+  // faz o app do iPad baixar UMA vez e reusar. Sem isso, cada abertura revalidaria
+  // 255 arquivos e a tela demoraria a pintar fora de casa.
+  app.use('/3d', express.static(WEB3D_DIR, { maxAge: '365d', immutable: true }));
   console.log('✓ Viewer 3D servido em /3d');
 }
 

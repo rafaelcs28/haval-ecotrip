@@ -26,6 +26,9 @@ final class BridgePublisher: ObservableObject {
     /// URL HTTP do APK na LAN. Preenchido pelo `LocalDiscovery` quando o iPad
     /// está na mesma rede do carro. nil → não disponível, usa Tailscale.
     @Published var lanUrl: URL? = nil
+    /// Último snapshot cru recebido pelo /ws/state do carro (10 Hz). Quem quiser ler
+    /// o estado do carro observa isto em vez de abrir conexão própria.
+    @Published var ultimoSnapshotLan: [String: Any] = [:]
     /// Toggle do user: usar LAN quando disponível. Default ON.
     @Published var useLanWhenAvailable: Bool =
         UserDefaults.standard.object(forKey: "use_lan_when_available") as? Bool ?? true
@@ -341,6 +344,12 @@ final class BridgePublisher: ObservableObject {
                     }
                     if let obj = try? JSONSerialization.jsonObject(with: data),
                        let dict = obj as? [String: Any] {
+                        // Publica o snapshot além de chamar o callback: o cluster usa
+                        // `onClusterExtra`, e um segundo consumidor (o viewer 3D) não
+                        // pode roubar esse gancho nem abrir uma SEGUNDA conexão no
+                        // mesmo /ws/state — seria tráfego dobrado e dois clientes pro
+                        // NanoWSD do APK contar.
+                        self.ultimoSnapshotLan = dict
                         self.onClusterExtra?(dict)
                     }
                 }

@@ -75,6 +75,18 @@ struct SettingsView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
 
+                // ── Carro em 3D ─────────────────────────────────────────
+                Section("Visualização") {
+                    NavigationLink {
+                        Carro3DView()
+                    } label: {
+                        Label("Carro em 3D", systemImage: "cube.transparent")
+                    }
+                    Text("Mesmo visualizador do head unit, alimentado pela LAN direta. "
+                         + "Os modelos baixam do bridge na primeira abertura e ficam em cache.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+
                 // ── Conexão LAN direta com o carro ──────────────────────
                 Section("Conexão LAN direta (carro)") {
                     Toggle("Usar LAN quando disponível", isOn: Binding(
