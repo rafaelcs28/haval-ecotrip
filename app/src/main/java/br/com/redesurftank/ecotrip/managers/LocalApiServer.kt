@@ -449,7 +449,9 @@ class LocalApiServer(
                 "car.basic.sunroof_status"       to cachedSkylight(),
                 "car.basic.sunshade_status"      to cachedShade(),
                 "car.basic.vehicle_speed"        to m.latestSpeedKmh,
-                "car.basic.gear_status"          to m.latestGear.ifEmpty { null },
+                // CRU (0=N 2=D 3=P 4=R), não a letra: este bloco é contrato de
+                // chave crua, e o viewer 3D faz parseInt — "R" virava NaN.
+                "car.basic.gear_status"          to m.latestGearRaw.ifEmpty { null },
                 "car.basic.driving_ready_state"  to m.latestDrivingReadyState,
                 "car.basic.steering_wheel_angle" to m.latestSteeringAngle,
                 "car.basic.seat_belt_warning"    to m.latestSeatBeltWarning,

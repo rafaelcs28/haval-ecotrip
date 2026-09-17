@@ -218,6 +218,9 @@ class MqttManager private constructor() {
     var latestSpeedKmh: Float = 0f
     var latestSteeringAngle: Float = 0f   // ângulo do volante (graus, ±) — via expressa
     var latestGear: String = ""
+    /// Valor CRU do CAN (0=N 2=D 3=P 4=R). O bloco `car` da API LAN é contrato de
+    /// chaves CRUAS: mandar a letra ali fazia o viewer 3D ler parseInt("R") = NaN.
+    var latestGearRaw: String = ""
     var latestInsideTemp: Float = 0f
         set(value) { field = value; if (::prefs.isInitialized) prefs.edit().putFloat(SharedPreferencesKeys.LATEST_INSIDE_TEMP, value).apply() }
     var latestOutsideTemp: Float = 0f
@@ -952,6 +955,7 @@ class MqttManager private constructor() {
                         else -> raw?.toString() ?: value.trim()
                     }
                     latestGear = gearStr
+                    latestGearRaw = value.trim()
                     tripManager.onGear(gearStr)
                 }
                 CarConstants.CAR_BASIC_DRIVING_READY_STATE.value -> {

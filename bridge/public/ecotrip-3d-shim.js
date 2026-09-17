@@ -159,6 +159,98 @@
   // não é gambiarra por cima do layout dele: é o mesmo caminho, com os números do
   // iPad. Um quadro vira faixa em CIMA, o outro faixa EMBAIXO, e o carro fica na
   // banda do meio.
+  // ── Ré: o carro andava pra frente com a marcha em R ───────────────────────
+  //
+  // `vehicle_speed` do barramento é SEM SINAL, então o visualizador girava roda e
+  // cenário pra frente em qualquer marcha. Ele já sabe desenhar ré — `motionSpeed`
+  // negativo é previsto (o rótulo dele mostra "↩") —, só nunca recebia sinal.
+  //
+  // O sentido é aplicado em `_setMotionSpeed` DEPOIS do valor normal, e não
+  // invertendo o `vehicle_speed` na entrada: a velocidade crua também alimenta o
+  // cálculo de desaceleração que acende a luz de freio (limiar 1,0 m/s²), e um
+  // número negativo ali faria arrancada de ré acender freio.
+  //
+  // A marcha chega nas duas formas — "4" cru do CAN e "R" já traduzido pelo bloco
+  // curado do APK —, por isso as duas contam.
+  (function () {
+    var emRe = false, kmh = 0, tentativas = 0;
+
+    function aplicaSentido() {
+      var app = window.__app;
+      if (!app || typeof app._setMotionSpeed !== 'function') return;
+      if (app._motionSpeedHeldByUi) return;    // o slider OVERRIDE→MOTION tem a vez
+      var v = Math.abs(kmh) / 40;              // unidade do viewer: km/h ÷ 40
+      app._setMotionSpeed(emRe ? -v : v);
+    }
+
+    function envolve() {
+      var alvo = window.onCarDataUpdate;
+      if (typeof alvo !== 'function' || alvo.__ecotripRe) return false;
+      var novo = function (k, v) {
+        var r = alvo(k, v);
+        if (k === 'car.basic.gear_status') {
+          var t = String(v).trim().toUpperCase();
+          emRe = (t === 'R' || t === '4');
+          aplicaSentido();                     // sair da ré também precisa desfazer
+        } else if (k === 'car.basic.vehicle_speed') {
+          var n = parseFloat(String(v).trim());
+          if (isFinite(n)) { kmh = n; if (emRe) aplicaSentido(); }
+        }
+        return r;
+      };
+      novo.__ecotripRe = true;
+      window.onCarDataUpdate = novo;
+      return true;
+    }
+
+    (function tenta() {
+      if (envolve() || ++tentativas > 60) return;
+      setTimeout(tenta, 300);                  // telemetryClient.js ainda não subiu
+    })();
+  })();
+
+  // ── Banco de teste ────────────────────────────────────────────────────────
+  //
+  // `?teste=porta` / `?teste=re` injetam um estado depois do boot e escrevem o
+  // resultado numa tarja. Existe porque o simulador não deixa tocar na tela nem
+  // ler o console: sem isso, "a porta abre?" e "a ré inverteu?" só se responde com
+  // o carro na frente. A tarja mostra o que o VISUALIZADOR entendeu, não o que eu
+  // mandei — é a diferença entre verificar e torcer.
+  (function () {
+    var m = /[?&]teste=([a-z_]+)/.exec(location.search);
+    if (!m) return;
+    var qual = m[1];
+    function tarja(txt) {
+      var d = document.getElementById('__teste') || document.createElement('div');
+      d.id = '__teste';
+      d.style.cssText = 'position:fixed;left:8px;bottom:8px;z-index:99999;padding:6px 10px;'
+        + 'background:#000c;color:#0f0;font:12px monospace;border-radius:6px;pointer-events:none';
+      d.textContent = txt;
+      document.body.appendChild(d);
+    }
+    setTimeout(function () {
+      var f = window.onCarDataUpdate;
+      if (typeof f !== 'function') { tarja('sem onCarDataUpdate'); return; }
+      if (qual === 'porta') {
+        f('car.basic.door_status', '{1,1,0,0,0}');
+        f('car.basic.window_status', '{2,2,1,1}');
+      } else if (qual === 're') {
+        f('car.basic.gear_status', '4');
+        f('car.basic.vehicle_speed', '20');
+      } else if (qual === 'drive') {
+        f('car.basic.gear_status', '2');
+        f('car.basic.vehicle_speed', '20');
+      }
+      setTimeout(function () {
+        var app = window.__app, v = null;
+        try { v = app && app._currentMotionSpeed && app._currentMotionSpeed(); } catch (e) {}
+        var portas = app && app._carDoorSlots ? app._carDoorSlots.join(',') : '—';
+        tarja(qual + ' | motionSpeed=' + (v == null ? '?' : (v * 40).toFixed(1) + ' km/h')
+              + ' | portas=' + portas);
+      }, 1200);
+    }, 12000);
+  })();
+
   if (window.__ECOTRIP_NATIVE__) {
     // ── Comandos do visualizador → hospedeiro nativo ────────────────────────
     //
