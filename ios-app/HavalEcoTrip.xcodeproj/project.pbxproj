@@ -91,6 +91,7 @@
 		8C3FA5DCF7133607EC275A89 /* TripLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B0EC768E77CEDD141861D39 /* TripLiveActivity.swift */; };
 		8CA84A44DD5A9465CC78AE3E /* ZonasSilencioView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60686867184476F78E4F1691 /* ZonasSilencioView.swift */; };
 		8E243C437C40D71C7010FE21 /* DepartureAskManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C084EFC344E5832B39E32B4E /* DepartureAskManager.swift */; };
+		8E3E42A58256E1265F9ABF9C /* Viewer3DView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD9E9BE61AC66E47F660A414 /* Viewer3DView.swift */; };
 		907217011438996B6B234CBE /* DriveSheetsV2.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76A9EF7A30ED513EAB44FB7C /* DriveSheetsV2.swift */; };
 		918327725401C391E14F531E /* BydDesignSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93B4FFFA330691BE792A6CD2 /* BydDesignSystem.swift */; };
 		91E8922CD20B94185D7454A2 /* BydLiveActivityPush.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60050A5D1678A9235BEB0730 /* BydLiveActivityPush.swift */; };
@@ -311,6 +312,7 @@
 		B8C3D7D3EC9E5F913CE28355 /* BydMiniMap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BydMiniMap.swift; sourceTree = "<group>"; };
 		B9BBC1E7EB38A5621A6751AA /* ShareExtension.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = ShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		BA1A634027D62C075536F879 /* CarHeroView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarHeroView.swift; sourceTree = "<group>"; };
+		BD9E9BE61AC66E47F660A414 /* Viewer3DView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Viewer3DView.swift; sourceTree = "<group>"; };
 		BE979130639CFA45EF877A5B /* EscutaSheetV2.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EscutaSheetV2.swift; sourceTree = "<group>"; };
 		BF4805E2E098ECAD51E0A441 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		C084EFC344E5832B39E32B4E /* DepartureAskManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DepartureAskManager.swift; sourceTree = "<group>"; };
@@ -458,6 +460,7 @@
 				5A0BF2317E99D3BCDB34E075 /* SpeedFenceSheet.swift */,
 				099944E7CC1BCBFE6E3A0B09 /* TempConsumptionSheet.swift */,
 				74CCDC7C537D3745BA939111 /* ViagensV2View.swift */,
+				BD9E9BE61AC66E47F660A414 /* Viewer3DView.swift */,
 				60686867184476F78E4F1691 /* ZonasSilencioView.swift */,
 				93D5723EF46BF3407E23FA8C /* group.br.com.consorciolimpagyn.havalecotrip	 */,
 			);
@@ -1011,6 +1014,7 @@
 				F84F3B84B0CC0D78ACA5E89B /* TempConsumptionSheet.swift in Sources */,
 				2480E68526B78CFE04F2C37B /* TripActivityAttributes.swift in Sources */,
 				21AF7E0943D616FF926C18CE /* ViagensV2View.swift in Sources */,
+				8E3E42A58256E1265F9ABF9C /* Viewer3DView.swift in Sources */,
 				8CA84A44DD5A9465CC78AE3E /* ZonasSilencioView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
