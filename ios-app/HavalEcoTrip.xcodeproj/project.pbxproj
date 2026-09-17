@@ -66,6 +66,7 @@
 		6AC2ED6F20F98D935A953C0A /* CarAudioSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8AFBB5C9B38702398F58246 /* CarAudioSession.swift */; };
 		6B1479E8CF6EDE745584DB42 /* LockWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7C8F9D484392C67E49E3E78 /* LockWidgets.swift */; };
 		6B3EDE545B2502D265805216 /* OfflineSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2EBD85F9B7D028E3D520ED77 /* OfflineSync.swift */; };
+		6B7DDFE48C18BE72254235E8 /* Carro3DHero.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4BC4B9C3CB748609DFE218E2 /* Carro3DHero.swift */; };
 		6C1FE4315EFC5408CBF98788 /* NotificationsCenterSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7817E2396F9C3176DF2954E /* NotificationsCenterSheet.swift */; };
 		6D2D2B81A43BB7E8D26EE81F /* SongProActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF8BF0D6E8837DEC20056AB8 /* SongProActivityAttributes.swift */; };
 		7115EB26C2B97145BFBF7471 /* DepartureAskActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2FF82EC94D39D72882566F0F /* DepartureAskActivityAttributes.swift */; };
@@ -251,6 +252,7 @@
 		492762BFD473DC0FD6D89688 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		4982EFADD98ECBA5A75504CD /* SongProTripLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SongProTripLiveActivity.swift; sourceTree = "<group>"; };
 		4A804763C29A6FBD8871C5A7 /* LivePreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LivePreview.swift; sourceTree = "<group>"; };
+		4BC4B9C3CB748609DFE218E2 /* Carro3DHero.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Carro3DHero.swift; sourceTree = "<group>"; };
 		4FB73D94989A66F5854A3DDE /* MilestonesSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MilestonesSheet.swift; sourceTree = "<group>"; };
 		547E045E2B2DA8F7E8B45F40 /* ControlsWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ControlsWidget.swift; sourceTree = "<group>"; };
 		59969E598BACA40911CD6232 /* ArrivalSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArrivalSheet.swift; sourceTree = "<group>"; };
@@ -385,6 +387,7 @@
 				B8AFBB5C9B38702398F58246 /* CarAudioSession.swift */,
 				BA1A634027D62C075536F879 /* CarHeroView.swift */,
 				863D3C9EEE6ACCFDC700C7A1 /* CarMessageSheet.swift */,
+				4BC4B9C3CB748609DFE218E2 /* Carro3DHero.swift */,
 				8E2D54361AF23B5E75EF04B7 /* CarStatusInfoView.swift */,
 				C68353FA3433CBE88BFA4347 /* CarStore.swift */,
 				FFF70A4F7CBB079E318E2289 /* ChargeAnalysisSheet.swift */,
@@ -935,6 +938,7 @@
 				3415D5108C04AAF8C9573FBE /* CarMessageSheet.swift in Sources */,
 				D09B9FDE499BEDF1D32157CF /* CarStatusInfoView.swift in Sources */,
 				E4DBC8604FEF4AF3E5F39336 /* CarStore.swift in Sources */,
+				6B7DDFE48C18BE72254235E8 /* Carro3DHero.swift in Sources */,
 				920A0533D20932EF36FC4D49 /* ChargeActivityAttributes.swift in Sources */,
 				30E7EF6F07C0F5426CFC7E3D /* ChargeAnalysisSheet.swift in Sources */,
 				BBDA07ABAFDD14A11CEAC022 /* ChargeForecastSheet.swift in Sources */,

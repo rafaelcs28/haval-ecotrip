@@ -13,6 +13,7 @@ struct ConfigV2View: View {
 
     @AppStorage("faceid_lock") private var faceIDLock = false
     @AppStorage("lan_enabled") private var lanEnabled = false
+    @AppStorage("carro_3d_painel") private var carro3D = true
     @AppStorage("glass_enabled") private var glassEnabled = true
     @AppStorage("reduce_anim") private var reduceAnim = false
 
@@ -140,6 +141,12 @@ struct ConfigV2View: View {
                                      value: latencyMs.map { "WS 1 Hz · \($0) ms" } ?? "WS 1 Hz", chevron: true)
                         }
                         .buttonStyle(.plain)
+                    }
+                    group("APARÊNCIA DO PAINEL") {
+                        toggleRow(icon: "cube.transparent", tint: DS.teal,
+                                  title: "Carro em 3D no Painel",
+                                  sub: "Desenho do carro no topo · custa alguns segundos na 1ª abertura",
+                                  isOn: $carro3D)
                     }
                     group("AVANÇADO") {
                         toggleRow(icon: "wifi", tint: DS.teal, title: "LAN direta",
