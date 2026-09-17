@@ -18,6 +18,10 @@ import SwiftUI
 import WebKit
 
 struct Carro3DTela: View {
+    /// `true` quando mora dentro da Drive: sem fundo preto e sem botão de fechar,
+    /// porque ali o chrome (chip de estado, coluna de ações, painel de velocidade)
+    /// é da tela hospedeira e o carro é só o miolo.
+    var embutido = false
     @Environment(\.dismiss) private var dismiss
     /// Cinza do carro do dono. O verniz e o ambiente clareiam bastante: `44474f`
     /// saía prata. Este valor é o que RENDERIZA como o cinza chumbo do carro, não
@@ -26,29 +30,36 @@ struct Carro3DTela: View {
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
-            Color.black.ignoresSafeArea()
+            (embutido ? DS.bg : Color.black).ignoresSafeArea()
             if let u = url {
                 Carro3DWebView(url: u).ignoresSafeArea()
             } else {
                 Text("Configure o servidor primeiro")
                     .font(.footnote).foregroundStyle(.secondary)
             }
-            Button { dismiss() } label: {
+            if !embutido { fechar }
+        }
+    }
+
+    private var fechar: some View {
+        Button { dismiss() } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(.white)
                     .frame(width: 38, height: 38)
                     .background(.white.opacity(0.14), in: Circle())
-            }
-            .padding(.top, 10).padding(.trailing, 14)
         }
+        .padding(.top, 10).padding(.trailing, 14)
     }
 
     private var url: URL? {
         guard Settings.isConfigured else { return nil }
         // `native=1` não entra aqui: quem alimenta é o Swift, e a página só
         // desenha — ela não busca dado sozinho em nenhum caso.
-        return URL(string: Settings.apiBase + "/carro.html?cor=" + cor)
+        // Embutido o carro divide a tela com o painel de velocidade, então aperta o
+        // enquadramento: a folga que sobra bem em tela cheia deixa ele pequeno aqui.
+        return URL(string: Settings.apiBase + "/carro.html?cor=" + cor
+                   + (embutido ? "&folga=0.92" : ""))
     }
 }
 
