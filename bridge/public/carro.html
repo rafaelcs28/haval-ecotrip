@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Haval — carro</title>
+<!--
+  Renderizador MÍNIMO: só o carro, nada de interface.
+
+  Existe porque o viewer do Haval-H6-3D não tem modo "só o carro" — ele sempre
+  monta o shell inteiro (widgets, desktops, chrome). Esconder aquilo com CSS por
+  cima do DOM dele quebraria na primeira atualização que o autor fizesse. Aqui eu
+  carrego o MESMO GLB com Three.js e desenho só o veículo, com controle total.
+
+  Estado do carro entra por `window.onCarDataUpdate(chave, valor)` — o mesmo ponto
+  de entrada do viewer, então o hospedeiro nativo alimenta os dois igual.
+
+  Render sob demanda: nada de loop contínuo. Redesenha quando algo muda, quando o
+  dedo arrasta, e para de vez quando a tela sai de vista. Numa home que fica aberta
+  o dia todo, loop a 60 fps é bateria queimada à toa.
+-->
+<style>
+  html,body{margin:0;height:100%;background:transparent;overflow:hidden;
+            -webkit-user-select:none;user-select:none}
+  #cv{display:block;width:100%;height:100%;touch-action:none}
+  #msg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+       color:#8a8a90;font:12px -apple-system,system-ui,sans-serif;pointer-events:none}
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<div id="msg">carregando o carro…</div>
+
+<script src="/3d/vendor/three/build/three.min.js"></script>
+<script src="/3d/vendor/three/examples/js/loaders/GLTFLoader.js"></script>
+<script src="/3d/vendor/three/examples/js/loaders/DRACOLoader.js"></script>
+<!-- WorkerPool ANTES do KTX2Loader: no build legado examples/js ele é arquivo
+     separado e NÃO está no three.min.js. Sem ele o KTX2Loader não reclama — só
+     nunca resolve, e o carregamento fica parado em "carregando" pra sempre. -->
+<script src="/3d/vendor/three/examples/js/utils/WorkerPool.js"></script>
+<script src="/3d/vendor/three/examples/js/loaders/KTX2Loader.js"></script>
+<!-- Ambiente: o GLB usa KHR_materials_transmission/volume, e material com
+     transmissão renderiza PRETO sem scene.environment. Era o que fazia sumir
+     pedaço do carro. RoomEnvironment é gerado em memória — não custa download. -->
+<script src="/3d/vendor/three/examples/js/environments/RoomEnvironment.js"></script>
+<script>
+(function () {
+  'use strict';
+  var qs = new URLSearchParams(location.search);
+  var MODELO = qs.get('modelo') || '/3d/assets/haval-h6-hev-lite.glb';
+
+  var cv = document.getElementById('cv'), msg = document.getElementById('msg');
+  var renderer = new THREE.WebGLRenderer({ canvas: cv, antialias: true, alpha: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));  // 3x não se vê e custa 2,25×
+  if ('outputColorSpace' in renderer) renderer.outputColorSpace = THREE.SRGBColorSpace;
+  else if ('outputEncoding' in renderer) renderer.outputEncoding = THREE.sRGBEncoding;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.05;
+
+  var scene = new THREE.Scene();
+  try {
+    var pmrem = new THREE.PMREMGenerator(renderer);
+    scene.environment = pmrem.fromScene(new THREE.RoomEnvironment(), 0.04).texture;
+  } catch (e) { console.warn('[carro] sem ambiente:', e); }
+  var camera = new THREE.PerspectiveCamera(32, 1, 0.1, 100);
+
+  // Luz: sem HDR pra não pagar mais um download. Um key quente alto, um fill frio
+  // baixo e um rim atrás — suficiente pra lataria escura não virar silhueta chapada.
+  scene.add(new THREE.HemisphereLight(0xbfd4ff, 0x0a0a0c, 0.55));
+  var key = new THREE.DirectionalLight(0xffffff, 2.1); key.position.set(4, 6, 5);
+  scene.add(key);
+  var fill = new THREE.DirectionalLight(0x9fc0ff, 0.7); fill.position.set(-5, 2, 3);
+  scene.add(fill);
+  var rim = new THREE.DirectionalLight(0xffffff, 1.2); rim.position.set(-2, 3, -6);
+  scene.add(rim);
+
+  var carro = null, raio = 3, alvo = new THREE.Vector3();
+  // 3/4 DIANTEIRO. O modelo tem a frente em −Z, então o ângulo que mostra o rosto
+  // do carro é ~0,78π; 0,22π mostrava a traseira.
+  var giro = parseFloat(qs.get('giro') || String(Math.PI * 0.78));
+  var alturaCam = 0.28;
+
+  function enquadra() {
+    var l = cv.clientWidth || 1, a = cv.clientHeight || 1;
+    camera.aspect = l / a;
+    // Distância que FAZ CABER, calculada do FOV — não multiplicador no olho. Metade
+    // da maior dimensão sobre a tangente de meio-FOV é a conta clássica; em retrato
+    // divide pelo aspecto, porque aí quem limita é a largura, não a altura.
+    var vfov = camera.fov * Math.PI / 180;
+    var recuo = (raio / Math.tan(vfov / 2)) * 1.18;   // 18% de folga nas bordas
+    if (camera.aspect < 1) recuo /= camera.aspect;
+    camera.position.set(
+      alvo.x + Math.sin(giro) * recuo,
+      alvo.y + raio * alturaCam * 2.2,
+      alvo.z + Math.cos(giro) * recuo
+    );
+    camera.lookAt(alvo);
+    camera.updateProjectionMatrix();
+    renderer.setSize(l, a, false);
+  }
+
+  var precisaDesenhar = true;
+  function pede() { precisaDesenhar = true; }
+  function laco() {
+    requestAnimationFrame(laco);
+    if (!precisaDesenhar || document.hidden) return;   // parado = nada de GPU
+    precisaDesenhar = false;
+    enquadra();
+    renderer.render(scene, camera);
+  }
+  laco();
+
+  window.addEventListener('resize', pede);
+  document.addEventListener('visibilitychange', pede);
+
+  // Arrastar gira. Sem OrbitControls: só preciso de um eixo, e o arquivo dele
+  // custaria mais que estas dez linhas.
+  var arrastando = false, x0 = 0, g0 = 0;
+  cv.addEventListener('pointerdown', function (e) { arrastando = true; x0 = e.clientX; g0 = giro; cv.setPointerCapture(e.pointerId); });
+  cv.addEventListener('pointermove', function (e) { if (!arrastando) return; giro = g0 - (e.clientX - x0) * 0.008; pede(); });
+  cv.addEventListener('pointerup',   function () { arrastando = false; });
+
+  // O GLB traz geometria Draco E textura KTX2/Basis. Faltando qualquer um dos dois
+  // transcodificadores o load falha inteiro — foi o que me pegou: sem o KTX2Loader
+  // o erro vem como 'setKTX2Loader must be called before loading KTX2 textures'.
+  var draco = new THREE.DRACOLoader();
+  draco.setDecoderPath('/3d/vendor/draco/');
+  var ktx2 = new THREE.KTX2Loader();
+  ktx2.setTranscoderPath('/3d/vendor/basis/');
+  ktx2.detectSupport(renderer);          // escolhe o formato que a GPU aceita
+  var loader = new THREE.GLTFLoader();
+  loader.setDRACOLoader(draco);
+  loader.setKTX2Loader(ktx2);
+
+  loader.load(MODELO, function (gltf) {
+    carro = gltf.scene;
+    // O GLB não traz só o veículo: vem com um plano de 310 unidades junto (chão ou
+    // céu). Medir a cena inteira dava caixa 309×1,8×309 e o enquadramento ia parar
+    // a 270 unidades de distância — carro invisível, tela branca. Esconde e ignora
+    // qualquer malha grande demais pra ser carro; um H6 tem 4,6 m.
+    var LIMITE = 15, escondidas = [];
+    var box = new THREE.Box3();
+    var bm = new THREE.Box3(), tm = new THREE.Vector3();
+    carro.traverse(function (o) {
+      if (!o.isMesh) return;
+      bm.setFromObject(o); bm.getSize(tm);
+      if (Math.max(tm.x, tm.z) > LIMITE) {
+        o.visible = false; escondidas.push(o.name + ' ' + tm.x.toFixed(0) + 'x' + tm.z.toFixed(0));
+        return;
+      }
+      box.union(bm);
+    });
+    if (box.isEmpty()) box.setFromObject(carro);   // nada sobrou: volta ao ingênuo
+    var c = box.getCenter(new THREE.Vector3()), t = box.getSize(new THREE.Vector3());
+    raio = Math.max(t.x, t.y, t.z) / 2;
+    // Assenta no chão e centra na origem: o GLB pode vir com pivô em qualquer lugar.
+    carro.position.sub(c);
+    carro.position.y += t.y / 2;
+    alvo.set(0, t.y * 0.45, 0);
+    // Pintura. O material da lataria se chama `Body` no GLB. Troco a cor dele e
+    // NÃO a de tudo: `car_black_plastic`, vidro e roda também são materiais, e
+    // pintar por varredura deixaria o carro inteiro monocromático.
+    var cor = qs.get('cor');
+    if (cor) {
+      carro.traverse(function (o) {
+        if (!o.isMesh || !o.material || o.material.name !== 'Body') return;
+        // Clona: o material é compartilhado entre as peças da lataria, e mexer no
+        // original vaza pra qualquer outra instância que venha a usá-lo.
+        var m = o.material.clone();
+        m.color = new THREE.Color(cor.charAt(0) === '#' ? cor : '#' + cor);
+        o.material = m;
+      });
+    }
+    scene.add(carro);
+    msg.style.display = 'none';
+    pede();
+    window.__carroPronto = true;
+    document.documentElement.setAttribute('data-ok', String(raio.toFixed(2)));
+    if (qs.get('diag') === '1') {
+      var d = document.createElement('div');
+      d.style.cssText = 'position:fixed;left:8px;top:8px;z-index:9;background:#000c;color:#0f0;'
+        + 'font:11px monospace;padding:6px 8px;border-radius:6px;white-space:pre';
+      d.textContent = 'tam ' + t.x.toFixed(2) + '×' + t.y.toFixed(2) + '×' + t.z.toFixed(2)
+        + '\nraio ' + raio.toFixed(2)
+        + '\ncanvas ' + cv.clientWidth + '×' + cv.clientHeight
+        + '\ncam ' + camera.position.x.toFixed(1) + ',' + camera.position.y.toFixed(1)
+        + ',' + camera.position.z.toFixed(1)
+        + '\nmalhas ' + (function(){var n=0;carro.traverse(function(x){if(x.isMesh)n++;});return n;})()
+        + '\nescondi ' + escondidas.length + ': ' + escondidas.slice(0,4).join(' | ');
+      document.body.appendChild(d);
+    }
+  }, function (p) {
+    if (p.total) msg.textContent = 'carregando o carro… ' + Math.round(p.loaded / p.total * 100) + '%';
+  }, function (err) {
+    msg.textContent = 'erro: ' + (err && (err.message || err.type || err)) ;
+    document.documentElement.setAttribute('data-erro', String(err && (err.message || err.type || err)));
+    console.error('[carro]', err);
+  });
+
+  // ── Estado ────────────────────────────────────────────────────────────────
+  // Mesma porta de entrada do viewer. Por ora destaca as aberturas: porta ou vidro
+  // aberto acende a malha correspondente. Abrir a porta de verdade exigiria o rig
+  // do modelo — e, num carro do tamanho de um dedo na tela, destacar lê melhor que
+  // animar.
+  var ABERTO = new THREE.Color(0xf59e0b);
+  var marcadas = [];
+  function destaca(regex, ligado) {
+    if (!carro) return;
+    carro.traverse(function (o) {
+      if (!o.isMesh || !regex.test(o.name || '')) return;
+      if (ligado) {
+        if (!o.userData.__matOrig) o.userData.__matOrig = o.material;
+        var m = o.material.clone();
+        if ('emissive' in m) { m.emissive = ABERTO; m.emissiveIntensity = 0.6; }
+        o.material = m; marcadas.push(o);
+      } else if (o.userData.__matOrig) {
+        o.material = o.userData.__matOrig; delete o.userData.__matOrig;
+      }
+    });
+    pede();
+  }
+
+  var PORTAS = [/door.*fl|fl.*door|front.*left/i, /door.*fr|fr.*door|front.*right/i,
+                /door.*rl|rl.*door|rear.*left/i,  /door.*rr|rr.*door|rear.*right/i];
+  window.onCarDataUpdate = function (chave, valor) {
+    try {
+      if (chave === 'car.basic.door_status') {
+        var v = String(valor).split(',');
+        for (var i = 0; i < PORTAS.length && i < v.length; i++) destaca(PORTAS[i], +v[i] > 0);
+      }
+    } catch (e) {}
+  };
+})();
+</script>
+</body>
+</html>
