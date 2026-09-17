@@ -17,11 +17,29 @@ struct Carro3DView: View {
     @EnvironmentObject var publisher: BridgePublisher
     @AppStorage("bridge_base_url") private var bridgeBase = "https://bridge.malha.dev"
 
+    /// Largura de projeto do visualizador. Ele foi feito pra head unit larga e não
+    /// reflui: num viewport de 1024 pt o layout não encolhe — ele fica CORTADO, e o
+    /// carro sai pela direita da tela. Então o WebView é montado com 1920 px de
+    /// largura e a camada inteira é reduzida pra caber. É o mesmo desenho que o
+    /// head unit mostra, só menor — e não uma versão espremida que o autor nunca fez.
+    private let larguraProjeto: CGFloat = 1920
+    /// Altura relativa do viewport de projeto. Ajustável em Config só pra achar o
+    /// valor certo no olho — o palco do carro é 8/3 no CSS do visualizador.
+    @AppStorage("carro3d_altura_rel") private var alturaRel: Double = 0.75
+
     var body: some View {
-        Carro3DWeb(baseUrl: bridgeBase, publisher: publisher)
-            .ignoresSafeArea()
-            .navigationTitle("Carro em 3D")
-            .navigationBarTitleDisplayMode(.inline)
+        GeometryReader { g in
+            let escala = max(0.05, g.size.width / larguraProjeto)
+            let alturaProjeto = larguraProjeto * CGFloat(alturaRel)
+            Carro3DWeb(baseUrl: bridgeBase, publisher: publisher)
+                .frame(width: larguraProjeto, height: alturaProjeto)
+                .scaleEffect(escala, anchor: .topLeading)
+                .frame(width: g.size.width, height: g.size.height, alignment: .topLeading)
+                .clipped()
+        }
+        .ignoresSafeArea()
+        .navigationTitle("Carro em 3D")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 

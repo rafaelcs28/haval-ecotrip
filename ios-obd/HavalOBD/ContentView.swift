@@ -11,6 +11,7 @@ struct SettingsView: View {
     @EnvironmentObject var discovery: OBDDiscovery
     @EnvironmentObject var channel: OBDBridgeChannel
     @Environment(\.dismiss) var dismiss
+    @AppStorage("carro3d_altura_rel") private var carro3dAlturaRel: Double = 0.75
     @State private var copiedFeedback = false
     @State private var bridgePassword: String = ""
     @State private var bridgeTotp: String = ""
@@ -77,14 +78,39 @@ struct SettingsView: View {
 
                 // ── Carro em 3D ─────────────────────────────────────────
                 Section("Visualização") {
-                    NavigationLink {
-                        Carro3DView()
+                    Button {
+                        AbaPedida.shared.aba = .carro3d
+                        dismiss()
                     } label: {
-                        Label("Carro em 3D", systemImage: "cube.transparent")
+                        Label("Abrir carro em 3D", systemImage: "cube.transparent")
                     }
-                    Text("Mesmo visualizador do head unit, alimentado pela LAN direta. "
-                         + "Os modelos baixam do bridge na primeira abertura e ficam em cache.")
+                    Text("O visualizador virou ABA, não é mais uma tela aqui dentro: "
+                         + "deslizar com DOIS DEDOS pra esquerda ou pra direita alterna "
+                         + "painel e carro, sempre em tela cheia. Aqui dentro ele abria "
+                         + "espremido no cartão de ajustes.\n\nMesmo visualizador do head "
+                         + "unit, alimentado pela LAN direta. Os modelos baixam do bridge "
+                         + "na primeira abertura e ficam em cache.")
                         .font(.caption).foregroundStyle(.secondary)
+
+                    // O visualizador é de terceiro e não tem modo retrato: ele
+                    // dimensiona o carro pela ALTURA do viewport. Num iPad em pé,
+                    // viewport cheio = carro maior que a tela, cortado pela direita.
+                    // Então o WebView é montado com uma altura de projeto MENOR que
+                    // a tela e a camada é reduzida pra caber. Este controle é essa
+                    // altura — o valor certo muda com o modelo de iPad, por isso é
+                    // botão e não constante.
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text("Altura do palco 3D")
+                            Spacer()
+                            Text(String(format: "%.2f", carro3dAlturaRel))
+                                .foregroundStyle(.secondary).monospacedDigit()
+                        }
+                        Slider(value: $carro3dAlturaRel, in: 0.35...1.30, step: 0.05)
+                        Text("Menor = carro menor e mais folga. Maior = carro maior; "
+                             + "passando do ponto ele sai pela direita da tela.")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
                 }
 
                 // ── Conexão LAN direta com o carro ──────────────────────

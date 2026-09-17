@@ -60,6 +60,21 @@ struct HavalOBDApp: App {
     }
 }
 
+/// Abas do Cockpit. Deslizar com dois dedos anda entre elas; o conteúdo ocupa a
+/// tela inteira do iPad, sem ficar dentro de cartão nenhum.
+enum AbaCockpit: Int, CaseIterable {
+    case painel, carro3d
+    var titulo: String { self == .painel ? "Painel" : "Carro em 3D" }
+}
+
+/// Aba pedida de fora do RootView (botão dos ajustes). Gesto é rápido mas
+/// invisível: sem um caminho visível, quem não souber do gesto não acha o 3D.
+final class AbaPedida: ObservableObject {
+    static let shared = AbaPedida()
+    @Published var aba: AbaCockpit? = nil
+    private init() {}
+}
+
 /// Root — cluster fullscreen + 3 maneiras de abrir settings:
 ///   1. Botão flutuante visível (engrenagem) no canto superior direito
 ///   2. Hotspot ampliado 120×120 nesse mesmo canto (toque longo 0.6s)
@@ -71,6 +86,13 @@ struct RootView: View {
     @StateObject  private var nav     = NavigationService()
     @State private var showSettings   = false
     @State private var showNav        = false
+    @State private var aba: AbaCockpit = .painel
+    @ObservedObject private var pedida = AbaPedida.shared
+    /// O visualizador 3D baixa ~92 MB na primeira abertura. Monta na primeira vez
+    /// que a aba é pedida e NUNCA desmonta — trocar de aba não pode recarregar
+    /// aquilo. Por isso as duas ficam vivas e quem alterna é a opacidade.
+    @State private var montou3D      = false
+    @State private var avisoAba: String? = nil
     @State private var splashHidden   = false
     @State private var initInFlight   = false
 
@@ -83,6 +105,16 @@ struct RootView: View {
                 .ignoresSafeArea()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .onTapGesture(count: 3) { showSettings = true }
+                .opacity(aba == .painel ? 1 : 0)
+                .allowsHitTesting(aba == .painel)
+
+            if montou3D {
+                Carro3DView()
+                    .ignoresSafeArea()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .opacity(aba == .carro3d ? 1 : 0)
+                    .allowsHitTesting(aba == .carro3d)
+            }
 
             // Splash com logo enquanto o cluster.html carrega.
             // Some quando channel.webViewReady vira true (cluster terminou
@@ -102,8 +134,27 @@ struct RootView: View {
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
 
+            if let aviso = avisoAba {
+                Text(aviso)
+                    .font(.system(size: 15, weight: .semibold))
+                    .padding(.horizontal, 16).padding(.vertical, 9)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .padding(.top, 28)
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
+            }
         }
-        .sheet(isPresented: $showSettings) { SettingsView() }
+        .background(DoisDedosSwipe { passo in troca(passo) })
+        // Tela cheia, não `.sheet`: no iPad o sheet vira cartão no meio da tela —
+        // era o que deixava o carro em 3D espremido num quadrado.
+        .fullScreenCover(isPresented: $showSettings) { SettingsView() }
+        .onChange(of: pedida.aba) { _, nova in
+            guard let nova, nova != aba else { return }
+            if nova == .carro3d { montou3D = true }
+            withAnimation(.easeOut(duration: 0.18)) { aba = nova }
+            pedida.aba = nil
+        }
         .onChange(of: channel.navRequestId) { old, new in
             if new > old { withAnimation(.spring(response: 0.3)) { showNav = true } }
         }
@@ -121,9 +172,30 @@ struct RootView: View {
         // App em modo SERVIDOR — toda telemetria vem via MQTT do bridge.
         // BLE/ELM desativados (podem ser reativados via Settings se quiser).
         .onAppear {
+            // Gancho de teste: o simulador não injeta toque de dois dedos, então é
+            // assim que a aba 3D é conferida sem device na mão.
+            //   xcrun simctl launch <sim> <bundle> -aba carro3d
+            if ProcessInfo.processInfo.arguments.contains("carro3d") {
+                montou3D = true; aba = .carro3d
+            }
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
                 if !splashHidden { withAnimation(.easeOut(duration: 0.3)) { splashHidden = true } }
             }
+        }
+    }
+
+    private func troca(_ passo: Int) {
+        let todas = AbaCockpit.allCases
+        let nova = todas[(aba.rawValue + passo + todas.count) % todas.count]
+        guard nova != aba else { return }
+        if nova == .carro3d { montou3D = true }
+        withAnimation(.easeOut(duration: 0.18)) { aba = nova }
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        // Aviso curto: sem ele, quem deslizou sem querer não entende o que mudou.
+        withAnimation(.easeOut(duration: 0.15)) { avisoAba = nova.titulo }
+        let titulo = nova.titulo
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+            if avisoAba == titulo { withAnimation(.easeIn(duration: 0.3)) { avisoAba = nil } }
         }
     }
 }
