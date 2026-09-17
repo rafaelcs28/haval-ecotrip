@@ -5308,9 +5308,16 @@ if (fs.existsSync(path.join(WEB3D_DIR, 'index.html'))) {
     // O Express casa os dois caminhos na MESMA rota (strict routing desligado),
     // então redirecionar por rota separada vira loop. O teste é a URL crua.
     const cru = req.originalUrl.split('?')[0];
-    if (!cru.endsWith('/')) {
-      const qs = req.originalUrl.includes('?') ? req.originalUrl.slice(req.originalUrl.indexOf('?')) : '';
-      return res.redirect(302, '/3d/' + qs);
+    // `?android` é flag DELES e aqui é a melhor configuração pro iPad, não um
+    // disfarce: (1) pula o auto-connect em ws://127.0.0.1:8888, que no iPad nunca
+    // existe e reconectaria a cada 3s pra sempre — numa tela que fica horas aberta
+    // isso é bateria à toa; (2) liga o tier _perfMobile, que por comentário do
+    // próprio autor "não muda o que o carro parece"; (3) só abre mão do GLTFExporter,
+    // que é recurso de desktop. O shim é quem entrega os dados no lugar do WS deles.
+    if (!cru.endsWith('/') || req.query.android === undefined) {
+      const q = new URLSearchParams(req.query);
+      q.set('android', '1');
+      return res.redirect(302, '/3d/?' + q.toString());
     }
     try {
       // `?token=` é opcional e serve pra abrir direto no Safari. No app iOS o
