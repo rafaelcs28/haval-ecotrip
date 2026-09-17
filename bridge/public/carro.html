@@ -23,6 +23,8 @@
   html,body{margin:0;height:100%;background:transparent;overflow:hidden;
             -webkit-user-select:none;user-select:none}
   #cv{display:block;width:100%;height:100%;touch-action:none}
+  #cadeado{position:absolute;left:10px;bottom:8px;color:#ff7a18;line-height:0;
+           filter:drop-shadow(0 1px 2px rgba(0,0,0,.45));pointer-events:none}
   #msg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
        color:#8a8a90;font:12px -apple-system,system-ui,sans-serif;pointer-events:none}
 </style>
@@ -30,6 +32,15 @@
 <body>
 <canvas id="cv"></canvas>
 <div id="msg">carregando o carro…</div>
+<!-- Tranca não tem geometria pra acender: cadeado é o único jeito honesto.
+     Só aparece DESTRANCADO — trancado é o estado normal e não merece pixel. -->
+<div id="cadeado" hidden aria-label="destrancado">
+  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor"
+       stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="3.5" y="11" width="17" height="10.5" rx="2.2"></rect>
+    <path d="M7.5 11V7a4.5 4.5 0 0 1 8.6-1.8"></path>
+  </svg>
+</div>
 
 <script src="/3d/vendor/three/build/three.min.js"></script>
 <script src="/3d/vendor/three/examples/js/loaders/GLTFLoader.js"></script>
@@ -81,9 +92,10 @@
 
   var carro = null, raio = 3, alvo = new THREE.Vector3();
   var tam = new THREE.Vector3(4.6, 1.7, 1.9);   // dimensões reais, preenchidas no load
-  // 3/4 DIANTEIRO. O modelo tem a frente em −Z, então o ângulo que mostra o rosto
-  // do carro é ~0,78π; 0,22π mostrava a traseira.
-  var giro = parseFloat(qs.get('giro') || String(Math.PI * 0.78));
+  // 3/4 DIANTEIRO — e o ângulo é 1,78π, não 0,78π. O comentário antigo estava
+  // invertido: 0,78π renderiza a TRASEIRA (tampa, HAVAL, lanterna), conferido em
+  // captura. Meia volta resolve, e é o enquadramento que mostra grade e faróis.
+  var giro = parseFloat(qs.get('giro') || String(Math.PI * 1.78));
   var alturaCam = 0.28;
 
   function enquadra() {
@@ -275,6 +287,8 @@
       scene.add(sombra);
     })();
 
+    reaplica();   // estado que chegou durante o carregamento
+
     // ── Aro ───────────────────────────────────────────────────────────────────
     // O corpo vem com pneu e cubo, mas SEM aro: o viewer monta o aro de um GLB do
     // catálogo conforme a versão (phev34 → HavalPHEV34-wheel.glb). Sem esse passo
@@ -374,39 +388,201 @@
     console.error('[carro]', err);
   });
 
-  // ── Estado ────────────────────────────────────────────────────────────────
-  // Mesma porta de entrada do viewer. Por ora destaca as aberturas: porta ou vidro
-  // aberto acende a malha correspondente. Abrir a porta de verdade exigiria o rig
-  // do modelo — e, num carro do tamanho de um dedo na tela, destacar lê melhor que
-  // animar.
-  var ABERTO = new THREE.Color(0xf59e0b);
-  var marcadas = [];
-  function destaca(regex, ligado) {
+  // ── Estado do carro desenhado no modelo ───────────────────────────────────
+  // Abrir a porta de verdade exigiria o rig do viewer; num carro do tamanho de um
+  // dedo na tela, ACENDER a peça lê melhor que animar — e não depende de pivô.
+  //
+  // Nomes vêm do perfil HEV do próprio viewer, inclusive a grafia torta que ele
+  // documenta: o export escreve a janela dianteira direita como `Window__FR`, com
+  // underscore dobrado. Por isso o casamento é por prefixo normalizado, não igualdade.
+  var COR_ABERTO = 0xff4d00, COR_LUZ = parseInt(qs.get('corluz') || 'fff0c0', 16);
+
+  function norm(t) { return String(t || '').toLowerCase().replace(/[^a-z0-9]/g, ''); }
+
+  /** Acende (ou apaga) todas as malhas sob os nós cujo nome casa com `alvo`. */
+  function marca(alvo, ligado, cor) {
     if (!carro) return;
+    var achou = false;
     carro.traverse(function (o) {
-      if (!o.isMesh || !regex.test(o.name || '')) return;
+      if (!alvo(norm(o.name))) return;
+      achou = true;
+      o.traverse(function (x) {
+        if (!x.isMesh || !x.material) return;
+        if (ligado) {
+          if (!x.userData.__mat0) x.userData.__mat0 = x.material;
+          var m = x.userData.__mat0.clone();
+          // Dois acertos que custaram tentativa: escurecer a base (senão o laranja
+          // some na pintura clara) e manter a emissão BAIXA. O tone mapping é ACES
+          // — emissivo forte satura e sai amarelo-pastel, que lia como defeito de
+          // textura e não como aviso. 1.15 dava amarelo; 0.32 dá laranja.
+          if ('emissive' in m) {
+            m.color = new THREE.Color(0x140a02);
+            if ('clearcoat' in m) m.clearcoat = 0;
+            m.emissive = new THREE.Color(cor || COR_ABERTO);
+            m.emissiveIntensity = 0.32;
+          } else { m.color = new THREE.Color(cor || COR_ABERTO); }
+          x.material = m;
+        } else if (x.userData.__mat0) {
+          x.material = x.userData.__mat0; delete x.userData.__mat0;
+        }
+      });
+    });
+    if (achou) pede();
+  }
+
+  /** Acende por MATERIAL (faróis e lanternas não têm nó próprio). */
+  function marcaMat(re, ligado, cor) {
+    if (!carro) return;
+    carro.traverse(function (x) {
+      if (!x.isMesh || !x.material || !re.test(x.material.name || '')) return;
       if (ligado) {
-        if (!o.userData.__matOrig) o.userData.__matOrig = o.material;
-        var m = o.material.clone();
-        if ('emissive' in m) { m.emissive = ABERTO; m.emissiveIntensity = 0.6; }
-        o.material = m; marcadas.push(o);
-      } else if (o.userData.__matOrig) {
-        o.material = o.userData.__matOrig; delete o.userData.__matOrig;
+        if (!x.userData.__mat0) x.userData.__mat0 = x.material;
+        var m = x.userData.__mat0.clone();
+        if ('emissive' in m) { m.emissive = new THREE.Color(cor); m.emissiveIntensity = parseFloat(qs.get('ilum') || '3.0'); }
+        m.color = new THREE.Color(cor);
+        // A lente é translúcida: só somar emissivo deixava o farol do mesmo cinza.
+        // Opacidade e transmissão vão a zero pra a peça virar corpo aceso.
+        if ('transmission' in m) m.transmission = 0;
+        m.transparent = false; m.opacity = 1;
+        if ('roughness' in m) m.roughness = 0.35;
+        if ('metalness' in m) m.metalness = 0;
+        x.material = m;
+      } else if (x.userData.__mat0) {
+        x.material = x.userData.__mat0; delete x.userData.__mat0;
       }
     });
     pede();
   }
 
-  var PORTAS = [/door.*fl|fl.*door|front.*left/i, /door.*fr|fr.*door|front.*right/i,
-                /door.*rl|rl.*door|rear.*left/i,  /door.*rr|rr.*door|rear.*right/i];
+  // Slots do vetor de portas, do CAR_DOOR_SLOTS do viewer: o porta-malas é o 5,
+  // não o 4 — o vetor tem buraco no meio.
+  var PORTA_NO = ['doorfl', 'doorfr', 'doorbl', 'doorbr'];
+  var PORTA_SLOT = [0, 1, 2, 3];
+  var VIDRO_NO = ['windowfl', 'windowfr', 'windowbl', 'windowbr'];
+
+  // O estado chega por push e NÃO se repete: o Swift só manda o que mudou. Se o
+  // valor chegar antes do modelo terminar de carregar (KTX2 no iPad leva segundos),
+  // aplicar na hora é perder o dado pra sempre. Guarda tudo e reaplica quando pronto.
+  var estado = {}, estadoNorm = null;
+  function reaplica() {
+    for (var k in estado) aplica(k, estado[k]);
+    if (estadoNorm) window.setCarState(estadoNorm);
+  }
+
   window.onCarDataUpdate = function (chave, valor) {
+    estado[chave] = valor;
+    aplica(chave, valor);
+  };
+
+  /**
+   * Entrada PREFERIDA, e a que o Painel usa: estado já normalizado pelo bridge.
+   *
+   * As chaves cruas do `CarConstants` só chegam pela LAN direta do carro (blocos
+   * `car`/`car_raw`). Fora do alcance do carro elas não existem, e desenhar só
+   * por elas deixava o Painel mudo na maior parte do tempo. Aqui entram os campos
+   * que o bridge normaliza e o app já tem sempre.
+   *
+   * `null` é DESCONHECIDO e não desenha nada. Estado velho não vira alerta: quem
+   * decide o que é fresco é o hospedeiro, com a mesma regra do resto do Painel.
+   */
+  window.setCarState = function (o) {
+    if (!o) return;
+    // Acumula em vez de substituir: o hospedeiro manda só o que mudou, e o
+    // primeiro envio costuma chegar com o modelo ainda carregando.
+    estadoNorm = estadoNorm || {};
+    for (var q in o) estadoNorm[q] = o[q];
+    if (!carro) return;
+    var b = { porta_fl: 'doorfl', porta_fr: 'doorfr', porta_rl: 'doorbl',
+              porta_rr: 'doorbr', porta_malas: 'hingetrunk',
+              vidro_fl: 'windowfl', vidro_fr: 'windowfr',
+              vidro_rl: 'windowbl', vidro_rr: 'windowbr' };
+    for (var k in b) if (o[k] !== undefined && o[k] !== null) {
+      (function (pref, on) {
+        marca(function (n) { return n.indexOf(pref) === 0; }, !!on);
+      })(b[k], o[k]);
+    }
+    if (o.teto !== undefined && o.teto !== null)
+      marca(function (n) { return n.indexOf('sunroof') === 0; }, !!o.teto);
+    if (o.farol !== undefined && o.farol !== null)
+      marcaMat(/headlight|positionlight_front/i, !!o.farol, COR_LUZ);
+    if (o.destrancado !== undefined)
+      document.getElementById('cadeado').hidden = (o.destrancado !== true);
+  };
+
+  function aplica(chave, valor) {
+    if (!carro) return;
     try {
+      var v = String(valor);
       if (chave === 'car.basic.door_status') {
-        var v = String(valor).split(',');
-        for (var i = 0; i < PORTAS.length && i < v.length; i++) destaca(PORTAS[i], +v[i] > 0);
+        // Chega entre chaves — "{0,0,0,0,0}" — e o primeiro elemento vinha como
+        // "{0", que `+` transforma em NaN: a porta dianteira esquerda nunca
+        // acendia. E o porta-malas é o índice 4, não o 5 (o 5 é a posição no
+        // vetor do VIEWER, outro contrato).
+        var d = csv(v);
+        ['doorfl', 'doorfr', 'doorbl', 'doorbr'].forEach(function (nome, i) {
+          if (d[i] === null) return;
+          marca(function (n) { return n.indexOf(nome) === 0; }, d[i] > 0);
+        });
+        if (d[4] !== null && d[4] !== undefined)
+          marca(function (n) { return n.indexOf('hingetrunk') === 0; }, d[4] > 0);
+
+      } else if (chave === 'car.basic.window_status') {
+        // 1=fechado, 2=aberto, 3=entreaberto. Fechado é 1 — tratar 0 como fechado
+        // é o erro clássico aqui. E 0 não é fechado nem aberto: é leitura em
+        // trânsito, então não desenha nada em vez de acusar vidro aberto à toa.
+        var w = csv(v);
+        ['windowfl', 'windowfr', 'windowbl', 'windowbr'].forEach(function (nome, i) {
+          if (!w[i]) return;
+          marca(function (n) { return n.indexOf(nome) === 0; }, w[i] !== 1);
+        });
+
+      } else if (chave === 'car.basic.sunroof_status' || chave === 'car.basic.sunshade_status') {
+        // Percentual de abertura (200 = basculado), não booleano.
+        marca(function (n) { return n.indexOf('sunroof') === 0; }, +v > 0);
+
+      } else if (chave === 'car.basic.door_lock_status') {
+        // 0 = destrancado; 1 E 3 = trancado. O 3 já foi lido como destrancado uma
+        // vez e o app avisou trava aberta com o carro fechado.
+        document.getElementById('cadeado').hidden = (+v !== 0);
+
+      } else if (chave === 'car.basic.low_beam_light_status'
+              || chave === 'car.basic.high_beam_light_status') {
+        // Pegar só `HeadlightMain` acendia o projetor interno — dois pixels no
+        // tamanho que o carro tem no Painel. A lente (`Glass (Headlight)`) e a luz
+        // de posição entram junto pra o farol LER como aceso de longe. "Rear" não
+        // corre risco: os materiais da lanterna são `Glass (Rear Lights)`,
+        // `BrakeLight` e `PositionLight_Rear` — nenhum tem "Headlight" no nome.
+        marcaMat(/headlight|positionlight_front/i, +v > 0, COR_LUZ);
       }
     } catch (e) {}
-  };
+  }
+
+  function csv(v) {
+    return String(v).replace(/[^0-9,\-]/g, '').split(',').map(function (x) {
+      var n = parseInt(x, 10); return isNaN(n) ? null : n;
+    });
+  }
+
+  // ?teste=porta|vidro|teto|farol — injeta um estado pra conferir o desenho sem
+  // depender do carro estar naquele estado.
+  var teste = qs.get('teste');
+  if (teste) setTimeout(function () {
+    var m = { porta:  ['car.basic.door_status',   '1,1,1,1,0,1'],
+              vidro:  ['car.basic.window_status', '1,2,1,2'],
+              teto:   ['car.basic.sunroof_status', '60'],
+              farol:  ['car.basic.low_beam_light_status', '1'],
+              tranca: ['car.basic.door_lock_status', '0'] }[teste];
+    if (teste === 'norm') {
+      window.setCarState({ porta_fl: true, porta_malas: true, vidro_rl: true,
+                           teto: true, farol: true, destrancado: true });
+    } else if (teste === 'tudo') {
+      window.onCarDataUpdate('car.basic.door_status', '1,0,0,0,0,1');
+      window.onCarDataUpdate('car.basic.window_status', '2,1,2,1');
+      window.onCarDataUpdate('car.basic.sunroof_status', '60');
+      window.onCarDataUpdate('car.basic.low_beam_light_status', '1');
+      window.onCarDataUpdate('car.basic.door_lock_status', '0');
+    } else if (m) window.onCarDataUpdate(m[0], m[1]);
+  }, 3500);
 })();
 </script>
 </body>

@@ -12,8 +12,9 @@
 //    dia todo é bateria queimada à toa.
 //  · Altura fixa e fundo transparente: o Painel continua pintando instantâneo em
 //    SwiftUI e o carro entra quando estiver pronto, em vez de segurar a tela.
-//  · O estado vai por `window.onCarDataUpdate`, o mesmo ponto de entrada que o
-//    APK usa no carro — a página não abre rede nenhuma.
+//  · O estado vai por `window.setCarState`, com os campos já normalizados pelo
+//    bridge — a página não abre rede nenhuma. As chaves cruas do CarConstants
+//    ficam pro iPad, que fala LAN direta com o carro.
 
 import SwiftUI
 import WebKit
@@ -82,28 +83,54 @@ private struct Carro3DWebView: UIViewRepresentable {
 
         private func empurra() {
             guard let w = web else { return }
-            let r = CarStore.shared.raw
-            var pares: [(String, String)] = []
-            for bloco in ["car_raw", "car"] {
-                guard let m = r[bloco] as? [String: Any] else { continue }
-                for (k, v) in m {
-                    if v is NSNull { continue }
-                    let s = String(describing: v)
-                    if ultimo[k] == s { continue }
-                    ultimo[k] = s
-                    pares.append((k, s))
-                }
+            let st = CarStore.shared
+
+            // Os campos NORMALIZADOS do bridge, não as chaves cruas do CarConstants:
+            // `car`/`car_raw` só existem quando o iPhone está na LAN do carro, e fora
+            // dela o desenho ficava mudo. Estes o app tem sempre.
+            //
+            // Cada abertura passa pelo MESMO filtro de frescor do resto do Painel
+            // (`campoConfiavel`). Sem ele o carro desenharia porta aberta com o
+            // veículo trancado: `door_fl` congela no último valor do APK, que morre
+            // junto com o carro, e ninguém publica o fechamento — foi exatamente o
+            // "1 aberta" que o painel já acusou errado.
+            // Desconhecido desenha FECHADO, nunca aberto: o destaque afirma, e o
+            // que não pôde ser confirmado não vira aviso laranja na tela.
+            func aberto(_ campo: String) -> Bool {
+                st.campoConfiavel(campo) && st.str(campo) == "on"
             }
-            guard !pares.isEmpty else { return }
-            let js = pares.map { k, v in
-                "window.onCarDataUpdate&&window.onCarDataUpdate(\(cita(k)),\(cita(v)));"
-            }.joined()
-            w.evaluateJavaScript(js, completionHandler: nil)
+            var o: [String: Bool] = [
+                "porta_fl": aberto("door_fl"), "porta_fr": aberto("door_fr"),
+                "porta_rl": aberto("door_rl"), "porta_rr": aberto("door_rr"),
+                "porta_malas": aberto("door_trunk"),
+                "vidro_fl": aberto("window_fl"), "vidro_fr": aberto("window_fr"),
+                "vidro_rl": aberto("window_rl"), "vidro_rr": aberto("window_rr"),
+                "teto": aberto("sunroof"),
+            ]
+            // Farol: `light_state` é o campo próprio, mas o bridge anota "sem sensor
+            // por ora" — então o alto também acende o desenho. Sem leitura, apagado.
+            func ligado(_ campo: String) -> Bool {
+                st.campoConfiavel(campo) && st.str(campo) == "on"
+            }
+            o["farol"] = ligado("light_state") || ligado("high_beam")
+
+            // Tranca segue a semântica do bridge: 'off' = trancado. Só desenha o
+            // cadeado com leitura afirmada — trancado é o normal e não vira aviso.
+            o["destrancado"] = st.lockKnown && st.campoConfiavel("lock_state") && !st.isLocked
+
+            var mudou: [String: Bool] = [:]
+            for (k, v) in o {
+                let s = String(v)
+                if ultimo[k] == s { continue }
+                ultimo[k] = s
+                mudou[k] = v
+            }
+            guard !mudou.isEmpty,
+                  let d = try? JSONSerialization.data(withJSONObject: mudou),
+                  let j = String(data: d, encoding: .utf8) else { return }
+            w.evaluateJavaScript("window.setCarState&&window.setCarState(\(j));",
+                                 completionHandler: nil)
         }
 
-        private func cita(_ s: String) -> String {
-            (try? String(data: JSONSerialization.data(withJSONObject: [s]), encoding: .utf8))
-                .map { String($0.dropFirst().dropLast()) } ?? "\"\""
-        }
     }
 }
