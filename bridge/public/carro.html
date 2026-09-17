@@ -233,6 +233,48 @@
     }
     scene.add(carro);
 
+    // ── Sombra de contato ─────────────────────────────────────────────────────
+    // Sem isso o carro flutua no preto e lê como recorte colado. Não uso mapa de
+    // sombra: o custo por quadro não se justifica num carro parado, e a mancha
+    // elíptica embaixo entrega 90% da sensação de assentamento por quase nada.
+    (function () {
+      var S = 256, cv2 = document.createElement('canvas');
+      cv2.width = cv2.height = S;
+      var g2 = cv2.getContext('2d');
+      var grad = g2.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
+      // Queda RÁPIDA. Com um degradê suave a mancha parecia uma poça gigante
+      // espalhada atrás do carro, porque no chão em perspectiva ela se estica.
+      grad.addColorStop(0,    'rgba(0,0,0,0.60)');
+      grad.addColorStop(0.30, 'rgba(0,0,0,0.34)');
+      grad.addColorStop(0.62, 'rgba(0,0,0,0.08)');
+      grad.addColorStop(1,    'rgba(0,0,0,0)');
+      g2.fillStyle = grad; g2.fillRect(0, 0, S, S);
+      var tex2 = new THREE.CanvasTexture(cv2);
+      var sombra = new THREE.Mesh(
+        // Pegada do carro, não uma área arbitrária: comprimento por largura, com
+        // pouca folga. Eu tinha posto 2× a LARGURA e virou mancha do tamanho da tela.
+        new THREE.PlaneGeometry(t.x * 1.06, t.z * 1.12),
+        new THREE.MeshBasicMaterial({ map: tex2, transparent: true, depthWrite: false })
+      );
+      sombra.rotation.x = -Math.PI / 2;
+      // Assenta no ponto mais baixo MEDIDO do carro, não em y=0. Eu supunha que o
+      // modelo encostava no zero depois do meu reposicionamento e não encosta — a
+      // mancha ficava flutuando abaixo das rodas, o oposto do efeito pretendido.
+      carro.updateMatrixWorld(true);
+      var pisoBox = new THREE.Box3(), pisoTmp = new THREE.Vector3();
+      var piso = Infinity, cxz = new THREE.Vector3();
+      carro.traverse(function (o) {
+        if (!o.isMesh || !o.visible) return;
+        pisoBox.setFromObject(o); pisoBox.getSize(pisoTmp);
+        if (Math.max(pisoTmp.x, pisoTmp.z) > 15) return;   // ignora as caixas mentirosas
+        if (pisoBox.min.y < piso) piso = pisoBox.min.y;
+      });
+      new THREE.Box3().setFromObject(carro).getCenter(cxz);
+      sombra.position.set(cxz.x, (isFinite(piso) ? piso : 0) + 0.004, cxz.z);
+      sombra.renderOrder = -1;
+      scene.add(sombra);
+    })();
+
     // ── Aro ───────────────────────────────────────────────────────────────────
     // O corpo vem com pneu e cubo, mas SEM aro: o viewer monta o aro de um GLB do
     // catálogo conforme a versão (phev34 → HavalPHEV34-wheel.glb). Sem esse passo
