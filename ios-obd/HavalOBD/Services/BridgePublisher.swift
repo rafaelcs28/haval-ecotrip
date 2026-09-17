@@ -29,6 +29,11 @@ final class BridgePublisher: ObservableObject {
     /// Último snapshot cru recebido pelo /ws/state do carro (10 Hz). Quem quiser ler
     /// o estado do carro observa isto em vez de abrir conexão própria.
     @Published var ultimoSnapshotLan: [String: Any] = [:]
+    /// Último estado vindo da NUVEM (HTTP/MQTT), acumulado. O viewer 3D precisa de
+    /// uma fonte quando a LAN não está no ar — e `onClusterExtra` tem dono (o
+    /// cluster), roubar aquele gancho deixaria o painel sem dado. Acumula em vez de
+    /// substituir porque com LAN ligada a nuvem manda só o que o WS não cobre.
+    @Published var ultimoEstadoCloud: [String: Any] = [:]
     /// Toggle do user: usar LAN quando disponível. Default ON.
     @Published var useLanWhenAvailable: Bool =
         UserDefaults.standard.object(forKey: "use_lan_when_available") as? Bool ?? true
@@ -101,6 +106,7 @@ final class BridgePublisher: ObservableObject {
             for k in Self.lanFastKeys { d.removeValue(forKey: k) }
             if d.isEmpty { return }
         }
+        for (k, v) in d { ultimoEstadoCloud[k] = v }
         onClusterExtra?(d)
     }
 

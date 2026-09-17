@@ -148,7 +148,53 @@
   // não abre rede nenhuma: duas rotas pro mesmo campo é a receita de discordância,
   // e a página, servida por HTTPS, nem conseguiria alcançar o carro em http — o
   // WebKit barra como mixed content. Aqui ele fica só como receptor.
+  // ── Layout de retrato (iPad em pé) ────────────────────────────────────────
+  //
+  // O visualizador foi desenhado pra head unit deitada: as bordas dos quadros de
+  // widget são coordenadas FIXAS de um palco 1920×~800 (`_applyWebShellPreviewLayout`).
+  // Num iPad em pé isso deixa tudo amontoado em cima e o carro grande demais.
+  //
+  // `window.onAndroidShellLayout` é a porta que o próprio autor abriu pro
+  // hospedeiro nativo mandar as medidas dele — é o que o APK do carro usa. Então
+  // não é gambiarra por cima do layout dele: é o mesmo caminho, com os números do
+  // iPad. Um quadro vira faixa em CIMA, o outro faixa EMBAIXO, e o carro fica na
+  // banda do meio.
   if (window.__ECOTRIP_NATIVE__) {
+    // ── Comandos do visualizador → hospedeiro nativo ────────────────────────
+    //
+    // O viewer manda tudo por `TelemetryBridge.invokeVehicleCommand`, que no carro
+    // é a interface JS do APK. No iPad não existia ninguém: ele registrava
+    // "no Impulse bridge for <cmd>" no console e engolia o toque — abrir vidro e
+    // teto não surtiam efeito nenhum. Aqui a chamada vira mensagem pro app, que
+    // manda pelo MESMO caminho do painel (WS da LAN, ou nuvem).
+    //
+    // `getCarData`/`setCarData` ficam de fora de propósito: leitura já chega por
+    // `onCarDataUpdate`, e escrever no barramento por outra porta seria uma
+    // segunda via pro mesmo estado.
+    var nativo = window.webkit && window.webkit.messageHandlers
+                 && window.webkit.messageHandlers.carro3d;
+    if (nativo) {
+      window.TelemetryBridge = window.TelemetryBridge || {};
+      window.TelemetryBridge.invokeVehicleCommand = function (cmd, value) {
+        try { nativo.postMessage({ cmd: String(cmd), value: String(value == null ? '' : value) }); }
+        catch (e) { console.warn('[ecotrip] comando não foi:', cmd, e); }
+        return true;
+      };
+    }
+
+    // `right:'idle'` faz o viewer se declarar hospedado em Android e esconder a
+    // própria barra de ferramentas — que no carro é certo (o launcher do carro põe
+    // a dele) e aqui não: sem a engrenagem não há como adicionar widget nenhum.
+    var estiloBarra = document.createElement('style');
+    estiloBarra.textContent = '.hv-toolbar{display:flex !important}';
+    document.head.appendChild(estiloBarra);
+
+    // Enquadramento do carro em retrato fica com o DONO, não comigo: o
+    // visualizador salva a pose por layout, e é o pinça-de-dois-dedos que ajusta.
+    // Cheguei a mexer em `_shellCameraTarget` pra empurrar a câmera pra trás
+    // sozinho; não pegou (pose salva ganha de distMul) e nem devia — era tirar do
+    // usuário o controle que ele pediu pra ter de volta.
+
     window.__ecotripShim = { aplica: aplica, estado: function () { return ultimo; },
                              modo: 'nativo' };
     return;

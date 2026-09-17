@@ -134,6 +134,21 @@ struct RootView: View {
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
 
+            // Troca de aba por BOTÃO, não por gesto. Dois dedos era o gesto certo
+            // no papel e o errado na prática: é com dois dedos que se ajusta o
+            // enquadramento do carro dentro do visualizador, e os dois brigavam.
+            // Um dedo pertence à página, três ninguém adivinha — então botão.
+            Button { troca(1) } label: {
+                Image(systemName: aba == .painel ? "cube.transparent" : "square.grid.2x2")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 44, height: 44)
+                    .background(.black.opacity(0.45), in: Circle())
+                    .overlay(Circle().strokeBorder(.white.opacity(0.18), lineWidth: 1))
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+            .padding(.leading, 14).padding(.bottom, 14)
+
             if let aviso = avisoAba {
                 Text(aviso)
                     .font(.system(size: 15, weight: .semibold))
@@ -145,7 +160,6 @@ struct RootView: View {
                     .transition(.opacity)
             }
         }
-        .background(DoisDedosSwipe { passo in troca(passo) })
         // Tela cheia, não `.sheet`: no iPad o sheet vira cartão no meio da tela —
         // era o que deixava o carro em 3D espremido num quadrado.
         .fullScreenCover(isPresented: $showSettings) { SettingsView() }
