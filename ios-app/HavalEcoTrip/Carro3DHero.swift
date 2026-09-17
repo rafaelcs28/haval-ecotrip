@@ -21,7 +21,9 @@ import WebKit
 struct Carro3DHero: View {
     @ObservedObject private var store = CarStore.shared
     /// Cinza do carro do dono. Editável em Config no futuro; por ora, constante.
-    private let cor = "44474f"
+    // O verniz e o ambiente clareiam bastante: `44474f` saía prata. Este valor é o
+    // que RENDERIZA como o cinza chumbo do carro, não o que parece certo no papel.
+    private let cor = "15171b"
 
     var body: some View {
         if let u = url {

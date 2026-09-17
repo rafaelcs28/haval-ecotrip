@@ -55,26 +55,32 @@
   if ('outputColorSpace' in renderer) renderer.outputColorSpace = THREE.SRGBColorSpace;
   else if ('outputEncoding' in renderer) renderer.outputEncoding = THREE.sRGBEncoding;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.05;
+  // Exposição contida. Com 1.05 e as luzes fortes que eu tinha, `cc0000` (vermelho
+  // ESCURO) saía laranja vivo e o cinza chumbo virava prata: a pintura era lavada
+  // pela soma de key + rim + ambiente. Cor pedida tem que ser a cor vista.
+  renderer.toneMappingExposure = parseFloat(qs.get('exp') || '0.82');
 
   var scene = new THREE.Scene();
   try {
     var pmrem = new THREE.PMREMGenerator(renderer);
     scene.environment = pmrem.fromScene(new THREE.RoomEnvironment(), 0.04).texture;
+    // O ambiente existe pra transmissão/vidro funcionar, não pra iluminar a lataria.
+    if ('environmentIntensity' in scene) scene.environmentIntensity = 0.45;
   } catch (e) { console.warn('[carro] sem ambiente:', e); }
   var camera = new THREE.PerspectiveCamera(32, 1, 0.1, 100);
 
   // Luz: sem HDR pra não pagar mais um download. Um key quente alto, um fill frio
   // baixo e um rim atrás — suficiente pra lataria escura não virar silhueta chapada.
-  scene.add(new THREE.HemisphereLight(0xbfd4ff, 0x0a0a0c, 0.55));
-  var key = new THREE.DirectionalLight(0xffffff, 2.1); key.position.set(4, 6, 5);
+  scene.add(new THREE.HemisphereLight(0xbfd4ff, 0x0a0a0c, 0.30));
+  var key = new THREE.DirectionalLight(0xffffff, 1.15); key.position.set(4, 6, 5);
   scene.add(key);
-  var fill = new THREE.DirectionalLight(0x9fc0ff, 0.7); fill.position.set(-5, 2, 3);
+  var fill = new THREE.DirectionalLight(0x9fc0ff, 0.35); fill.position.set(-5, 2, 3);
   scene.add(fill);
-  var rim = new THREE.DirectionalLight(0xffffff, 1.2); rim.position.set(-2, 3, -6);
+  var rim = new THREE.DirectionalLight(0xffffff, 0.65); rim.position.set(-2, 3, -6);
   scene.add(rim);
 
   var carro = null, raio = 3, alvo = new THREE.Vector3();
+  var tam = new THREE.Vector3(4.6, 1.7, 1.9);   // dimensões reais, preenchidas no load
   // 3/4 DIANTEIRO. O modelo tem a frente em −Z, então o ângulo que mostra o rosto
   // do carro é ~0,78π; 0,22π mostrava a traseira.
   var giro = parseFloat(qs.get('giro') || String(Math.PI * 0.78));
@@ -86,9 +92,19 @@
     // Distância que FAZ CABER, calculada do FOV — não multiplicador no olho. Metade
     // da maior dimensão sobre a tangente de meio-FOV é a conta clássica; em retrato
     // divide pelo aspecto, porque aí quem limita é a largura, não a altura.
+    // Enquadra pela SILHUETA projetada, não pela maior dimensão do carro. Usar
+    // `raio` (metade do maior lado, 2,49 m) tratava o carro como uma esfera desse
+    // tamanho: num 3/4 a silhueta é bem menor que isso e sobrava moldura — o carro
+    // saía pequeno no meio de um retângulo vazio.
+    //
+    // Largura projetada = quanto do comprimento e da largura caem no eixo
+    // horizontal da câmera, no ângulo atual. Altura projetada é a altura mesmo.
     var vfov = camera.fov * Math.PI / 180;
-    var recuo = (raio / Math.tan(vfov / 2)) * 1.18;   // 18% de folga nas bordas
-    if (camera.aspect < 1) recuo /= camera.aspect;
+    var hfov = 2 * Math.atan(Math.tan(vfov / 2) * camera.aspect);
+    var projL = Math.abs(tam.x * Math.cos(giro)) + Math.abs(tam.z * Math.sin(giro));
+    var distH = (projL / 2) / Math.tan(hfov / 2);
+    var distV = (tam.y / 2) / Math.tan(vfov / 2);
+    var recuo = Math.max(distH, distV) * parseFloat(qs.get('folga') || '1.10');
     camera.position.set(
       alvo.x + Math.sin(giro) * recuo,
       alvo.y + raio * alturaCam * 2.2,
@@ -160,6 +176,7 @@
     });
     if (box.isEmpty()) box.setFromObject(carro);   // nada sobrou: volta ao ingênuo
     var c = box.getCenter(new THREE.Vector3()), t = box.getSize(new THREE.Vector3());
+    tam.copy(t);
     raio = Math.max(t.x, t.y, t.z) / 2;
     // Assenta no chão e centra na origem: o GLB pode vir com pivô em qualquer lugar.
     carro.position.sub(c);
@@ -203,6 +220,14 @@
         // original vaza pra qualquer outra instância que venha a usá-lo.
         var m = o.material.clone();
         m.color = new THREE.Color(cor.charAt(0) === '#' ? cor : '#' + cor);
+        // Sem zerar o mapa, a cor MULTIPLICA a textura branca da lataria e o
+        // resultado continua lendo branco — foi o que aconteceu com o cinza.
+        // Também baixo o metalness: lataria muito metálica reflete o ambiente
+        // claro e clareia de volta a cor que acabei de aplicar.
+        if (m.map) m.map = null;
+        if ('metalness' in m) m.metalness = Math.min(m.metalness, 0.35);
+        if ('roughness' in m) m.roughness = Math.max(m.roughness, 0.35);
+        m.needsUpdate = true;
         o.material = m;
       });
     }
@@ -220,7 +245,10 @@
         // O GLTFLoader SANITIZA nome de nó: `Wheel_#0` no arquivo não chega como
         // `Wheel_#0` na cena. Casar com o nome cru não encontrava nada e o aro
         // simplesmente não era montado, sem erro nenhum.
-        carro.traverse(function (o) { if (/^wheel/i.test(o.name || '')) rodas.push(o); });
+        // Ancora pelo PNEU, não pelo grupo `Wheel_`: o modelo tem 4 pneus mas só 3
+        // estão dentro de um nó Wheel_ — `Tire_#000` (dianteira esquerda) está solto
+        // na raiz, e era por isso que ESSA roda ficava sem aro.
+        carro.traverse(function (o) { if (/^tire/i.test(o.name || '')) rodas.push(o); });
         // Entra como FILHO do nó da roda, sem escala minha: o nó já carrega o
         // transform (posição, rotação e escala) daquela roda, e aplicar uma escala
         // por cima multiplicava duas vezes — o aro nascia minúsculo dentro do pneu,
@@ -232,18 +260,14 @@
         // usar 1:1 (aro do tamanho do carro, pra fora da caixa de roda).
         var kMan = qs.get('escalaAro');
         var cx = new THREE.Box3(), tv = new THREE.Vector3();
-        rodas.forEach(function (w) {
-          // Diâmetro do PNEU daquela roda — é a referência física do aro.
-          var pneu = null;
-          // SEM exigir isMesh: `Tire_#000_1` é um grupo, e a malha dentro dele tem
-          // outro nome. Com o filtro de mesh o pneu nunca era encontrado e a escala
-          // silenciosamente não era aplicada.
-          w.traverse(function (x) { if (!pneu && /tire/i.test(x.name || '')) pneu = x; });
+        rodas.forEach(function (pneu) {
+          // Entra como IRMÃO do pneu: herda o transform da roda sem depender de
+          // existir um grupo `Wheel_` em volta, que é o que falta numa das quatro.
+          var w = pneu.parent || carro;
           var c = proto.clone(true);
           c.name = '__aro';
           w.add(c);
           if (kMan) { c.scale.setScalar(parseFloat(kMan)); return; }
-          if (!pneu) return;
           // Box3.setFromObject lê matrixWorld, que continua VELHA logo depois do
           // add(). Sem este update a medida sai do lugar antigo e a escala nunca
           // corrige — foi por isso que o aro continuou gigante duas tentativas.
