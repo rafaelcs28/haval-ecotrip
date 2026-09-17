@@ -103,3 +103,6 @@ traffic_snapshots.json
 # backups pontuais de dados (gerados em correções)
 charges.json.pre-*
 refuels.json.pre-*
+
+# App 3D servido (cópia de terceiro, ~115MB — não versionar)
+web3d/

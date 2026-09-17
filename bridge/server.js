@@ -5292,6 +5292,44 @@ app.get('/', (req, res, next) => {
 
 app.use(express.static(path.join(__dirname, 'public')));
 
+// ── Viewer 3D (Haval-H6-3D, de netseek) servido pro iPad ─────────────────────
+// O app do carro é, na prática, uma página: Three.js num WebView. Servir aqui e
+// abrir num WKWebView do app iOS evita portar 13 mil linhas de casca Java que só
+// fazem sentido no head unit (troca de tarefa, acessibilidade, launcher).
+//
+// O index é servido com o shim INJETADO em vez de editado: o arquivo do autor
+// fica intacto na árvore, e atualizar a cópia dele não conflita com nada nosso.
+const WEB3D_DIR = path.join(__dirname, 'web3d');
+if (fs.existsSync(path.join(WEB3D_DIR, 'index.html'))) {
+  // SEM a barra final, `assets/x.glb` no HTML resolve pra /assets/x.glb em vez de
+  // /3d/assets/x.glb e nada carrega — o viewer sobe com o DOM cru, placeholders
+  // de template à mostra. Mesma armadilha de path aninhado do Assinador.
+  app.get(['/3d', '/3d/'], (req, res) => {
+    // O Express casa os dois caminhos na MESMA rota (strict routing desligado),
+    // então redirecionar por rota separada vira loop. O teste é a URL crua.
+    const cru = req.originalUrl.split('?')[0];
+    if (!cru.endsWith('/')) {
+      const qs = req.originalUrl.includes('?') ? req.originalUrl.slice(req.originalUrl.indexOf('?')) : '';
+      return res.redirect(302, '/3d/' + qs);
+    }
+    try {
+      // `?token=` é opcional e serve pra abrir direto no Safari. No app iOS o
+      // token entra por WKUserScript (não passa pela URL, que vaza em log e
+      // histórico) — por isso a injeção aqui só acontece se vier e for válido.
+      const t = String(req.query.token || '');
+      const ok = t && (!BRIDGE_TOKEN_HASH || t === BRIDGE_TOKEN_HASH || sha256hex(t) === BRIDGE_TOKEN_HASH);
+      const cfg = ok ? `<script>window.__ECOTRIP_TOKEN__=${JSON.stringify(t)};</script>` : '';
+      const html = fs.readFileSync(path.join(WEB3D_DIR, 'index.html'), 'utf8')
+        .replace('</body>', cfg + '<script src="/ecotrip-3d-shim.js"></script></body>');
+      res.type('html').set('Cache-Control', 'no-store').send(html);
+    } catch (e) { res.status(500).send('viewer indisponível: ' + e.message); }
+  });
+  // Assets são ~92MB e imutáveis entre atualizações — cache longo é o que torna
+  // a segunda abertura instantânea no iPad.
+  app.use('/3d', express.static(WEB3D_DIR, { maxAge: '7d', immutable: true }));
+  console.log('✓ Viewer 3D servido em /3d');
+}
+
 // ── Autenticação ──────────────────────────────────────────────────────────────
 // O cliente envia SHA-256(senha) no header Authorization: Bearer <hash>
 // O servidor compara com BRIDGE_TOKEN_HASH armazenado no .env
@@ -5830,7 +5868,7 @@ async function _fetchBluettiStatus() {
 let _bluettiState = null;
 async function _bluettiTick() {
   const d = await _fetchBluettiStatus();
-  if (d) { _bluettiState = d; _bluettiCache = { data: d, ts: Date.now() }; }
+  if (d) { _marcaBuracoDePotencia(d); _bluettiState = d; _bluettiCache = { data: d, ts: Date.now() }; }
   _evalBluettiAlerts();
 }
 setInterval(() => { _bluettiTick().catch(() => {}); }, 30_000);
@@ -5867,6 +5905,33 @@ function _pushBluettiHist(key, pct) {
   const arr = _bluettiHist[key]; arr.push(pct);
   if (arr.length > 6) arr.shift();
 }
+// A Casa para de reportar POTÊNCIA por minutos e volta (visto em 16/09/2026:
+// 0 W por 3 min, depois 49 W — o consumo real do Mac Mini + roteador). O
+// `stale_zeros` do módulo não pega isso porque exige TUDO zerado, e a bateria
+// segue mandando 100%: sinal de vida existe, medição é que sumiu.
+//
+// Zero é uma afirmação ("não está consumindo nada"); buraco de telemetria não é.
+// Aqui a diferença fica registrada: guarda a última leitura não-zero e há quanto
+// tempo. Quem desenha decide mostrar o último valor com idade em vez de 0.
+const _bluettiUltPot = {};    // key -> { grid_in_w, ac_out_w, dc_out_w, pv_in_w, ts }
+function _marcaBuracoDePotencia(d) {
+  for (const key of ['casa', 'sitio']) {
+    const b = d[key];
+    if (!b) continue;
+    const campos = ['grid_in_w', 'ac_out_w', 'dc_out_w', 'pv_in_w'];
+    const algum = campos.some(k => (b[k] ?? 0) > 0);
+    if (algum) {
+      _bluettiUltPot[key] = { ts: Date.now() };
+      for (const k of campos) _bluettiUltPot[key][k] = b[k];
+      b.power_stale_ms = 0;
+    } else {
+      const u = _bluettiUltPot[key];
+      b.power_stale_ms = u ? Date.now() - u.ts : null;
+      b.ultima_potencia = u || null;
+    }
+  }
+}
+
 function _bluettiOffgridConfirmed(key, gridW, batt) {
   if (gridW !== 0) return false;
   const arr = _bluettiHist[key];
@@ -7673,7 +7738,10 @@ app.get('/api/wall', requireAuth, (_req, res) => {
     return { key: k, label: b.label || k, pct: b.battery_pct ?? null,
              offgrid: b.offgrid ?? null, grid_w: b.grid_in_w ?? null,
              autonomy_min: b.battery_time_min ?? null,
-             reachable: !!b.reachable };
+             reachable: !!b.reachable,
+             // Buraco de telemetria: potência toda zerada depois de ter medido.
+             sem_potencia_ms: b.power_stale_ms ?? null,
+             ultima_potencia: b.ultima_potencia || null };
   }).filter(Boolean);
 
   const svc = [];
