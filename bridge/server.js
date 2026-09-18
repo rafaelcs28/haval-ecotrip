@@ -3336,6 +3336,7 @@ const state = {
   status_message:   '',     // string pipe-separada de alertas do carro
   engine_state:     null,   // null=desconhecido | '0'=desligado | '1'=ligado (motor elétrico+ICE, GWM hyengsts)
   lock_state:       null,   // null=desconhecido | 'off'=trancado | 'on'=destrancado
+  shizuku:          null,   // null=desconhecido | 'alive' | 'dead' — publicado pelo APK
   high_beam:        null,   // null | 'on' | 'off'
   light_state:      null,   // null | 'on' | 'off' — farol (sem sensor por ora)
   ac_state:         null,   // null | 'on' | 'off'
@@ -4394,6 +4395,18 @@ setInterval(() => {
     apkAge > SOURCE_STALL_MS && gwmAge < SOURCE_STALL_MS && _carIsAwake() && !zona,
     'App do carro silente',
     `Sem dados do APK há ${Math.round(apkAge / 60_000)}min (GWM continua ativa).`,
+    'high', ['car']);
+
+  // 1b. Shizuku caído. É ele que sustenta leitura do CAN e comando de vidro/teto;
+  // sem ele o APK segue vivo e "funcionando", só que cego e sem braço — por isso
+  // não cai em nenhum dos alertas de silêncio acima. Em 18/09 caiu no meio de uma
+  // viagem e a única pista foi o comportamento. Só alerta com carro acordado:
+  // dormindo, binder morto é o normal.
+  _alert('car_shizuku_dead',
+    state.shizuku === 'dead' && _carIsAwake(),
+    'Shizuku caiu no carro',
+    'O APK está vivo mas sem acesso ao CAN — leitura e comandos param. '
+    + 'Reiniciar a multimídia recupera.',
     'high', ['car']);
 
   // 2. GWM silente mas APK ativo — HA é polled, silêncio é sempre anomalia.
@@ -24650,6 +24663,18 @@ function applyMqttMessage(key, value, isRetained = false) {
         if ((parseInt(state.hvac_fan_speed, 10) || 0) > 0) _scheduleAcParkedAlert();
       }
       if (curSpeed >= 5 && prevSpeed < 5) _captureTyreBaseline();
+      break;
+    }
+    case 'shizuku': {
+      // 'alive' | 'dead'. O APK publica só na TRANSIÇÃO (pubD), então retained é
+      // a única cópia do estado atual — aceitar retained aqui é o que faz o bridge
+      // saber a situação depois de um restart dele.
+      const antes = state.shizuku;
+      state.shizuku = value === 'alive' || value === 'dead' ? value : null;
+      if (!isRetained && antes && antes !== state.shizuku) {
+        addEvent(state.shizuku === 'dead' ? 'shizuku_dead' : 'shizuku_alive',
+                 state.shizuku === 'dead' ? 'Shizuku caiu' : 'Shizuku voltou');
+      }
       break;
     }
     case 'gear': {

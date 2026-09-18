@@ -26,6 +26,9 @@ class App : Application() {
     override fun onCreate() {
         super.onCreate()
         instance = this
+        // Antes de tudo que loga: WARN/ERROR passam a ficar em disco. A receita de
+        // recuperação aqui é reiniciar, e reiniciar apagava a prova do que quebrou.
+        AppLogger.initDisco(this)
         // ANTES de qualquer coisa que leia a URL do bridge: o MqttManager lê
         // BRIDGE_URL direto das prefs, então a migração tem que já ter gravado o
         // valor novo quando ele carregar.

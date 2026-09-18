@@ -2432,6 +2432,17 @@ class MqttManager private constructor() {
             pubD("outside_temp", fmt1(latestOutsideTemp), retained = false)
             if (latestGear.isNotEmpty()) pubD("gear", latestGear, retained = false)
 
+            // Shizuku vivo? É o que sustenta leitura do CAN, comando de vidro/teto e
+            // install silencioso — quando ele cai, o carro fica mudo e HOJE nada sai
+            // daqui avisando. Em 18/09 caiu no meio de uma viagem e o dono só
+            // percebeu pelo comportamento; o motivo não deu pra apurar porque o log
+            // do app é um ring buffer de 300 linhas SEM persistência, e o reinício
+            // (que é a receita de recuperação) apaga justamente a prova.
+            //
+            // `pubD` só publica quando MUDA, então isto é uma linha por transição.
+            pubD("shizuku", if (rikka.shizuku.Shizuku.pingBinder()) "alive" else "dead",
+                 retained = true)
+
             // GPS — publica apenas quando há sinal válido (≠ 0.0)
             val (gpsLat, gpsLng) = TripManager.getInstance().getLastGps()
             if (gpsLat != 0.0 && gpsLng != 0.0) {
