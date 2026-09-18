@@ -7668,9 +7668,13 @@ app.get('/api/wall', requireAuth, (_req, res) => {
   for (const [id, v] of _alertState) {
     if (!v || !v.firing) continue;
     const ao = AGENT_OWNED.has(id);
+    // Alerta que TEM ação carrega o link: aviso sem o que fazer só transfere o
+    // trabalho. O reauth da Bluetti era o caso — dizia "refazer login" e o botão
+    // vivia escondido dentro de um bloco recolhido do health.
+    const acao = id === 'bluetti_cloud_reauth' ? _bluettiReauthLink() : null;
     firing.push({ id, title: v.title || id,
                   sev: (!ao && (v.priority === 'urgent' || v.priority === 'high')) ? 'crit' : 'warn',
-                  since_ms: v.firedAt || null });
+                  since_ms: v.firedAt || null, url: acao });
   }
   firing.sort((a, b) => (a.sev === b.sev ? (a.since_ms || 0) - (b.since_ms || 0) : a.sev === 'crit' ? -1 : 1));
   const crit = firing.filter(f => f.sev === 'crit').length;
@@ -23666,6 +23670,22 @@ function applyGwmEntity(id, value, isRetained = false) {
     return;
   }
   _fieldSource[field] = 'gwm';   // rastreia origem por campo
+
+  // ── Tempo restante de recarga: o nosso ETA é o dono ─────────────────────────
+  //
+  // `charge_remaining_min` está em MIGRATED_TO_HA, então a nuvem grava aqui; e
+  // `_recalcChargeEta` grava o NOSSO a cada leitura de potência. Dois escritores
+  // no mesmo campo, e quem aparece é o último que passou.
+  //
+  // Os dois números respondem perguntas diferentes: o do carro é até o limite
+  // DELE, que fica em 100 porque quem corta em 93 é o software daqui. Em 17/09,
+  // com 89% e 5,7 kW, o painel mostrou "50 min ATÉ 93%" — 50 era o tempo até 100.
+  // Minutos depois o mesmo painel dizia 13, que é o nosso ETA e o número certo.
+  // Não é oscilação de estimativa: é troca de pergunta no meio da frase.
+  //
+  // Enquanto carrega, a nuvem não escreve este campo. Fora da recarga ela escreve
+  // normal — aí não há alvo custom nem ETA pra defender.
+  if (field === 'charge_remaining_min' && state.charging_state === 'Carregando') return;
 
   // ── Binary body (doors, lock, AC) ─────────────────────────────────────────
   if (GWM_BODY_BINARY.has(field)) {
