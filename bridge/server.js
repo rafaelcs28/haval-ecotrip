@@ -25360,9 +25360,32 @@ function applyMqttMessage(key, value, isRetained = false) {
           const sid = String(at.startMs || at.tripId || '').replace(/\D/g, '');
           if (!sid) continue;
           // Já temos essa viagem (e o arquivo existe) → não reingere.
-          const exists = autoTripsArr.some(t => t.tripId === sid)
-                         && fs.existsSync(path.join(AUTOTRIPS_DIR, `${sid}.json`));
-          if (exists) { skipped++; continue; }
+          //
+          // MENOS quando a que chegou é MAIOR. Viagem continuada (o dono manda
+          // "continuar" depois de o carro reiniciar no meio) mantém o MESMO startMs
+          // e volta com mais quilômetro: o APK tira o id de `bridgeSyncedIds` justo
+          // pra reenviar a versão estendida. Pular por "já existe" jogava essa
+          // versão fora — e como o tópico é retained, ela era rejeitada de novo a
+          // cada reconexão, pra sempre.
+          //
+          // Aconteceu em 18/09: o Shizuku caiu no meio, o dono reiniciou a
+          // multimídia e mandou continuar. O trecho 1 (11,9 km) subiu por HTTP às
+          // 17:41; a viagem inteira (17,5 km, com engineOffSec=80 marcando a parada)
+          // ficou parada no retained. O caminho HTTP substitui (`autoTripsArr[idx] =
+          // record`) — só este aqui recusava.
+          const _atual = autoTripsArr.find(t => t.tripId === sid);
+          const _temArquivo = fs.existsSync(path.join(AUTOTRIPS_DIR, `${sid}.json`));
+          // Margem de 100 m: reenvio do MESMO trecho varia nos decimais por
+          // reconciliação de amostras, e trocar o registro por isso é ruído.
+          const _cresceu = _atual
+            && ((+at.distKm || 0) - (+_atual.distKm || 0) > 0.1
+                || (+at.endMs || 0) - (+_atual.endMs || 0) > 60_000);
+          if (_atual && _temArquivo && !_cresceu) { skipped++; continue; }
+          if (_cresceu) {
+            console.log(`↻ AutoTrip ${sid}: versão estendida por MQTT `
+              + `${(+_atual.distKm || 0).toFixed(1)}km → ${(+at.distKm || 0).toFixed(1)}km `
+              + `(viagem continuada) — substituindo`);
+          }
           const r = ingestAutoTrip({ tripId: sid, autoTrip: at, samples: [] }, { suppressPush: true });
           if (r.body && r.body.ok && !r.body.skipped) added++;
           else skipped++;
