@@ -23,6 +23,7 @@ const carHelp     = require('./car-help');
 const bluettiCloud = require('./bluetti-cloud');
 const starlink     = require('./starlink-sitio');
 const sajCloud     = require('./saj-cloud');   // nuvem SAJ direta (Catalão), sem o HA no caminho
+const ocpp         = require('./ocpp-server'); // central system do carregador (OCPP 1.6J)
 
 // Sem isto, uma rejection/exception fora de rota (timer, callback MQTT, fetch em
 // background) derrubava o processo inteiro. Loga e segue — pm2 só reinicia em crash real.
@@ -7622,6 +7623,28 @@ app.get('/api/wall/detail', requireAuth, (req, res) => {
         l.url || null);
     } else if (/^Gastos/.test(nome)) {
       for (const x of _pixbot) add(x.label, x.up ? 'no ar' : 'fora', x.url || null);
+    } else if (/^Recados/.test(nome)) {
+      // Uma seção por instância: dois números, e o detalhe precisa dizer de
+      // QUAL deles se está falando.
+      for (const r of _recadosLista) {
+        const w = r.wa || {};
+        const pre = _recadosLista.length > 1 ? `${r.rotulo || '?'} · ` : '';
+        add(`${pre}Serviço`, r.up ? 'no ar' : 'fora', r.error || null);
+        add(`${pre}WhatsApp`, w.conectado ? 'pareado' : 'DESPAREADO',
+            w.numero || w.erro || 'reparear no painel');
+        add(`${pre}Contatos`, r.contatos ?? null,
+            r.contatos ? null : 'sincroniza no pareamento');
+        add(`${pre}Agendados`, r.agendados ?? 0,
+            r.proximo_ms ? 'próximo ' + new Date(r.proximo_ms).toLocaleString('pt-BR',
+              { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : null);
+        // Atrasado e repetindo só aparecem quando existem: linha zerada ocupa
+        // espaço na parede sem dizer nada.
+        if (r.atrasados) add(`${pre}Atrasados`, r.atrasados, 'passaram da hora e não saíram');
+        if (r.repetindo) add(`${pre}Repetindo`, r.repetindo, 'tentando de novo');
+        add(`${pre}Últimos 7 dias`, `${r.enviados_7d ?? 0} enviados`,
+            r.nao_entregues_7d ? `${r.nao_entregues_7d} não entregues` : null);
+      }
+      // Janela de entrega foi removida em 20/09/2026: recado sai na hora marcada.
     } else if (/Driver Cred/.test(nome)) {
       add('Estado', _credito?.up ? 'no ar' : 'fora', _credito?.url || null);
       const vg = _credito?.vigia, fl = vg && vg.fila;
@@ -7826,6 +7849,22 @@ app.get('/api/wall', requireAuth, (_req, res) => {
   familia('Gastos', _pixbot.filter(x => !/teste/i.test(x.label || ''))
                            .map(x => ({ ...x, __lbl: x.label })),
           x => !!x.up, () => null);
+  if (_recadosLista.length) {
+    // O ponto é "está no ar?", mas há duas falhas que o up/down não pega:
+    // serviço vivo com o WhatsApp despareado, e recado que passou da hora e não
+    // saiu. As duas fazem o recado de segunda não chegar, então as duas pintam
+    // o nó — com DUAS instâncias, basta uma ruim pra tirar o verde.
+    const estado = (r) => !r.up ? 'fora'
+      : r.wa?.conectado === false ? 'WhatsApp despareado'
+      : r.atrasados ? `${r.atrasados} atrasado${r.atrasados > 1 ? 's' : ''}`
+      : r.agendados ? `${r.agendados} agendado${r.agendados > 1 ? 's' : ''}` : null;
+    const bom = (r) => !!r.up && r.wa?.conectado !== false && !r.atrasados;
+    const partes = _recadosLista.map((r) => {
+      const e = estado(r);
+      return _recadosLista.length > 1 ? `${r.rotulo}: ${e || 'ok'}` : e;
+    }).filter(Boolean);
+    push('Recados', _recadosLista.every(bom), partes.join(' · ') || null);
+  }
   if (_credito) {
     // O ponto continua sendo "está no ar?" — pendência de operação é outro eixo e
     // não pode pintar o serviço de vermelho. Ela vai no detalhe da linha, onde
@@ -7928,9 +7967,9 @@ app.get('/api/wall', requireAuth, (_req, res) => {
       `Backups · ${(_backups || []).filter(b => b.ok !== false).length}/${(_backups || []).length} em dia`,
       m.uptime_sec ? `No ar há ${Math.floor(m.uptime_sec / 86400)}d` : null,
     ].filter(Boolean)),
-    apps: nodeDe(/^(delega|lari|pixbot|credito|apns)/,
+    apps: nodeDe(/^(delega|lari|pixbot|credito|apns|recados)/,
       // Ancorado: /Assist/ solto casava com 'Home Assistant'.
-      svc.filter(x => /^(Delega|Assist\.|Gastos|Driver Cred|Clockin)/.test(x.nome))
+      svc.filter(x => /^(Delega|Assist\.|Gastos|Driver Cred|Clockin|Recados)/.test(x.nome))
          .map(x => `${x.nome} · ${x.ok ? 'no ar' : 'FORA'}${x.det ? ' · ' + x.det : ''}`)),
     rede: nodeDe(/^(mqtt|cf|dns|funnel|gw_|ts_|local_|broker|cert)/,
       svc.filter(x => /Home Assistant|MQTT|Cloudflare|Gateway/.test(x.nome))
@@ -8983,6 +9022,19 @@ const CREDITO_VIGIA_TOKEN = process.env.CREDITO_VIGIA_TOKEN || '';
 const MINIAPP_SUSTAIN_MS = +(process.env.MINIAPP_SUSTAIN_MIN || 3) * 60_000;
 let _pixbot = [];
 let _credito = null;
+// Recados (WhatsApp agendado). Monitorar aqui porque o valor dele é justamente
+// não depender de eu lembrar: se a sessão cair, o recado de segunda não sai e
+// ninguém descobre até alguém cobrar.
+// Duas instâncias de Recados (números diferentes). Uma lista, não uma URL:
+// vigiar só a primeira deixaria a segunda cair em silêncio.
+const RECADOS_ALVOS = (process.env.RECADOS_HEALTH_URLS
+  || 'Empresa|http://127.0.0.1:3060/api/saude,Pessoal|http://127.0.0.1:3061/api/saude')
+  .split(',').map((par) => {
+    const [rotulo, url] = par.split('|');
+    return { rotulo: (rotulo || '').trim(), url: (url || '').trim() };
+  }).filter((a) => a.url);
+let _recados = null;
+let _recadosLista = [];
 let _creditoVigia = null;   // resumo operacional, atualizado fora do caminho do poller
 
 async function _getJson(url, ms = 5000, headers = null) {
@@ -9037,10 +9089,43 @@ async function _pollMiniApps() {
     }
     _credito.vigia = _creditoVigia;
   }
+  _recadosLista = [];
+  for (const alvo of RECADOS_ALVOS) {
+    const j = await _getJson(alvo.url, 8000,
+      BRIDGE_TOKEN_HASH ? { Authorization: 'Bearer ' + BRIDGE_TOKEN_HASH } : null);
+    _recadosLista.push(j._err
+      ? { rotulo: alvo.rotulo, up: false, error: j._err, ts: Date.now() }
+      : { rotulo: alvo.rotulo, up: true, ...j, ts: Date.now() });
+  }
+  _recados = _recadosLista[0] || null;   // compatibilidade com quem lê o singular
   _evalMiniAppAlerts();
 }
 
 function _evalMiniAppAlerts() {
+  // Duas falhas diferentes: o serviço fora do ar, e o serviço no ar com o
+  // WhatsApp despareado. A segunda é a traiçoeira — tudo "verde" e o recado
+  // agendado simplesmente não sai na segunda de manhã.
+  for (const r of _recadosLista) {
+    const suf = r.rotulo ? `_${r.rotulo.replace(/\W+/g, '')}` : '';
+    const nome = r.nome || (r.rotulo ? `Recados ${r.rotulo}` : 'Recados');
+    _alert(`recados${suf}_down`, r.up === false,
+      `💬 ${nome} fora do ar`,
+      `O agendador não responde (${r.error || 'sem detalhe'}). Recado marcado não sai.`,
+      'high', ['bubble.left.and.bubble.right']);
+    const semSessao = r.up === true && r.wa && r.wa.conectado === false;
+    _alert(`recados${suf}_wa_off`, semSessao,
+      `💬 ${nome} — WhatsApp despareado`,
+      `A sessão caiu${r.agendados ? ` e há ${r.agendados} recado(s) agendado(s)` : ''}. `
+      + `Reparear em ${r.url_painel || 'recados.malha.dev'}.`,
+      r.agendados ? 'high' : 'default', ['link.badge.plus']);
+    // Atraso: passou da hora e não saiu. O próprio serviço já tenta de novo e
+    // avisa quando esgota; aqui é a segunda rede — se o PROCESSO morrer, ele
+    // não avisa ninguém, e é a parede que tem que denunciar.
+    _alert(`recados${suf}_atrasado`, r.up === true && !!r.atrasados,
+      `💬 ${nome} — recado atrasado`,
+      `${r.atrasados} recado(s) passaram da hora e não saíram.`,
+      'high', ['clock.badge.exclamationmark']);
+  }
   // Pixbot, por instância: só "fora do ar". Nada de julgar `wa` aqui — ver acima.
   for (const p of _pixbot) {
     const k = `pixbot_${p.label}_down`;
@@ -9178,6 +9263,8 @@ app.get('/api/health', requireAuth, (_req, res) => {
     apk_executor:  _apkExecutorHealth(),
     mac:           _macStats,
     saj_cloud:     sajCloud.status(),
+    recados:       _recados,
+    ocpp:          ocpp.estado(),
     processes:     _processes,
     clockin:       _appHealth.clockin,
     lari:          _lari,
@@ -16532,10 +16619,13 @@ function _routeUpgrade(req, socket, head) {
     wss.handleUpgrade(req, socket, head, ws => wss.emit('connection', ws, req));
   } else if (pathname === '/ws/audio') {
     wssAudio.handleUpgrade(req, socket, head, ws => wssAudio.emit('connection', ws, req));
+  } else if (ocpp.lidaUpgrade(req, socket, head)) {
+    /* carregador OCPP — o módulo já respondeu (aceitou ou devolveu 401) */
   } else {
     socket.destroy();
   }
 }
+ocpp.inicia();
 server.on('upgrade', _routeUpgrade);
 if (httpsServer) httpsServer.on('upgrade', _routeUpgrade);
 setInterval(() => {
@@ -23025,7 +23115,7 @@ function _createShareToken(ttlMinRaw, opts) {
   // pareamento do iPhone dela com o app Grasi Recarga (via deep link); quando
   // 'other', é só um link público read-only com o nome registrado p/ auditoria.
   const recipientName = String((opts && opts.recipientName) || '').slice(0, 40).trim();
-  const recipientRole = ['grasi', 'companion', 'other'].includes(opts && opts.recipientRole)
+  const recipientRole = ['grasi', 'companion', 'ivone', 'other'].includes(opts && opts.recipientRole)
     ? opts.recipientRole : null;
   // includeSoc: quando false, a página pública esconde SOC/autonomia. Default true.
   const includeSoc = (opts && opts.includeSoc === false) ? false : true;
@@ -23062,7 +23152,40 @@ app.get('/api/byd/paired-recipients', (_req, res) => {
   res.json({ recipients: out });
 });
 
-app.post('/api/share/create', (req, res) => {
+// ── Trajeto pra Ivone: o link sai por WhatsApp, não por link solto ──────────
+//
+// A Grasi recebe o trajeto direto na Live Activity porque tem app pareado. A
+// Ivone não tem app — pra ela o caminho é o WhatsApp PESSOAL (instância 3061 do
+// recados, número 556499111211), e o atalho existe pra não ter que copiar link e
+// procurar contato toda vez.
+//
+// Token: recados valida o mesmo `BRIDGE_TOKEN_HASH` que este bridge já tem, então
+// não entra segredo novo aqui — é a credencial que já existe, reusada.
+const RECADOS_PESSOAL = process.env.RECADOS_URL_PESSOAL || 'http://127.0.0.1:3061';
+const IVONE_WHATSAPP  = process.env.IVONE_WHATSAPP || '5564999357277';
+
+async function _mandaTrajetoPorWhats(numero, url, destName) {
+  try {
+    const recados = require('/Users/consorciolimpagyn/recados/cliente');
+    const texto = destName
+      ? `Rafael está a caminho de ${destName}. Acompanhe por aqui: ${url}`
+      : `Rafael compartilhou o trajeto dele. Acompanhe por aqui: ${url}`;
+    // 12s e não o default de 60: quem espera é a tela do app. Falhou, o app mostra
+    // o link pra mandar na mão — melhor que segurar a tela um minuto.
+    const r = await recados.enviar({
+      para: numero, texto,
+      base: RECADOS_PESSOAL, token: BRIDGE_TOKEN_HASH, timeoutMs: 12_000,
+    });
+    const id = r && (r.id || (r.ids && r.ids[0])) || null;
+    console.log(`[share] trajeto enviado por WhatsApp pra ${numero} · id=${id}`);
+    return { ok: true, id };
+  } catch (e) {
+    console.warn('[share] falha ao mandar trajeto por WhatsApp:', e.message);
+    return { ok: false, erro: e.message };
+  }
+}
+
+app.post('/api/share/create', async (req, res) => {
   const b = req.body || {};
   const out = _createShareToken(b.ttlMin, {
     recipientName: b.recipientName, recipientRole: b.recipientRole,
@@ -23078,7 +23201,13 @@ app.post('/api/share/create', (req, res) => {
     const fromName = String(b.fromName || 'Rafael').slice(0, 40);
     _startSharedTripLA(out.token, fromName).catch(() => {});
   }
-  res.json({ ok: true, ...out, paired });
+  // Ivone: manda o link por WhatsApp e ESPERA, pra a tela poder dizer se foi.
+  // Dizer "enviado" sem saber seria a mesma mentira do "Carro trancado" da Siri.
+  let whats = null;
+  if (out.recipientRole === 'ivone') {
+    whats = await _mandaTrajetoPorWhats(IVONE_WHATSAPP, out.url, out.destName);
+  }
+  res.json({ ok: true, ...out, paired, whats });
 });
 
 // Pareamento do Grasi Recarga via share token: o app abre o deep link

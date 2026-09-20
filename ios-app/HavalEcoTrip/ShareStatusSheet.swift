@@ -14,6 +14,9 @@ final class ShareStatusStore: ObservableObject {
     @Published var error: String?
     @Published var grasiPaired: Bool = false   // se a Grasi já pareou pelo Grasi Recarga
     @Published var grasiName: String = "Grasi"
+    /// Resultado do envio por WhatsApp (só no atalho da Ivone): nil = não tentou.
+    @Published var whatsOk: Bool? = nil
+    @Published var whatsErro: String? = nil
     @Published var deliveredViaLA: Bool = false   // último share caiu direto na LA dela
 
     private var base: String {
@@ -43,6 +46,10 @@ final class ShareStatusStore: ObservableObject {
             self.expiresMs = (j["expiresMs"] as? Double) ?? 0
             self.destName = (j["destName"] as? String).flatMap { $0.isEmpty ? nil : $0 }
             self.deliveredViaLA = (j["paired"] as? Bool) ?? false   // share caiu direto na LA dela?
+            if let w = j["whats"] as? [String: Any] {
+                self.whatsOk = (w["ok"] as? Bool) ?? false
+                self.whatsErro = w["erro"] as? String
+            } else { self.whatsOk = nil; self.whatsErro = nil }
         } catch { self.error = "Erro de rede: \(error.localizedDescription)" }
     }
 
@@ -82,9 +89,14 @@ struct ShareStatusSheet: View {
 
     enum RecipientKind: String, CaseIterable, Identifiable {
         case grasi = "Grasi"
+        case ivone = "Ivone"
         case other = "Outra pessoa"
         var id: String { rawValue }
-        var role: String { self == .grasi ? "grasi" : "other" }
+        // A Grasi recebe na Live Activity (app pareado); a Ivone não tem app, e o
+        // link vai por WhatsApp pessoal — quem faz isso é o bridge, não o iPhone.
+        var role: String {
+            switch self { case .grasi: return "grasi"; case .ivone: return "ivone"; case .other: return "other" }
+        }
     }
 
     private let options: [(String, Int)] = [
@@ -137,6 +149,19 @@ struct ShareStatusSheet: View {
                                     .padding(10).background(DS.panel2)
                                     .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                                     .foregroundStyle(DS.text).autocorrectionDisabled()
+                            } else if recipientKind == .ivone {
+                                // A Ivone não tem app: o link vai por WhatsApp, do número
+                                // pessoal, mandado pelo bridge assim que for gerado.
+                                HStack(spacing: 6) {
+                                    Image(systemName: "message.fill").foregroundStyle(DS.green)
+                                    Text(store.whatsOk == false
+                                         ? "Não consegui mandar no WhatsApp\(store.whatsErro.map { " (\($0))" } ?? "") — o link está aí pra mandar na mão."
+                                         : store.whatsOk == true
+                                         ? "Link enviado no WhatsApp dela ✓"
+                                         : "O link vai por WhatsApp pro número dela assim que for gerado.")
+                                        .font(.caption)
+                                        .foregroundStyle(store.whatsOk == false ? DS.orange : DS.green)
+                                }
                             } else if store.grasiPaired {
                                 // Já pareada: share vai direto pra LA dela — sem precisar mandar link.
                                 HStack(spacing: 6) {
@@ -239,6 +264,7 @@ struct ShareStatusSheet: View {
                     } else {
                         DSActionButton(icon: "link.badge.plus", title: "Gerar link", color: DS.green, busy: store.loading) {
                             let name: String? = recipientKind == .grasi ? "Grasi" :
+                                recipientKind == .ivone ? "Ivone" :
                                 otherName.trimmingCharacters(in: .whitespaces).isEmpty ? nil : otherName.trimmingCharacters(in: .whitespaces)
                             Task { await store.create(ttlMin: ttlMin, recipientName: name, recipientRole: recipientKind.role) }
                         }
@@ -262,6 +288,7 @@ struct ShareStatusSheet: View {
     private var activeName: String {
         if let n = store.destName?.trimmingCharacters(in: .whitespacesAndNewlines), !n.isEmpty { return n }
         if recipientKind == .grasi { return store.grasiName }
+        if recipientKind == .ivone { return "Ivone" }
         return otherName.trimmingCharacters(in: .whitespaces)
     }
 
