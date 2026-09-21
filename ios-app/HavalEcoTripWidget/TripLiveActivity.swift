@@ -150,6 +150,18 @@ struct TripLockScreenView: View {
                             Text("→ \(dest)")
                                 .font(.system(size: 14, weight: .semibold)).foregroundStyle(LAv2.text)
                                 .lineLimit(1).minimumScaleFactor(0.7)
+                        } else {
+                            // Navegando SEM nome de destino. Fica escrito em vez de
+                            // ficar em branco porque as duas situações são diferentes
+                            // e não dá pra distinguir olhando: "nav desligada" não
+                            // desenha este bloco nenhum; "nav ligada e o app de
+                            // navegação não disse pra onde" desenha isto.
+                            //
+                            // É o que o teste do Maps precisa responder: se aparecer
+                            // o nome, o host publica; se aparecer esta linha, não.
+                            Text("destino não informado")
+                                .font(.system(size: 11)).foregroundStyle(LAv2.muted)
+                                .lineLimit(1).minimumScaleFactor(0.7)
                         }
                         if let eta = etaClock {
                             // Sem nome de destino a chegada vira a linha principal, e por

@@ -2045,6 +2045,10 @@ async function getLocalWeather(lat, lng) {
       condition: j.weather?.[0]?.description || '',
       icon: j.weather?.[0]?.icon || '',
       humidity: j.main?.humidity || null,
+      // Cobertura de nuvem (0-100). É o que separa "as placas estão na sombra"
+      // de "o disjuntor caiu" — sem isso o detector de queda só sabia que a
+      // potência sumiu, não por quê.
+      cloudsPct: j.clouds?.all ?? null,
       ts: Date.now(),
     };
     _weatherCache.set(cacheKey, { ts: Date.now(), data });
@@ -6821,20 +6825,66 @@ function _expectedNow(key) {
 // Histórico curto de potência por sistema (últimos 6 ticks = ~6min) — precisa
 // de queda SUSTENTADA pra alertar, evitando falso positivo de nuvem passageira.
 const _solarPowerHist = {};
+// 3 minutos era pouco: nuvem de verão tapa o sol por 10-20min sem esforço, e o
+// alerta saía 'urgent' com o sistema perfeito. Agora a régua é por TEMPO, não
+// por número de ticks — o tick pode falhar e antes isso encurtava a janela sem
+// ninguém perceber.
+const DROP_SUSTAIN_MIN     = Number(process.env.SOLAR_DROP_SUSTAIN_MIN || 15);
+// Com céu encoberto ou com as vizinhas caindo junto, a explicação meteorológica
+// já existe: exige o dobro de teimosia antes de acusar defeito.
+const DROP_SUSTAIN_NUBLADO = Number(process.env.SOLAR_DROP_SUSTAIN_NUBLADO_MIN || 40);
+const DROP_NUVEM_PCT       = Number(process.env.SOLAR_DROP_NUVEM_PCT || 60);
+
+/** Contexto que explica a queda sem precisar de defeito. */
+function _contextoDaQueda(key) {
+  // Outras usinas caindo ao mesmo tempo = frente de chuva, não disjuntor.
+  // São três cidades distintas; as três juntas é clima, uma só é suspeita.
+  const outras = ['catalao', 'ivonei', 'palmeiras'].filter(k => k !== key);
+  const caindo = outras.filter(k => {
+    const h = _solarPowerHist[k];
+    if (!h || h.length < 4) return false;
+    const ref = h[0].w, ult = h[h.length - 1].w;
+    return ref > 1500 && ult < ref * 0.5;
+  });
+  const clima = _quedaClima[key];
+  return { vizinhasCaindo: caindo, nuvemPct: clima?.cloudsPct ?? null };
+}
+const _quedaClima = {};     // { key: {cloudsPct, ts} } — preenchido pelo tick solar
+
 function _detectPowerDrop(key, currentW, daytime) {
   const arr = _solarPowerHist[key] || (_solarPowerHist[key] = []);
   // null = telemetria ausente, não 0 W. `|| 0` fazia o datalogger mudo virar
   // queda de 100% e disparar 'urgent' com o inversor gerando normal.
   if (currentW == null) return false;
-  arr.push({ w: currentW, ts: Date.now() });
-  if (arr.length > 6) arr.shift();
-  if (!daytime || arr.length < 4) return false;
-  // Referência: leitura mais antiga da janela (4 ticks atrás, ~4min)
-  const older = arr[arr.length - 4].w;
-  if (older < 2000) return false;                   // vinha gerando pouco — nuvem inicial, não é "queda"
-  // Últimas 3 leituras TODAS abaixo de 30% do valor de referência = sustentado
-  return arr.slice(-3).every(x => x.w < older * 0.3);
+  const agora = Date.now();
+  arr.push({ w: currentW, ts: agora });
+  // Guarda uma hora: a janela mais longa precisa de referência mais antiga.
+  while (arr.length && agora - arr[0].ts > 60 * 60_000) arr.shift();
+  if (!daytime) return false;
+
+  const ctx = _contextoDaQueda(key);
+  const nublado = (ctx.nuvemPct != null && ctx.nuvemPct >= DROP_NUVEM_PCT)
+                  || ctx.vizinhasCaindo.length > 0;
+  const janelaMin = nublado ? DROP_SUSTAIN_NUBLADO : DROP_SUSTAIN_MIN;
+  const inicio = agora - janelaMin * 60_000;
+
+  // Referência: MEDIANA do que vinha gerando ANTES da janela. A leitura única
+  // de "4 ticks atrás" podia cair bem num pico e inflar a queda.
+  const antes = arr.filter(x => x.ts < inicio).map(x => x.w);
+  if (antes.length < 3) return false;              // sem passado suficiente
+  const ord = [...antes].sort((a, b) => a - b);
+  const ref = ord[Math.floor(ord.length / 2)];
+  if (ref < 2000) return false;                    // vinha gerando pouco — não é "queda"
+
+  const dentro = arr.filter(x => x.ts >= inicio);
+  // Precisa cobrir a janela de verdade: com o tick falhando, 2 amostras podiam
+  // "sustentar" 15 minutos sem ninguém ter olhado o meio do caminho.
+  if (dentro.length < Math.max(3, Math.floor(janelaMin / 3))) return false;
+  const caiu = dentro.every(x => x.w < ref * 0.3);
+  if (caiu) _quedaMotivo[key] = { ref, janelaMin, ...ctx };
+  return caiu;
 }
+const _quedaMotivo = {};
 function _isLowGenDay(key, todayKwh) {
   if (todayKwh == null || todayKwh < 0) return false;
   const arr = (_solarHistory[key] || []).slice(-14);
@@ -6854,11 +6904,32 @@ function _lateAfternoonAt(locKey) {
 // Wrapper que os 3 watchdogs chamam
 async function _evalSolarAnomalies(key, sunLocKey, currentW, todayKwh, daytime) {
   const label = { catalao: '☀️ SAJ Catalão', ivonei: '☀️ Ivonei (Goiânia)', palmeiras: '☀️ Palmeiras' }[key] || key;
-  // A) Queda súbita sustentada por 3+ ticks (~3min) — filtra nuvem passageira
-  const drop = _detectPowerDrop(key, currentW || 0, daytime);
+  // Cobertura de nuvem DESTA usina, pro detector saber se existe explicação no
+  // céu. Cache de 10min no getLocalWeather — não pesa no tick.
+  const co = SUN_COORDS[sunLocKey];
+  if (co) {
+    try {
+      const w = await getLocalWeather(co.lat, co.lng);
+      if (w && w.cloudsPct != null) _quedaClima[key] = { cloudsPct: w.cloudsPct, ts: Date.now() };
+    } catch (_) {}
+  }
+  // A) Queda profunda SUSTENTADA. `currentW || 0` voltaria a transformar
+  // telemetria ausente em 0 W: passa o valor como veio.
+  const drop = _detectPowerDrop(key, currentW, daytime);
+  const mot = _quedaMotivo[key] || {};
+  // O alerta chega com o diagnóstico já feito: quanto caiu, por quanto tempo,
+  // e o que foi descartado. Sem isso o primeiro reflexo é sempre "será nuvem?".
+  const porQue = [
+    mot.ref ? `Vinha em ${(mot.ref / 1000).toFixed(1)} kW e está abaixo de 30% disso` : 'Queda >70%',
+    mot.janelaMin ? `há ${mot.janelaMin}+ min seguidos` : null,
+    mot.nuvemPct != null ? `céu ${mot.nuvemPct}% encoberto` : null,
+    mot.vizinhasCaindo?.length
+      ? `${mot.vizinhasCaindo.join(' e ')} também caíram (pode ser clima)`
+      : 'as outras usinas seguem gerando — não é clima',
+  ].filter(Boolean).join(' · ');
   _alert(`solar_${key}_power_drop`, drop,
     `${label} — queda de geração persistente`,
-    `Potência caiu >70% e MANTEVE assim por 3+ min. Disjuntor CC, string desligou ou cloud perdeu inversor.`,
+    `${porQue}. Verificar disjuntor CC, string desligada ou inversor perdido pela nuvem.`,
     'urgent', ['bolt.slash', 'exclamationmark.triangle.fill'],
     { repeatEvery: 4 * 3600_000 });   // no máximo 1x/4h se persistir (evita spam)
   // B) Dia ruim (só depois de 15h — dá pra saber se salvou o dia)
@@ -8195,6 +8266,30 @@ app.get('/api/wall', requireAuth, (_req, res) => {
     // Só timestamps: quem decide se houve pulso é o cliente, comparando com o que
     // viu no ciclo anterior.
     pulse_ms: [state.last_apk_live_ms, state.last_gwm_ms].filter(Boolean),
+    // O carro PUBLICA (MQTT) e por isso pulsava sozinho; o resto o bridge
+    // CONSULTA, e nada disso acendia — a tela parecia ter um nó vivo e seis
+    // mortos. Aqui vai o carimbo da última MEDIÇÃO de cada nó: a página pulsa
+    // quando o número muda de verdade.
+    //
+    // Carimbo de MEDIÇÃO, não de consulta. Se a fonte devolve o mesmo valor
+    // velho, o timestamp não anda e o nó não pulsa — senão a animação viraria
+    // "o bridge está consultando", que é justamente a mentira que o pulso
+    // deveria evitar. Mesma regra de medicao_ms vs atividade.
+    pulses: {
+      solar: Math.max(_solisState?.ts || 0, _solarState?.ts || 0) || null,
+      // A Bluetti carimba a coleta inteira, não cada aparelho. `reachable`
+      // é o que separa "respondeu agora" de "está no objeto porque sempre
+      // esteve": bateria fora do ar não pulsa.
+      casa:  _bluettiState?.casa?.reachable  ? _bluettiState.ts : null,
+      sitio: _bluettiState?.sitio?.reachable ? _bluettiState.ts : null,
+      apps:  Math.max(..._pixbot.map(x => x.ts || 0),
+                      ..._recadosLista.map(x => x.ts || 0),
+                      _credito?.ts || 0) || null,
+      // Mac e rede são MEDIDOS localmente a cada ciclo, então `checked_at`
+      // aqui É o instante da medição — não há fonte remota pra ficar velha.
+      mac:   _macStats?.checked_at || null,
+      rede:  Math.max(_netBw?.checked_at || 0, _netStatus?.checked_at || 0) || null,
+    },
     services: svc,
     bridge: { uptime_sec: Math.round(process.uptime()), checks: svc.length },
   });
@@ -17494,7 +17589,17 @@ mqttClient.on('message', (topic, payload, packet) => {
       // completo).
       try {
         const nSteps = Array.isArray(o.steps) ? o.steps.length : 0;
-        if (!_nav.active || nSteps !== _navStepsN) {
+        // Modo captura: enquanto existir o arquivo `nav-capture.on`, grava TODO
+        // payload. O gatilho normal (início da rota + mudança no `steps`) não serve
+        // pra investigar o payload novo — ele não traz `steps`, então `nSteps` é
+        // sempre 0 e só o primeiro payload da rota era gravado. Pra comparar Waze e
+        // Maps campo a campo eu preciso do trecho inteiro, não de uma amostra.
+        //
+        // Arquivo e não variável: liga e desliga sem reiniciar o bridge, e some por
+        // acidente é melhor que ficar ligado por acidente.
+        let _capturaTudo = false;
+        try { _capturaTudo = fs.existsSync(path.join(DATA_DIR, 'nav-capture.on')); } catch (_) {}
+        if (_capturaTudo || !_nav.active || nSteps !== _navStepsN) {
           _navStepsN = nSteps;
           fs.appendFileSync(path.join(DATA_DIR, 'nav-raw.ndjson'),
             JSON.stringify({ ts: Date.now(), nSteps, payload: o }) + '\n');
