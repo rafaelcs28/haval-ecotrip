@@ -23176,11 +23176,32 @@ app.get('/api/byd/paired-recipients', (_req, res) => {
 const RECADOS_PESSOAL = process.env.RECADOS_URL_PESSOAL || 'http://127.0.0.1:3061';
 const IVONE_WHATSAPP  = process.env.IVONE_WHATSAPP || '5564999357277';
 
+/// Destino que o bridge REALMENTE conhece, em ordem de confiança.
+///
+/// Não dá pra "ler o destino do Waze": ele não expõe isso. A notificação dele traz
+/// próxima manobra e ETA — foi o que apareceu hoje no `arrival`, com `name: ""` e
+/// `sem_ponto: true`. O nome existe quando o destino saiu DAQUI (você escolheu no
+/// app, ou aceitou a pergunta de saída) e o bridge espelhou no Waze; aí ele fica
+/// no `route.wps` e às vezes volta no `arrival.name`.
+///
+/// Se você digitou o endereço direto no Waze, o bridge não tem como saber o nome —
+/// e a mensagem sai sem ele em vez de inventar.
+function _destinoAtualConhecido() {
+  const nomeArrival = String((state.arrival && state.arrival.name) || '').trim();
+  if (nomeArrival) return nomeArrival;
+  const wps = (state.route && Array.isArray(state.route.wps)) ? state.route.wps : [];
+  // O final é o destino; os outros são paradas no caminho.
+  const fim = wps.filter(w => w && w.name).pop();
+  const nomeRota = fim ? String(fim.name).trim() : '';
+  return nomeRota || '';
+}
+
 async function _mandaTrajetoPorWhats(numero, url, destName) {
   try {
     const recados = require('/Users/consorciolimpagyn/recados/cliente');
-    const texto = destName
-      ? `Rafael está a caminho de ${destName}. Acompanhe por aqui: ${url}`
+    const alvo = String(destName || '').trim() || _destinoAtualConhecido();
+    const texto = alvo
+      ? `Rafael está a caminho de ${alvo}. Acompanhe por aqui: ${url}`
       : `Rafael compartilhou o trajeto dele. Acompanhe por aqui: ${url}`;
     // 12s e não o default de 60: quem espera é a tela do app. Falhou, o app mostra
     // o link pra mandar na mão — melhor que segurar a tela um minuto.
