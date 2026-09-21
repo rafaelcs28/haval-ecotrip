@@ -18663,10 +18663,17 @@ function _tripContentState(ct, active) {
     // Android Auto o nome vem vazio de propósito (o host não entrega o destino), e a
     // condição antiga em `arrival.name` derrubava ETA, km e a barra de progresso junto
     // — a LA ficava sem linha do tempo enquanto o app iOS mostrava tudo.
+    //
+    // ETA e DISTÂNCIA entram separados: o Android Auto entrega os dois de forma
+    // independente e às vezes manda só o relógio (`sem_ponto: true`, sem o ponto
+    // de destino). Mandar `destKm: 0` nesse caso fazia a LA dizer "faltam 0,0 km"
+    // com barra cheia a 3 km do destino — zero por AUSÊNCIA lido como zero medido.
+    // Sem distância, o campo não vai: a LA já esconde "faltam", o "de X" e a barra
+    // quando ele é nulo, e sobra o que é verdade — a hora de chegada.
     ...(active && state.arrival && (+state.arrival.etaMin > 0 || +state.arrival.distKm > 0) ? {
       ...(state.arrival.name ? { destName: String(state.arrival.name) } : {}),
       destEtaMin: Math.round(+state.arrival.etaMin || 0),
-      destKm:     +(+state.arrival.distKm || 0).toFixed(1),
+      ...(+state.arrival.distKm > 0 ? { destKm: +(+state.arrival.distKm).toFixed(1) } : {}),
     } : {}),
     active: !!active,
     updatedAtMs: Date.now(),
@@ -19142,8 +19149,13 @@ function _sharedTripContentState(recipientName, tokenDestName, tk) {
   // amostra válida (>0) do share pelo _evalSharedTripLAs. Antes disso, mostra
   // 0 (barra vazia). Clampa em [0..1] — pode ir negativo se o motorista se
   // afastar (redirecionou) ou passar de 1 (chegou perto do destino).
+  //
+  // `distKm > 0`, não `>= 0`: a mesma armadilha da LA de viagem. Quando o nav
+  // entrega só o relógio (Android Auto sem ponto de destino) a distância chega 0,
+  // e com `>= 0` o progresso virava 1 — barra cheia com o carro ainda longe.
+  // Sem leitura, a barra fica onde estava em vez de anunciar chegada.
   let progress = 0;
-  if (tk && tk.startDistKm > 0 && distKm >= 0) {
+  if (tk && tk.startDistKm > 0 && distKm > 0) {
     progress = 1 - (distKm / tk.startDistKm);
     if (progress < 0) progress = 0;
     if (progress > 1) progress = 1;
