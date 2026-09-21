@@ -857,7 +857,14 @@ struct DashV2View: View {
         Text("Limite de carga (SOC)")
         ForEach([50, 60, 70, 80, 90, 100], id: \.self) { p in
             Button {
-                if p != limit { Task { await cfg.setChargeLimit(p) } }
+                // Compara com o alvo EFETIVO, não com o limite do carro. Com corte
+                // por software armado (ex.: 97%) o carro fica descapado em 100 — e
+                // com `p != limit` tocar em "100%" não fazia NADA: parecia que já
+                // estava lá, e o corte em 97 seguia armado. Escolher 100 ali é uma
+                // mudança real: quer dizer "desarma o corte". Quem desarma é o
+                // /api/charge-limit, que zera o custom target ao receber um preset.
+                let efetivo = customTarget > 0 ? customTarget : limit
+                if p != efetivo { Task { await cfg.setChargeLimit(p) } }
             } label: {
                 Label("\(p)%", systemImage: customTarget == 0 && limit == p ? "checkmark" : "bolt")
             }
