@@ -6879,6 +6879,10 @@ async function _evalSolarAnomalies(key, sunLocKey, currentW, todayKwh, daytime) 
 // S5-GR1P10K (Palmeiras de Goiás). Integração Solis Cloud publica 123 entities
 // por device — a maioria é lixo (bateria zerada, pv_string 4-24, l2/l3 zerados,
 // campos agregados unavailable). Filtrei só o que é útil.
+// Tomada WiFi do ventilador do Ivonei. É `switch.bluetti_1` por acidente de
+// nome do fabricante — o friendly_name é "Ventilador Socket 1" e nada tem a ver
+// com a bateria Bluetti de casa.
+const VENT_IVONEI = process.env.VENT_IVONEI_ENTITY || 'switch.bluetti_1';
 const _SOLIS = {
   ivonei: {
     label: 'Ivonei (Goiânia)',
@@ -7004,8 +7008,30 @@ async function _fetchSolisStatus() {
         invs,
       };
     };
+    // Ventilador do Ivonei: tomada WiFi que o HA liga quando o inversor passa
+    // de 50°C por 5min e desliga abaixo de 45°C por 15min (e às 18h, de todo
+    // jeito). Fica aqui junto da planta porque é dela que ele cuida.
+    const vent = (() => {
+      const e = arr.find(x => x.entity_id === VENT_IVONEI);
+      if (!e || e.state === 'unavailable' || e.state === 'unknown') {
+        return { ligado: null, erro: e ? e.state : 'sem entidade' };
+      }
+      const w = num('sensor.potencia_tomada_wifi');
+      return {
+        ligado: e.state === 'on',
+        // `last_changed` é quando LIGOU ou DESLIGOU — é o "desde quando".
+        // `last_updated` não serve: muda a cada atualização de atributo.
+        desde_ms: Date.parse(e.last_changed || e.last_updated || '') || null,
+        watts: w,
+        // Tomada ligada com consumo ~0 = ventilador parado (queimado, cabo
+        // solto). O socket dizer "on" não prova que o ar está se movendo.
+        girando: w == null ? null : w > 5,
+      };
+    })();
+    const ivonei = buildSystem(_SOLIS.ivonei, 'ivonei');
+    ivonei.ventilador = vent;
     return {
-      ivonei:    buildSystem(_SOLIS.ivonei,    'ivonei'),
+      ivonei,
       palmeiras: buildSystem(_SOLIS.palmeiras, 'palmeiras'),
       ts: Date.now(),
     };
@@ -7494,6 +7520,26 @@ app.get('/api/wall/detail', requireAuth, (req, res) => {
         exp ? `mediana de ${exp.samples} dias` : 'histórico insuficiente');
     if (c.p.invs_total != null)
       add('Inversores reportando', `${c.p.invs_reporting} de ${c.p.invs_total}`);
+    // Ventilador (só o Ivonei). Três linhas porque são três perguntas
+    // diferentes: está ligado, desde quando, e está realmente girando.
+    const v = c.p.ventilador;
+    if (v) {
+      const desde = v.desde_ms
+        ? `${new Date(v.desde_ms).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit',
+            hour: '2-digit', minute: '2-digit' })} · há ${idade(v.desde_ms)}`
+        : null;
+      add('Ventilador', v.ligado == null ? 'sem leitura' : (v.ligado ? 'ligado' : 'desligado'),
+          v.ligado == null ? (v.erro || null) : desde);
+      if (v.ligado) {
+        // A tomada dizer "on" não prova que o ar está se movendo: o motor pode
+        // ter queimado com o socket ligado. O consumo é que prova.
+        add('Consumo do ventilador', v.watts != null ? `${v.watts.toFixed(0)} W` : null,
+            v.watts == null ? 'tomada sem medição agora'
+            : v.girando ? 'girando' : 'LIGADO SEM CONSUMO — ventilador parado');
+      }
+      add('Regra', 'liga >50 °C por 5min · desliga <45 °C por 15min',
+          'e desliga às 18h de todo jeito');
+    }
     for (const i of (c.p.invs || [])) {
       add(i.label, [
         // SAJ chama de `power`, Solis de `ac_power_w`.
@@ -7755,7 +7801,9 @@ app.get('/api/wall', requireAuth, (_req, res) => {
              pace_kwh: pace,
              partial,
              temp: temps.length ? Math.max(...temps) : null,
-             temp_state: tempState(temps.length ? Math.max(...temps) : null, marca) };
+             temp_state: tempState(temps.length ? Math.max(...temps) : null, marca),
+             // Só o Ivonei tem ventilador. `undefined` nas outras some do JSON.
+             ventilador: p.ventilador || undefined };
   };
 
   // Endereço da Song Pro: a trilha dá lat/lng, mas o reverse-geocode é async e
@@ -17459,16 +17507,29 @@ mqttClient.on('message', (topic, payload, packet) => {
         _nav = { active: false, ms: Date.now(), stale: true };
         return;
       }
+      // DUAS grafias porque o Impulse mudou o payload em 15/09/2026 17:52 — de
+      // `remainingMeters`/`currentRoad`/`next.distanceMeters` (camelCase) pra
+      // `remaining_m`/`current_road`/`distance_m` (snake_case). O bridge continuou
+      // lendo só a antiga, então desde aquele dia a distância chegava 0 com a rota
+      // viva: 1502 payloads com a grafia velha até 15/09, 1123 com a nova depois.
+      //
+      // Foi isso que pôs "faltam 0,0 km" e barra cheia na LA a 3 km do destino em
+      // 21/09 — o payload daquele instante tinha `remaining_m: 410` e `eta: "08:43"`,
+      // e o ETA aparecia certo justamente porque `eta` não mudou de nome.
+      //
+      // Aceitar as duas, e não trocar pela nova, porque o dev do Impulse pode
+      // reverter ou publicar versões diferentes em instâncias diferentes.
+      const _n = o.next || {};
       _nav = {
         active: true,
         destination:       o.destination || (Array.isArray(o.destinations) ? o.destinations[0] : '') || '',
-        current_road:      o.currentRoad || '',
+        current_road:      o.current_road || o.currentRoad || '',
         eta:               o.eta || '',
-        remaining_seconds: +o.remainingSeconds || 0,
-        remaining_meters:  +o.remainingMeters  || 0,
-        next_icon:         o.next?.icon || '',
-        next_road:         o.next?.road || '',
-        next_distance_m:   +(o.next?.distanceMeters) || 0,
+        remaining_seconds: +o.remaining_s || +o.remainingSeconds || 0,
+        remaining_meters:  +o.remaining_m || +o.remainingMeters  || 0,
+        next_icon:         o.turn || _n.icon || '',
+        next_road:         o.next_street || _n.road || '',
+        next_distance_m:   +o.distance_m || +(_n.distanceMeters) || 0,
         // 'lastStep' = derivado do último passo pelo Impulse, não veio do host. Vale
         // pra resolver e mostrar, mas quero saber a procedência.
         destination_source: o.destinationSource || (o.destination ? 'host' : ''),
@@ -23178,15 +23239,23 @@ const IVONE_WHATSAPP  = process.env.IVONE_WHATSAPP || '5564999357277';
 
 /// Destino que o bridge REALMENTE conhece, em ordem de confiança.
 ///
-/// Não dá pra "ler o destino do Waze": ele não expõe isso. A notificação dele traz
-/// próxima manobra e ETA — foi o que apareceu hoje no `arrival`, com `name: ""` e
-/// `sem_ponto: true`. O nome existe quando o destino saiu DAQUI (você escolheu no
-/// app, ou aceitou a pergunta de saída) e o bridge espelhou no Waze; aí ele fica
-/// no `route.wps` e às vezes volta no `arrival.name`.
+/// A PRIMEIRA fonte é a navegação do Android Auto lida pelo Impulse (`_nav`): ela
+/// traz `destination` e `remaining_meters` do host, então endereço digitado direto
+/// no Waze TAMBÉM chega aqui. (Eu tinha afirmado o contrário; o que não dá é o
+/// caminho inverso — o bridge não consegue LER de volta o que espelhou, e foi
+/// dessa nota que eu generalizei errado.)
 ///
-/// Se você digitou o endereço direto no Waze, o bridge não tem como saber o nome —
-/// e a mensagem sai sem ele em vez de inventar.
+/// Depois vem o que saiu DAQUI: `arrival.name` e o último waypoint de `route.wps`,
+/// que existem quando o destino foi escolhido no app ou aceito na pergunta de saída.
+///
+/// Sem nenhum dos três — nav parada e nada posto pelo app, que foi o estado de
+/// 21/09 (`updatedAtMs=0`, "sem rota ativa") — a mensagem sai sem nome em vez de
+/// inventar um.
 function _destinoAtualConhecido() {
+  if (_nav && _nav.active) {
+    const doHost = String(_nav.destination || '').trim();
+    if (doHost) return doHost;
+  }
   const nomeArrival = String((state.arrival && state.arrival.name) || '').trim();
   if (nomeArrival) return nomeArrival;
   const wps = (state.route && Array.isArray(state.route.wps)) ? state.route.wps : [];
