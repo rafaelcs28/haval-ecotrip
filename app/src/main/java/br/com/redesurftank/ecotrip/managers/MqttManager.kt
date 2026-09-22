@@ -2443,6 +2443,11 @@ class MqttManager private constructor() {
             pubD("shizuku", if (rikka.shizuku.Shizuku.pingBinder()) "alive" else "dead",
                  retained = true)
 
+            // Vigia da inscrição no barramento. Vive aqui porque este bloco já roda
+            // periodicamente e sobrevive a tudo — se ele parar, o app inteiro parou e
+            // o problema é outro. O vigia tem trava própria (1 tentativa/min).
+            try { CarDataManager.getInstance().vigiaRegistro() } catch (_: Exception) {}
+
             // GPS — publica apenas quando há sinal válido (≠ 0.0)
             val (gpsLat, gpsLng) = TripManager.getInstance().getLastGps()
             if (gpsLat != 0.0 && gpsLng != 0.0) {
@@ -3853,6 +3858,17 @@ class MqttManager private constructor() {
                         hfModeActive = on
                         AppLogger.i(TAG, if (on) "HF mode ON — publish a cada ${HF_MODE_INTERVAL_MS}ms" else "HF mode OFF — intervalo normal restaurado")
                     }
+                }
+                "restart_app" -> {
+                    // Conserto do travamento silencioso: o app segue publicando com o
+                    // CAN congelado, e reiniciar é o que resolve — foi o que o dono fez
+                    // na mão três vezes em 22/09. Quem detecta é o bridge (velocidade
+                    // parada com o carro andando); aqui só se obedece, com a trava de
+                    // 15 min do AppRestart pra um comando errado não virar laço.
+                    val motivo = payload.trim().ifEmpty { "comando do bridge" }
+                    val ctx = appContext
+                    if (ctx == null) AppLogger.w(TAG, "restart_app sem contexto — ignorado")
+                    else AppRestart.reiniciar(ctx, motivo)
                 }
                 "diag" -> {
                     // Payload JSON: { enabled: bool, interval_sec: int }

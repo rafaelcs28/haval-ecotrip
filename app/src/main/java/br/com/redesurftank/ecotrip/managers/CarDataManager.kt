@@ -50,9 +50,32 @@ class CarDataManager private constructor() {
 
     private val remoteListener = object : IListener.Stub() {
         override fun onDataChanged(key: String, value: String) {
+            ultimoDadoMs = System.currentTimeMillis()
             if (value.isNotEmpty()) rawValues[key] = value
             synchronized(lock) { dataListeners.toList() }.forEach { it(key, value) }
         }
+    }
+
+    /// Quando o barramento entregou algo pela última vez. É o único sinal que
+    /// distingue "registrado e o carro está quieto" de "o registro caiu e eu não
+    /// sei" — e era exatamente o que faltava.
+    @Volatile private var ultimoDadoMs = 0L
+    @Volatile private var ultimaTentativaMs = 0L
+
+    /// Morte do serviço do CARRO (não do Shizuku).
+    ///
+    /// Aqui estava o buraco. O `shizukuDeadListener` cobre o Shizuku morrer, mas o
+    /// que morre no despertar depois de horas paradas é o
+    /// `com.beantechs.intelligentvehiclecontrol`: ele reinicia junto com a multimídia
+    /// e PERDE a nossa inscrição. O Shizuku segue vivo, `pingBinder()` responde true,
+    /// o `controlService` continua apontando pra um proxy morto — e ninguém
+    /// re-registra. O app fica publicando MQTT com timestamp fresco e zero dado do
+    /// CAN, que é exatamente o travamento de 22/09, três vezes no mesmo dia, sempre
+    /// na primeira saída depois de um longo repouso.
+    private val controlDeath = IBinder.DeathRecipient {
+        AppLogger.w(TAG, "binder do serviço do carro MORREU — reconectando")
+        controlService = null
+        checkPermissionAndConnect()
     }
 
     // Shizuku binder chegou — verifica permissão antes de conectar
@@ -100,6 +123,29 @@ class CarDataManager private constructor() {
         Shizuku.removeBinderDeadListener(shizukuDeadListener)
         Shizuku.removeRequestPermissionResultListener(permissionResultListener)
         controlService = null
+    }
+
+    /**
+     * Vigia do registro: silêncio longo do barramento = inscrição caída.
+     *
+     * `linkToDeath` cobre o serviço MORRER. Não cobre o caso em que ele sobrevive
+     * mas esquece de nós — o binder segue vivo, `pingBinder()` diz sim, e o dado
+     * nunca chega. Do lado de fora as duas falhas são idênticas: painel mudo.
+     *
+     * 90 s de silêncio é seguro mesmo com o carro dormindo: reconectar é registrar
+     * de novo, operação idempotente e barata. Melhor tentar à toa de vez em quando
+     * do que ficar cego uma viagem inteira — que foi o que aconteceu três vezes hoje.
+     *
+     * Chamado pelo CarTelemetryService, que já tem laço próprio.
+     */
+    fun vigiaRegistro() {
+        val agora = System.currentTimeMillis()
+        if (ultimoDadoMs > 0 && agora - ultimoDadoMs < 90_000) return
+        if (agora - ultimaTentativaMs < 60_000) return     // no máximo 1 tentativa/min
+        ultimaTentativaMs = agora
+        val quieto = if (ultimoDadoMs > 0) (agora - ultimoDadoMs) / 1000 else -1
+        AppLogger.w(TAG, "barramento quieto há ${quieto}s — re-registrando no serviço do carro")
+        checkPermissionAndConnect()
     }
 
     fun addListener(l: DataListener) = synchronized(lock) { dataListeners.add(l) }
@@ -168,7 +214,11 @@ class CarDataManager private constructor() {
             val svc = IIntelligentVehicleControlService.Stub.asInterface(binder)
             svc.registerDataChangedListener(pkg, remoteListener)
             svc.addListenerKey(pkg, KEYS)
+            // Avisa quando ESTE serviço cair. Sem isto a inscrição sumia calada.
+            try { binder.linkToDeath(controlDeath, 0) }
+            catch (e: Exception) { AppLogger.w(TAG, "linkToDeath falhou: ${e.message}") }
             controlService = svc
+            ultimoDadoMs = System.currentTimeMillis()
             AppLogger.i(TAG, "Connected — listening to ${KEYS.size} keys")
             // Shizuku confirmado vivo+autorizado: concede RECORD_AUDIO (escuta ao
             // vivo) que nunca foi pedida em runtime no head-unit.

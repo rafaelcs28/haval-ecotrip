@@ -4352,6 +4352,8 @@ let _silenceZones = [];
 let _zonaSilencioAtual = null;   // pra logar só a transição, não a cada minuto
 /// Posição de quando a velocidade ainda era > 0 — base do alerta car_can_frozen.
 let _canAncora = null;
+/// Último `cmd/restart_app` enviado — cooldown do conserto automático.
+let _ultimoRestartApk = 0;
 try { _silenceZones = JSON.parse(fs.readFileSync(SILENCE_ZONES_FILE, 'utf8')) || []; } catch (_) {}
 function _saveSilenceZones() {
   try { atomicWriteFileSync(SILENCE_ZONES_FILE, JSON.stringify(_silenceZones, null, 2)); }
@@ -4444,6 +4446,34 @@ setInterval(() => {
       state._can_mudo_desde_ms = _canAncora.ms;
       state._can_mudo_lat = _canAncora.lat; state._can_mudo_lng = _canAncora.lng;
       scheduleStateSave();
+
+      // ── Conserto automático ────────────────────────────────────────────────
+      //
+      // Só avisar não basta: em 22/09 isto aconteceu TRÊS vezes, e nas três quem
+      // resolveu foi o dono reiniciando na mão, dirigindo, depois de perceber o
+      // painel mudo. O app não morre — ele continua publicando com o barramento
+      // congelado —, então nada se auto-recupera.
+      //
+      // 3 min de condição sustentada antes de agir: tempo de descartar semáforo
+      // longo e GPS pulando, e ainda assim menos que o dono levaria pra notar.
+      // Cooldown de 20 min do lado de cá, e o AppRestart tem 15 min do lado de lá —
+      // duas travas porque reinício em laço deixaria o carro inutilizável, o que é
+      // pior que cego.
+      const mudoMs = now - _canAncora.ms;
+      if (mudoMs > 180_000 && (now - _ultimoRestartApk) > 20 * 60_000) {
+        _ultimoRestartApk = now;
+        publishCmdWithRetry(`${MQTT_PREFIX}/cmd/restart_app`,
+          `CAN congelado ha ${Math.round(mudoMs / 60000)}min com o carro andando`,
+          { retain: false, qos: 1 })
+          .then(() => {
+            console.log(`[can-frozen] restart_app enviado (mudo ha ${Math.round(mudoMs / 60000)}min)`);
+            addEvent('apk_restart_auto', 'App do carro reiniciado automaticamente');
+            sendPush('🔄 Reiniciei o app do carro',
+              'O painel estava congelado com o carro andando. Deve voltar a marcar em ~1 min.',
+              'car_apk_restart');
+          })
+          .catch(e => console.warn('[can-frozen] restart_app falhou:', e.message));
+      }
     }
     _alert('car_can_frozen',
       canCongelado,
