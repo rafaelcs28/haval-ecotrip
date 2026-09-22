@@ -354,7 +354,33 @@ const map = L.map('map', { zoomControl:false, attributionControl:false }).setVie
       }
     } catch (_) {}
   }
-  L.tileLayer('https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}@2x.png', { maxZoom:20 }).addTo(map);
+  // OpenStreetMap, e NÃO mais o CartoDB Voyager.
+  //
+  // Em 22/09 o destinatário abriu o link e o mapa veio carimbado "API KEY REQUIRED
+  // · carto.com/basemaps/apikey": a Carto passou a exigir chave nos basemaps. O
+  // tile continua respondendo 200 com PNG válido — só que com a marca d'água por
+  // cima. Foi por isso que o meu teste inicial (só o status HTTP) deu tudo certo
+  // com a tela quebrada na mão do usuário: 200 não quer dizer utilizável.
+  //
+  // Fallback em cadeia: se o OSM falhar, entra o Esri. Provedor gratuito muda
+  // regra sem avisar — já mudou uma vez — e mapa cinza não conta o que houve.
+  const FONTES = [
+    { url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', attribution: '© OpenStreetMap' },
+    { url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',
+      attribution: 'Esri' },
+  ];
+  let iFonte = 0, erros = 0, camada = null;
+  function poeCamada() {
+    if (camada) map.removeLayer(camada);
+    const f = FONTES[iFonte];
+    camada = L.tileLayer(f.url, { maxZoom: 19, attribution: f.attribution }).addTo(map);
+    erros = 0;
+    camada.on('tileerror', () => {
+      // 6 falhas: tile solto erra por rede; fonte quebrada erra sempre.
+      if (++erros >= 6 && iFonte < FONTES.length - 1) { iFonte++; poeCamada(); }
+    });
+  }
+  poeCamada();
 })();
 
 // Seta de navegação que aponta pro rumo (car_heading). A ponta da seta é o "norte"

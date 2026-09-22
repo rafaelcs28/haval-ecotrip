@@ -143,7 +143,11 @@ async function load() {
     $('map').hidden = false;
     const map = L.map('map', { zoomControl: true, attributionControl: false });
     mapRef = map;
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom: 19 }).addTo(map);
+    // Esri Dark Gray no lugar do CartoDB dark: a Carto passou a exigir chave e
+    // carimba "API KEY REQUIRED" no tile — servindo 200 normalmente, o que esconde
+    // a quebra de quem só olha o status. Visto no link de trajeto em 22/09.
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+                { maxZoom: 16, attribution: 'Esri' }).addTo(map);
     const pts = samples.filter(s => s.lat && s.lng).map(s => [s.lat, s.lng]);
     if (pts.length) {
       L.polyline(pts, { color: '#5eead4', weight: 4, opacity: .85 }).addTo(map);
