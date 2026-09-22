@@ -4350,6 +4350,8 @@ function _carIsAwake() {
 const SILENCE_ZONES_FILE = path.join(DATA_DIR, 'silence_zones.json');
 let _silenceZones = [];
 let _zonaSilencioAtual = null;   // pra logar só a transição, não a cada minuto
+/// Posição de quando a velocidade ainda era > 0 — base do alerta car_can_frozen.
+let _canAncora = null;
 try { _silenceZones = JSON.parse(fs.readFileSync(SILENCE_ZONES_FILE, 'utf8')) || []; } catch (_) {}
 function _saveSilenceZones() {
   try { atomicWriteFileSync(SILENCE_ZONES_FILE, JSON.stringify(_silenceZones, null, 2)); }
@@ -4401,6 +4403,56 @@ setInterval(() => {
     'App do carro silente',
     `Sem dados do APK há ${Math.round(apkAge / 60_000)}min (GWM continua ativa).`,
     'high', ['car']);
+
+  // 1a. CAN congelado com o carro ANDANDO.
+  //
+  // O modo de falha que nenhum alerta pegava: o APK continua publicando (timestamp
+  // fresco a cada 2s) mas os valores do barramento não mexem. Aconteceu em 18/09 e
+  // de novo em 22/09 — nas duas vezes o dono descobriu pelo app mudo, dirigindo.
+  //
+  // Por que ESTE sinal e não o ping do Shizuku: de fora, binder morto e APK travado
+  // são idênticos. Em 22/09 eu apostei em Shizuku e era o app travado; o ping teria
+  // respondido e o alerta ficaria calado. O que não mente é a contradição — GPS do
+  // head unit andando (prova que o APK está vivo E o carro se move) com velocidade
+  // parada em 0 (prova que o barramento não chega).
+  //
+  // Âncora: posição de quando a velocidade foi vista pela última vez acima de zero.
+  // Enquanto ela ficar em 0, mede quanto o carro andou desde então.
+  {
+    const vel = +state.speed_kmh || 0;
+    const lat = +state.gps_lat, lng = +state.gps_lng;
+    const temGps = Number.isFinite(lat) && Number.isFinite(lng) && (lat || lng);
+    if (vel > 0.5 || !temGps) {
+      _canAncora = temGps ? { lat, lng, ms: now, odo: +state.odometer_km || 0 } : null;
+    } else if (!_canAncora) {
+      _canAncora = { lat, lng, ms: now, odo: +state.odometer_km || 0 };
+    }
+    const andou = _canAncora ? haversineM(_canAncora.lat, _canAncora.lng, lat, lng) : 0;
+    const odoDelta = _canAncora ? (+state.odometer_km || 0) - _canAncora.odo : 0;
+    // 600 m OU 1 km de odômetro: abaixo disso é deriva de GPS parado. E 2 min de
+    // duração pra não disparar num semáforo com GPS pulando.
+    const tempo = _canAncora ? now - _canAncora.ms : 0;
+    const canCongelado = !!_canAncora && vel <= 0.5 && tempo > 120_000
+      && (andou > 600 || odoDelta >= 1) && (now - apkMs) < 60_000;
+    // Guarda A JANELA, não só o alerta. Quando a viagem finalmente abrir, o
+    // `_completaInicioComCelular` precisa saber desde quando o carro andava — e
+    // `_engine_on_ms` não serve: o reinício da multimídia (que é a receita de
+    // recuperação) reescreve ele segundos antes da viagem começar, e o portão de
+    // 3 min do completar-início nunca abre. Foi o que aconteceu em 22/09: motor
+    // "ligado" 07:15:22, viagem 07:15:06, e ~10 min de trajeto sem registro.
+    if (canCongelado && _canAncora) {
+      state._can_mudo_desde_ms = _canAncora.ms;
+      state._can_mudo_lat = _canAncora.lat; state._can_mudo_lng = _canAncora.lng;
+      scheduleStateSave();
+    }
+    _alert('car_can_frozen',
+      canCongelado,
+      'Carro andando e o painel não vê',
+      `O app do carro está publicando, mas a leitura do barramento está parada `
+      + `(velocidade 0 com ${(andou / 1000).toFixed(1)} km percorridos). `
+      + `Viagem não está sendo gravada — reiniciar a multimídia recupera.`,
+      'high', ['car']);
+  }
 
   // 1b. Shizuku caído. É ele que sustenta leitura do CAN e comando de vidro/teto;
   // sem ele o APK segue vivo e "funcionando", só que cego e sem braço — por isso
@@ -7870,6 +7922,22 @@ app.get('/api/wall', requireAuth, (_req, res) => {
              kwh:  t.kwh == null ? null : +t.kwh.toFixed(1),
              exp_kw: (exp && !partial) ? +(exp / 1000).toFixed(2) : null,
              pace_kwh: pace,
+             // Faixa do ritmo, no servidor: a mesma régua vale pra parede, pro
+             // widget e pra qualquer outra tela. Cedo no dia o quociente é
+             // instável (0,3 vs 0,2 kWh = 150%), então só classifica com massa
+             // suficiente — abaixo disso é `null` e ninguém pinta nada.
+             pace_state: (() => {
+               const k = t.kwh, m = pace;
+               if (k == null || !m || m < 2 || k < 2) return null;
+               const r = k / m;
+               // Faixa "normal" larga de propósito: um dia com nuvens fecha em
+               // 85% sem nada de errado, e pintar isso de âmbar todo dia
+               // nublado treina a ignorar a cor. Âmbar só quando está mesmo
+               // ficando pra trás.
+               if (r >= 1.05) return 'acima';
+               if (r >= 0.80) return 'normal';
+               return r >= 0.55 ? 'abaixo' : 'ruim';
+             })(),
              partial,
              temp: temps.length ? Math.max(...temps) : null,
              temp_state: tempState(temps.length ? Math.max(...temps) : null, marca),
@@ -8216,6 +8284,73 @@ app.get('/api/wall', requireAuth, (_req, res) => {
     // tudo bem agora?"; isto responde "o que anda quebrando?", que é outra
     // pergunta e não aparece em lugar nenhum hoje. Recuperações e restarts ficam
     // de fora: o que interessa é quantas vezes o problema ACONTECEU.
+    // Faixa das últimas 24h por família: uma célula por hora, cor = pior coisa
+    // que aconteceu naquela hora. Responde "estava tudo bem enquanto eu não
+    // olhava?" sem um único número — que é o que a lista de eventos respondia
+    // gastando vinte linhas.
+    faixa24: (() => {
+      // "Apps" é genérico demais numa parede: saber que "um app" caiu às 3h não
+      // diz nada. Cada app vira sua PRÓPRIA linha, e só as que tiveram evento
+      // aparecem — senão seriam seis linhas vazias todo dia.
+      const APPS = [
+        ['delega',  /^delega/,  'Delega'],
+        ['lari',    /^lari/,    'Assistentes'],
+        ['pixbot',  /^pixbot/,  'Gastos'],
+        ['credito', /^credito/, 'Driver Cred'],
+        ['apns',    /^apns/,    'APNs'],
+        ['recados', /^recados/, 'Recados'],
+      ];
+      const FAM = [
+        ['carro', /^(car|apk)_/, 'Carro'], ['solar', /^(solar|solis|fan)_/, 'Solar'],
+        ['casa', /^(bluetti_casa|ha_down)/, 'Casa'],
+        ['sitio', /^(starlink|bluetti_sitio|ext_monitor)/, 'Sítio'],
+        ['mac', /^(disk|ssd|mem_|rss|restarts|backup|icloud)/, 'Mac'],
+        ...APPS,
+        ['rede', /^(mqtt|cf|dns|funnel|gw_|ts_|local_|broker|cert)/, 'Rede'],
+      ];
+      const H = 24, agoraH = Math.floor(now / 3600_000);
+      const grade = {}, detalhe = {};
+      for (const [f] of FAM) grade[f] = new Array(H).fill(0);   // 0=quieto
+      for (const e of _healthEvents) {
+        const h = Math.floor(e.ts / 3600_000);
+        const i = H - 1 - (agoraH - h);
+        if (i < 0 || i >= H) continue;
+        // `_recovery` é boa notícia e não pinta a hora; restart pinta, porque é
+        // a coisa que passa despercebida e explica buraco em gráfico.
+        if (/_recovery$/.test(e.type)) continue;
+        const sev = /crit|urgent/i.test(e.msg || '') ? 2 : 1;
+        for (const [f, re] of FAM) {
+          if (re.test(e.type) || (f === 'mac' && e.type === 'restart')) {
+            grade[f][i] = Math.max(grade[f][i], sev);
+            // O QUE aconteteceu naquela hora. Sem isto o quadradinho só dizia
+            // "algo aconteceu", que obriga a ir procurar no log — a faixa
+            // apontava o problema e não contava qual era.
+            const ch = `${f}|${i}`;
+            (detalhe[ch] || (detalhe[ch] = [])).push({
+              ts: e.ts, sev,
+              // `title: body` — o título diz o que é, o corpo diz a causa.
+              // Mantém os dois: são as duas perguntas que o hover responde.
+              msg: String(e.msg || '').slice(0, 220),
+            });
+          }
+        }
+      }
+      // Hora cheia de repetição (23 restarts) não cabe e não informa mais que
+      // os primeiros: manda 4 e diz quantos ficaram de fora.
+      for (const ch of Object.keys(detalhe)) {
+        const tot = detalhe[ch].length;
+        detalhe[ch].sort((a, b) => b.sev - a.sev || a.ts - b.ts);
+        detalhe[ch] = { itens: detalhe[ch].slice(0, 4), total: tot };
+      }
+      // App sem nenhum evento em 24h não ganha linha. As 5 famílias fixas
+      // ficam sempre — a ausência delas é informação ("o carro não deu trabalho").
+      const fixas = new Set(['carro', 'solar', 'casa', 'sitio', 'mac', 'rede']);
+      const linhas = FAM
+        .filter(([f]) => fixas.has(f) || grade[f].some(v => v > 0))
+        .map(([f, , rot]) => ({ key: f, rotulo: rot }));
+      for (const f of Object.keys(grade)) if (!linhas.some(l => l.key === f)) delete grade[f];
+      return { horas: H, ate_ms: now, fam: linhas, grade, detalhe };
+    })(),
     top7d: (() => {
       const cut = now - 7 * 86400_000, c = {}, titulo = {};
       for (const e of _healthEvents) {
@@ -8235,7 +8370,14 @@ app.get('/api/wall', requireAuth, (_req, res) => {
                     .replace(/\s*\([^)]*\)?/g, '')
                     .replace(/^(☀️|🌱|🏠)?\s*(Solar|SAJ)\s+/, '$1 ')
                     .replace(/\s+/g, ' ').trim();
-        if (t && t.length <= 46) titulo[e.type] = t;
+        // Cair pra `e.type` mostrava a CHAVE crua na parede
+        // ("recados_999111211_wa_off"), que não é nome de nada. Com os nomes de
+        // instância o título passou de 46 caracteres e o defeito apareceu.
+        // Agora: se é longo, abrevia em palavra inteira; chave crua nunca.
+        if (t) titulo[e.type] = t.length <= 46
+          ? t
+          : (() => { const c = t.slice(0, 46), i = c.lastIndexOf(' ');
+                     return (i > 24 ? c.slice(0, i) : c).trim() + '…'; })();
       }
       const arr = Object.entries(c).sort((a, b) => b[1] - a[1]).slice(0, 6);
       const max = arr.length ? arr[0][1] : 0;
@@ -12488,8 +12630,17 @@ function computeDriveScore(samples, t) {
 /// viagem começar, e sempre marca o resultado como estimado. Devolve true se mexeu.
 function _completaInicioComCelular(autoTrip, samples, tripId) {
   try {
-    const ligouMs = +state._engine_on_ms || 0;
-    if (!ligouMs || !autoTrip || !autoTrip.startMs) return false;
+    // Âncora: o motor ligando OU a janela em que o CAN ficou mudo com o carro
+    // andando — o que for MAIS ANTIGO. O reinício da multimídia reescreve o
+    // `_engine_on_ms` no meio do trajeto perdido, e só com ele o trecho nunca era
+    // recuperado (22/09).
+    const mudoMs = +state._can_mudo_desde_ms || 0;
+    const mudoVale = mudoMs > 0 && autoTrip && autoTrip.startMs > mudoMs
+      && (autoTrip.startMs - mudoMs) < 3 * 3600_000;
+    const ligouMs = mudoVale
+      ? Math.min(+state._engine_on_ms || Infinity, mudoMs)
+      : (+state._engine_on_ms || 0);
+    if (!ligouMs || !Number.isFinite(ligouMs) || !autoTrip || !autoTrip.startMs) return false;
     const atraso = autoTrip.startMs - ligouMs;
     // < 3 min é a partida normal (APK leva alguns segundos pra abrir a trip).
     // > 3 h não é "o mesmo trajeto": provavelmente o motor ficou marcado ligado.
@@ -12542,6 +12693,8 @@ function _completaInicioComCelular(autoTrip, samples, tripId) {
     }
     extraM += haversineM(pts[pts.length-1].lat, pts[pts.length-1].lng, autoTrip.startLat, autoTrip.startLng);
 
+    // Consumida: não pode valer pra próxima viagem.
+    state._can_mudo_desde_ms = 0; scheduleStateSave();
     autoTrip.startMs  = novoStart;
     autoTrip.startLat = pts[0].lat;
     autoTrip.startLng = pts[0].lng;
