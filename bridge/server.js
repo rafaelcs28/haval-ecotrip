@@ -18885,6 +18885,43 @@ function _achaEmMeusLocais(label) {
 }
 
 /** Substitui a rota do app pelo destino que está no Waze. */
+/// Nome de local conhecido perto de um ponto — pra o destino deixar de ser
+/// "R. Carajás, 522 - Centro" e virar o apelido que o dono deu ao lugar.
+///
+/// Existe porque o `_achaEmMeusLocais` casa por NOME, e o Android Auto entrega o
+/// endereço, não o rótulo: "R. Carajás, 522" não parece com "Clean Master Catalão"
+/// em texto nenhum. Depois de geocodificar, porém, as duas coisas são o mesmo ponto
+/// no mapa — e aí o casamento é trivial.
+///
+/// Raio: `radius_m` do próprio local quando existe (é a tolerância que o dono
+/// definiu pro geofence), senão 250 m. Endereço geocodificado cai na rua, não na
+/// porta, então raio apertado demais erraria por pouco justamente nos casos certos.
+///
+/// Devolve o MAIS PRÓXIMO, não o primeiro: locais se sobrepõem (Casa e a rua dela),
+/// e o mais perto é o que o dono quis dizer.
+function _localProximo(lat, lng) {
+  if (!_validLatLng(+lat, +lng)) return null;
+  const cands = [];
+  for (const p of knownPlaces || []) {
+    if (_validLatLng(+p.lat, +p.lng)) cands.push({ name: p.name, lat: +p.lat, lng: +p.lng, raio: +p.radius_m || 250 });
+  }
+  for (const p of meusLocais || []) {
+    if (_validLatLng(+p.lat, +p.lng)) cands.push({ name: p.name, lat: +p.lat, lng: +p.lng, raio: 250 });
+  }
+  try {
+    for (const p of _navFavsParaUI() || []) {
+      if (_validLatLng(+p.lat, +p.lng)) cands.push({ name: p.name, lat: +p.lat, lng: +p.lng, raio: 250 });
+    }
+  } catch (_) {}
+  let melhor = null;
+  for (const c of cands) {
+    if (!c.name) continue;
+    const m = haversineM(+lat, +lng, c.lat, c.lng);
+    if (m <= c.raio && (!melhor || m < melhor.m)) melhor = { name: c.name, m };
+  }
+  return melhor;
+}
+
 async function _adotaDestinoDoWaze(label) {
   if (_navDestBusy) return;
   _navDestBusy = true;
@@ -18892,7 +18929,15 @@ async function _adotaDestinoDoWaze(label) {
     let hit = _achaEmMeusLocais(label);
     if (!hit) {
       const g = await _geocode(label);
-      if (g && _validLatLng(+g.lat, +g.lng)) hit = { name: g.name || label, lat: +g.lat, lng: +g.lng, via: 'geocode' };
+      if (g && _validLatLng(+g.lat, +g.lng)) {
+        // Geocodificou: antes de aceitar o endereço como nome, vê se o PONTO é um
+        // lugar que o dono já batizou. "R. Carajás, 522 - Centro" e "Clean Master
+        // Catalão" não se parecem em texto, mas são o mesmo lugar no mapa.
+        const perto = _localProximo(+g.lat, +g.lng);
+        hit = perto
+          ? { name: perto.name, lat: +g.lat, lng: +g.lng, via: `geocode+local(${Math.round(perto.m)}m)` }
+          : { name: g.name || label, lat: +g.lat, lng: +g.lng, via: 'geocode' };
+      }
     }
     if (!hit) {
       // Degrau 3: sem ponto, NÃO troca a rota. O card já mostra rótulo e ETA do Waze;
