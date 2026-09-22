@@ -18867,7 +18867,10 @@ function _achaEmMeusLocais(label) {
   // só vale em igualdade exata; com 2+ palavras, exige TODAS presentes no alvo.
   const toks = (t) => norm(t).split(' ').filter(Boolean);
   const alvoToks = new Set(toks(label));
-  for (const l of meusLocais) {
+  // Favoritos entram junto: eram consultados só por proximidade, e proximidade não
+  // ajuda quando o ponto geocodificado está na cidade errada. O texto salvo pelo
+  // dono é a âncora mais confiável que existe aqui.
+  for (const l of [...meusLocais, ...navFavorites]) {
     if (!_validLatLng(+l.lat, +l.lng)) continue;
     const nome = l.name || l.nome;
     const n = norm(nome), nt = toks(nome);
@@ -22865,8 +22868,14 @@ app.post('/api/nav-favorites', (req, res) => {
   if (!name) return res.status(400).json({ error: 'name obrigatório' });
   if (!_validLatLng(lat, lng)) return res.status(400).json({ error: 'lat/lng inválidos' });
   const i = navFavorites.findIndex(f => f.name.toLowerCase() === name.toLowerCase());
+  // `address` opcional: é o que permite casar o rótulo cru do Android Auto
+  // ("R. Carajás, 522 - Centro") com o nome que o dono deu ao lugar, SEM depender
+  // de geocodificar. Em 22/09 o geocode desse mesmo endereço caiu em Jussara/GO,
+  // 150 km do destino real em Barra do Garças/MT — texto salvo pelo dono não erra
+  // de cidade.
+  const address = String(b.address || '').trim().slice(0, 160);
   const item = { id: i >= 0 ? navFavorites[i].id : `fav_${Date.now().toString(36)}`,
-                 name, lat, lng, ts: Date.now() };
+                 name, lat, lng, ...(address ? { address } : {}), ts: Date.now() };
   if (i >= 0) navFavorites[i] = item; else navFavorites.push(item);
   _salvaNavFavs(); _publicaNavFavs();
   console.log(`[nav-fav] ${i >= 0 ? 'atualizado' : 'salvo'}: ${name} (${lat},${lng})`);
