@@ -995,6 +995,37 @@ class TripManager private constructor() {
      * Para AutoTripsScreen: snapshot ao vivo da viagem em andamento.
      * Retorna null quando o carro está parado (autoTripStartMs == 0).
      */
+    // ── Leitura para o Haval H6 3D (ViewerTripProvider) ────────────────────
+    /** true depois do init(): antes disso appContext/prefs não existem. */
+    fun isReadyForViewer(): Boolean = ::appContext.isInitialized
+
+    fun getTankCapacityForViewer(): Float = synchronized(lock) { tankCapacityL }
+
+    /** Amostras da viagem em curso: (startMs da gravação, amostras). */
+    fun getLiveSamplesForViewer(): Pair<Long, List<TelemetrySample>>? =
+        telemetryRecorder?.liveSamplesSnapshot()
+
+    /**
+     * Amostras gravadas de uma viagem (autotrip_samples/<startMs>.json), ou do
+     * arquivo _inprogress quando é a viagem aberta. Lista vazia se não há arquivo
+     * (a retenção apaga as antigas).
+     */
+    fun getTripSamplesForViewer(startMs: Long): List<TelemetrySample> {
+        if (!isReadyForViewer()) return emptyList()
+        val type = object : com.google.gson.reflect.TypeToken<List<TelemetrySample>>() {}.type
+        for (name in listOf("$startMs.json", "${startMs}_inprogress.json")) {
+            val f = java.io.File(samplesDir, name)
+            if (!f.isFile) continue
+            return try {
+                gson.fromJson<List<TelemetrySample>>(f.readText(), type) ?: emptyList()
+            } catch (e: Exception) {
+                AppLogger.w(TAG, "viewer: amostras ilegíveis de $startMs: ${e.message}")
+                emptyList()
+            }
+        }
+        return emptyList()
+    }
+
     fun getInProgressAutoTrip(): AutoTripEntry? = synchronized(lock) {
         if (autoTripStartMs == 0L) return@synchronized null
         val now    = System.currentTimeMillis()

@@ -116,6 +116,15 @@
                 android:resource="@xml/file_provider_paths" />
         </provider>
 
+        <!-- Viagens (atual + histórico + amostras + paradas) para o Haval H6 3D.
+             Só leitura, via call(); o provider recusa qualquer pacote que não
+             seja com.havalh6.viewer. -->
+        <provider
+            android:name=".providers.ViewerTripProvider"
+            android:authorities="${applicationId}.trips"
+            android:exported="true"
+            android:multiprocess="false" />
+
         <provider
             android:name="rikka.shizuku.ShizukuProvider"
             android:authorities="${applicationId}.shizuku"
