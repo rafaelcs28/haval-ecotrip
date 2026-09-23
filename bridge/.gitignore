@@ -106,3 +106,7 @@ refuels.json.pre-*
 
 # App 3D servido (cópia de terceiro, ~115MB — não versionar)
 web3d/
+
+# Bandeira de captura de navegação: liga a gravação de TODO payload do Impulse
+# enquanto existir. É estado de runtime de uma investigação, não configuração.
+nav-capture.on
