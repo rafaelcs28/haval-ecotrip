@@ -317,6 +317,15 @@ class TelemetryRecorder(private val context: Context) {
         }
     }
 
+    /**
+     * Cópia das amostras da viagem EM CURSO (só leitura), com o início dela.
+     * Null quando não está gravando. Usado pelo ViewerTripProvider (Haval H6 3D).
+     */
+    fun liveSamplesSnapshot(): Pair<Long, List<TelemetrySample>>? {
+        if (!recording) return null
+        return startMs to synchronized(samples) { samples.toList() }
+    }
+
     /** Para a gravação e retorna as amostras coletadas (inclui amostras pré-carregadas). */
     fun stopRecording(): List<TelemetrySample> {
         recording = false
