@@ -22,6 +22,14 @@ struct ConfigV2View: View {
     @State private var show2FA = false
     @State private var showNotif = false
     @State private var showVehicle = false
+    @State private var volanteAuto: Bool? = nil
+    private var volanteAutoSub: String {
+        switch volanteAuto {
+        case nil:   return "lendo do carro…"
+        case true?: return "rodovia → Esportivo · cidade → Conforto"
+        default:    return "desligado · o volante fica como você deixar"
+        }
+    }
     @State private var showPlaces = false
     @State private var showAutomations = false
     @State private var showNotifCenter = false
@@ -45,6 +53,23 @@ struct ConfigV2View: View {
                         div
                         row(icon: "wand.and.stars", tint: DS.orange, title: "Automações",
                             sub: "Ações no carro por local ou horário") { showAutomations = true }
+                        div
+                        // Estado vem do BRIDGE, não de @AppStorage: a fonte da verdade
+                        // é a regra no carro, e um espelho local mentiria depois de
+                        // mexerem do outro lado. nil = ainda lendo (ou sem resposta).
+                        toggleRow(icon: "steeringwheel", tint: DS.teal,
+                                  title: "Volante automático",
+                                  sub: volanteAutoSub,
+                                  isOn: Binding(
+                                    get: { volanteAuto ?? false },
+                                    set: { novo in
+                                        let antes = volanteAuto
+                                        volanteAuto = novo          // otimista: o toque responde na hora
+                                        Task {
+                                            if await !cfg.setVolanteAuto(novo) { volanteAuto = antes }
+                                        }
+                                    }))
+                        .disabled(volanteAuto == nil)
                         div
                         row(icon: "shield.lefthalf.filled", tint: DS.blue, title: "Guarda-estacionamento",
                             sub: "alerta se o carro se mover sem você") { showParkGuard = true }
@@ -186,7 +211,13 @@ struct ConfigV2View: View {
             .background(DS.bg.ignoresSafeArea())
             .toolbar(.hidden, for: .navigationBar)
         }
-        .task { car.start(); await cfg.loadAll(); await measureLatency() }
+        .task {
+            car.start(); await cfg.loadAll(); await measureLatency()
+            // Lê DEPOIS do resto: o interruptor nasce desabilitado e só habilita
+            // quando soube o estado real, pra ninguém virar um botão que ainda não
+            // sabe o que está ligado.
+            volanteAuto = await cfg.lerVolanteAuto()
+        }
         .sheet(isPresented: $showLogs) { LogsSheet() }
         .sheet(isPresented: $showPassword) { PasswordSheet(cfg: cfg) }
         .sheet(isPresented: $show2FA) { TwoFASheet(cfg: cfg) }

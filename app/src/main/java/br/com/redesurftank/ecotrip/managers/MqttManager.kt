@@ -2448,6 +2448,13 @@ class MqttManager private constructor() {
             // o problema é outro. O vigia tem trava própria (1 tentativa/min).
             try { CarDataManager.getInstance().vigiaRegistro() } catch (_: Exception) {}
 
+            // Limite de placa lido pelo carro (TSR). Publicado pra avaliar se serve de
+            // gatilho do volante automático: "rodovia" é propriedade da VIA, e o limite
+            // não cai porque você reduziu — ao contrário da velocidade, que confunde
+            // obra e congestionamento com cidade. Só dá pra decidir isso com dado real
+            // de estrada, e sem publicar não há dado.
+            if (latestSpeedLimit > 0) pubD("speed_limit", latestSpeedLimit.toString(), retained = false)
+
             // GPS — publica apenas quando há sinal válido (≠ 0.0)
             val (gpsLat, gpsLng) = TripManager.getInstance().getLastGps()
             if (gpsLat != 0.0 && gpsLng != 0.0) {

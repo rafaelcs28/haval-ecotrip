@@ -11054,6 +11054,32 @@ app.post('/api/rules', (req, res) => {
   res.json({ ok: true, rule: r, relayed });
 });
 
+// POST /api/rules/enabled  { ids: [...], enabled: bool } → liga/desliga em lote.
+//
+// Existe pra o app não precisar reenviar a regra inteira só pra virar um botão:
+// reenviar corpo inteiro a partir de um cliente que pode estar com uma cópia
+// velha é como se perde condição ajustada no carro. Aqui só o `enabled` muda.
+//
+// O relay publica a lista completa RETIDA, então desligar com o carro dormindo
+// vale: ele lê o retido ao conectar e já acorda com a configuração certa.
+app.post('/api/rules/enabled', (req, res) => {
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(String) : [];
+  const on = !!req.body?.enabled;
+  if (!ids.length) return res.status(400).json({ error: 'ids obrigatório' });
+  const mudou = [];
+  for (const id of ids) {
+    const r = automationRules.find(x => String(x.id) === id);
+    if (!r) continue;
+    if (r.enabled === on) continue;
+    r.enabled = on; r._updated_ms = Date.now();
+    mudou.push(id);
+  }
+  if (mudou.length) { saveRules(); }
+  const relayed = relayRules();
+  console.log(`[rules] ${on ? 'ligadas' : 'desligadas'}: ${ids.join(', ')} (mudaram: ${mudou.length})`);
+  res.json({ ok: true, enabled: on, mudou, relayed });
+});
+
 // DELETE /api/rules/:id → remove + tombstone + relay
 app.delete('/api/rules/:id', (req, res) => {
   const id = String(req.params.id);

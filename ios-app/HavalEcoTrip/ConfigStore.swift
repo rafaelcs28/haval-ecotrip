@@ -61,7 +61,7 @@ final class ConfigStore: ObservableObject {
         if let body { r.addValue("application/json", forHTTPHeaderField: "Content-Type"); r.httpBody = try? JSONSerialization.data(withJSONObject: body) }
         return r
     }
-    @discardableResult private func send(_ path: String, _ method: String, _ body: [String: Any]? = nil) async -> (Int, Data)? {
+    @discardableResult func send(_ path: String, _ method: String, _ body: [String: Any]? = nil) async -> (Int, Data)? {
         guard let r = req(path, method, body) else { return nil }
         guard let (d, resp) = try? await URLSession.shared.data(for: r) else { return nil }
         return ((resp as? HTTPURLResponse)?.statusCode ?? -1, d)
@@ -187,6 +187,35 @@ final class ConfigStore: ObservableObject {
     func setChargeLimit(_ pct: Int) async { await send("/api/charge-limit", "POST", ["pct": pct]) }
     // Alvo de corte por software (fora dos presets). pct=0 desliga.
     func setChargeTarget(_ pct: Int) async { await send("/api/charge-target", "POST", ["pct": pct]) }
+
+    // ── Volante automático (rodovia → Esportivo, cidade → Conforto) ───────────
+    //
+    // São DUAS regras no motor de automação do carro, ligadas e desligadas juntas.
+    // O app não reenvia o corpo delas: só vira o `enabled`. Reenviar a regra
+    // inteira a partir de um cliente com cópia velha é como se perde ajuste feito
+    // do outro lado.
+    //
+    // O bridge publica a lista RETIDA no MQTT, então mexer aqui com o carro
+    // dormindo vale: ele lê o retido ao conectar e já acorda configurado.
+    static let idsVolanteAuto = ["rule_volante_rodovia", "rule_volante_cidade"]
+
+    /// Ligadas? Só verdadeiro quando as DUAS estão — meia automação (só entra em
+    /// Esportivo e nunca volta) seria pior que nenhuma.
+    func lerVolanteAuto() async -> Bool? {
+        guard let (code, data) = await send("/api/rules", "GET"), code == 200,
+              let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]
+        else { return nil }
+        let nossas = arr.filter { Self.idsVolanteAuto.contains(($0["id"] as? String) ?? "") }
+        guard nossas.count == Self.idsVolanteAuto.count else { return nil }
+        return nossas.allSatisfy { ($0["enabled"] as? Bool) ?? false }
+    }
+
+    @discardableResult
+    func setVolanteAuto(_ on: Bool) async -> Bool {
+        let r = await send("/api/rules/enabled", "POST",
+                           ["ids": Self.idsVolanteAuto, "enabled": on])
+        return r?.0 == 200
+    }
 
     /// Reativa as Live Activities em andamento (recria as que travaram, sem reiniciar o bridge).
     func relaunchLA() async {
