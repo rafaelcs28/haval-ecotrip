@@ -31,7 +31,10 @@ import org.json.JSONObject
  *   trips   extras{offset,limit}      → {total, trips:[...]} mais nova primeiro
  *   live                              → {trip: {...} | null}
  *   samples extras{startMs,afterT,max}→ {startMs, fields, samples:[[...]]}; afterT em ms absolutos
- *   stops                             → {tankL, refuels:[...], charges:[...]}
+ *   stops                             → {tankL, priceGasolinePerL, priceEnergyPerKwh,
+ *                                          refuels:[{..., pricePerLiter}], charges:[...]}
+ *                                        preços = os do EcoTrip (padrões + por abastecimento);
+ *                                        o 3D deixa de perguntar preço quando isto existe
  *
  * Acesso: só o pacote do 3D (e o próprio EcoTrip). Nenhum método escreve nada.
  */
@@ -175,7 +178,9 @@ class ViewerTripProvider : ContentProvider() {
                 .put("beforeL", r.fuelLBefore.toDouble())
                 .put("afterL", r.fuelLAfter.toDouble())
                 .put("liters", r.litersAdded.toDouble())
-                .put("odometerKm", r.odometerKm.toDouble()))
+                .put("odometerKm", r.odometerKm.toDouble())
+                // 0 = pendente (o EcoTrip preenche depois); o 3D usa o padrão nesse caso.
+                .put("pricePerLiter", r.pricePerLiter.toDouble()))
         }
         val charges = JSONArray()
         for (c in tm.getChargeHistory().sortedBy { it.timestampMs }) {
@@ -188,6 +193,8 @@ class ViewerTripProvider : ContentProvider() {
         }
         return JSONObject()
             .put("tankL", tm.getTankCapacityForViewer().toDouble())
+            .put("priceGasolinePerL", tm.getPriceGasoline().toDouble())
+            .put("priceEnergyPerKwh", tm.getPriceEnergy().toDouble())
             .put("refuels", refuels)
             .put("charges", charges)
     }
