@@ -16,20 +16,7 @@ struct DriveV2View: View {
     @State private var showMic = false
     @State private var showMsg = false
     @State private var showControles = false
-    /// Escapatória do automático: nil segue o contexto, true/false força.
-    /// Heurística sem escape irrita — mapa parado e carro andando têm hora.
-    @State private var forcaCarro: Bool? = nil
-
     private var navMode: Bool { route.coords.count > 1 }
-
-    /// Andando o mapa é tudo e porta aberta não é pergunta; parado o mapa é um
-    /// marcador imóvel e o estado do carro é justamente o que se quer olhar.
-    /// Por isso o miolo troca sozinho — não é aba nem botão escondido.
-    private var dirigindo: Bool {
-        pv == "dirigindo" || store.tripActive
-            || (store.engineOn && (store.gear == "D" || store.gear == "R" || store.speedKmh > 1))
-    }
-    private var mostraCarro: Bool { forcaCarro ?? (!dirigindo && !navMode) }
 
     private var pv: String {
         #if DEBUG
@@ -56,11 +43,7 @@ struct DriveV2View: View {
 
     var body: some View {
         ZStack {
-            if mostraCarro {
-                // O WebView só existe enquanto o carro está à mostra. Drive fica
-                // aberta dirigindo, e render 3D atrás do mapa é bateria à toa.
-                Carro3DTela(embutido: true).ignoresSafeArea(edges: .top)
-            } else if store.hasGps || mock {
+            if store.hasGps || mock {
                 FollowMap(lat: displayCoord.latitude, lng: displayCoord.longitude, heading: displayHeading,
                           speedKmh: store.speedKmh, routeCoords: route.coords,
                           v2Accessory: { AnyView(accessoryColumn) })
@@ -118,14 +101,6 @@ struct DriveV2View: View {
         HStack(spacing: 8) {
             LiveChipV2(preview: pv)
             Spacer(minLength: 8)
-            Button { forcaCarro = !mostraCarro } label: {
-                Image(systemName: mostraCarro ? "map" : "car.side")
-                    .font(.system(size: 13, weight: .semibold)).foregroundStyle(DS.text)
-                    .frame(width: 30, height: 30)
-                    .background(.ultraThinMaterial, in: Circle())
-                    .overlay(Circle().stroke(DS.border, lineWidth: 1))
-            }
-            .buttonStyle(.plain)
             destinationPill
             if destination != nil {
                 Button { Task { await clearDest() } } label: {
