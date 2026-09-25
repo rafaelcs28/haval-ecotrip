@@ -1223,9 +1223,22 @@ function _checkAlerts() {
     + `atravessa e atualizar o DNS não resolve.`,
     'default', ['globe_with_meridians'], { repeatEvery: 12 * 3600_000 });
 
-  // 7. Memória alta (RSS > 450MB)
+  // 7. Memória alta. Subiu de 450 pra 512MB em 24/09/2026: o bridge cresceu
+  // (parede, faixa de 24h, histórico solar, duas instâncias de Recados) e
+  // batia nos 450 em operação NORMAL — alarme que dispara sem nada de errado
+  // treina a ignorar, e aí o disparo que importa passa junto.
+  //
+  // 512 e não 600 DE PROPÓSITO: o pm2 derruba o processo em 600M
+  // (`max_memory_restart`), então um aviso em 600 chegaria no mesmo instante do
+  // restart e deixaria de ser aviso. 512 é também o teto do heap
+  // (`--max-old-space-size=512`), ou seja, passar disso já é anormal.
+  //
+  // Quem detecta vazamento de verdade é o `rss_leak` abaixo, que olha
+  // INCLINAÇÃO ao longo de horas — não um valor absoluto.
+  const MEM_LIMITE_MB = Number(process.env.BRIDGE_MEM_ALERTA_MB || 512);
   const rss = Math.round(process.memoryUsage().rss / 1048576);
-  _alert('mem_high', rss > 450, 'Memória alta no bridge', `RSS ${rss}MB (limite 450MB)`, 'high', ['warning']);
+  _alert('mem_high', rss > MEM_LIMITE_MB, 'Memória alta no bridge',
+    `RSS ${rss}MB (limite ${MEM_LIMITE_MB}MB)`, 'high', ['warning']);
 
   // 8. Gateway LAN down
   _alert('gw_down', _gwStatus.up === false && !localBlind, 'Gateway LAN offline',
@@ -4350,8 +4363,10 @@ function _carIsAwake() {
 const SILENCE_ZONES_FILE = path.join(DATA_DIR, 'silence_zones.json');
 let _silenceZones = [];
 let _zonaSilencioAtual = null;   // pra logar só a transição, não a cada minuto
-/// Posição de quando a velocidade ainda era > 0 — base do alerta car_can_frozen.
-let _canAncora = null;
+/// Detector de barramento congelado — a decisão mora em can-frozen.js porque
+/// ela reinicia o app do carro sozinho e precisa ser testável fora do bridge.
+const canFrozen = require('./can-frozen');
+const _canMem = canFrozen.memoriaNova();
 /// Último `cmd/restart_app` enviado — cooldown do conserto automático.
 let _ultimoRestartApk = 0;
 try { _silenceZones = JSON.parse(fs.readFileSync(SILENCE_ZONES_FILE, 'utf8')) || []; } catch (_) {}
@@ -4421,30 +4436,32 @@ setInterval(() => {
   // Âncora: posição de quando a velocidade foi vista pela última vez acima de zero.
   // Enquanto ela ficar em 0, mede quanto o carro andou desde então.
   {
-    const vel = +state.speed_kmh || 0;
-    const lat = +state.gps_lat, lng = +state.gps_lng;
-    const temGps = Number.isFinite(lat) && Number.isFinite(lng) && (lat || lng);
-    if (vel > 0.5 || !temGps) {
-      _canAncora = temGps ? { lat, lng, ms: now, odo: +state.odometer_km || 0 } : null;
-    } else if (!_canAncora) {
-      _canAncora = { lat, lng, ms: now, odo: +state.odometer_km || 0 };
+    const v = canFrozen.tick({
+      now,
+      vel:    +state.speed_kmh || 0,
+      lat:    +state.gps_lat,
+      lng:    +state.gps_lng,
+      odoKm:  +state.odometer_km || 0,
+      apkAge: now - apkMs,
+    }, _canMem);
+
+    if (v.começou) {
+      console.log(`[can-frozen] contradição começou: ${(v.andou / 1000).toFixed(1)}km`
+        + ` em ${v.passos} passos, odo ${v.odoDelta.toFixed(1)}km,`
+        + ` barramento quieto há ${v.quietoS}s`);
+    } else if (v.acabou) {
+      console.log('[can-frozen] contradição acabou sem reinício');
     }
-    const andou = _canAncora ? haversineM(_canAncora.lat, _canAncora.lng, lat, lng) : 0;
-    const odoDelta = _canAncora ? (+state.odometer_km || 0) - _canAncora.odo : 0;
-    // 600 m OU 1 km de odômetro: abaixo disso é deriva de GPS parado. E 2 min de
-    // duração pra não disparar num semáforo com GPS pulando.
-    const tempo = _canAncora ? now - _canAncora.ms : 0;
-    const canCongelado = !!_canAncora && vel <= 0.5 && tempo > 120_000
-      && (andou > 600 || odoDelta >= 1) && (now - apkMs) < 60_000;
+
     // Guarda A JANELA, não só o alerta. Quando a viagem finalmente abrir, o
     // `_completaInicioComCelular` precisa saber desde quando o carro andava — e
     // `_engine_on_ms` não serve: o reinício da multimídia (que é a receita de
     // recuperação) reescreve ele segundos antes da viagem começar, e o portão de
     // 3 min do completar-início nunca abre. Foi o que aconteceu em 22/09: motor
     // "ligado" 07:15:22, viagem 07:15:06, e ~10 min de trajeto sem registro.
-    if (canCongelado && _canAncora) {
-      state._can_mudo_desde_ms = _canAncora.ms;
-      state._can_mudo_lat = _canAncora.lat; state._can_mudo_lng = _canAncora.lng;
+    if (v.congelado && v.ancora) {
+      state._can_mudo_desde_ms = v.ancora.ms;
+      state._can_mudo_lat = v.ancora.lat; state._can_mudo_lng = v.ancora.lng;
       scheduleStateSave();
 
       // ── Conserto automático ────────────────────────────────────────────────
@@ -4454,19 +4471,18 @@ setInterval(() => {
       // painel mudo. O app não morre — ele continua publicando com o barramento
       // congelado —, então nada se auto-recupera.
       //
-      // 3 min de condição sustentada antes de agir: tempo de descartar semáforo
-      // longo e GPS pulando, e ainda assim menos que o dono levaria pra notar.
       // Cooldown de 20 min do lado de cá, e o AppRestart tem 15 min do lado de lá —
       // duas travas porque reinício em laço deixaria o carro inutilizável, o que é
       // pior que cego.
-      const mudoMs = now - _canAncora.ms;
-      if (mudoMs > 180_000 && (now - _ultimoRestartApk) > 20 * 60_000) {
+      if (v.deveReiniciar && (now - _ultimoRestartApk) > 20 * 60_000) {
         _ultimoRestartApk = now;
+        const min = Math.round(v.sustentado / 60000);
         publishCmdWithRetry(`${MQTT_PREFIX}/cmd/restart_app`,
-          `CAN congelado ha ${Math.round(mudoMs / 60000)}min com o carro andando`,
+          `CAN congelado ha ${min}min com o carro andando`,
           { retain: false, qos: 1 })
           .then(() => {
-            console.log(`[can-frozen] restart_app enviado (mudo ha ${Math.round(mudoMs / 60000)}min)`);
+            console.log(`[can-frozen] restart_app enviado (contradição sustentada ha ${min}min,`
+              + ` ${(v.andou / 1000).toFixed(1)}km em ${v.passos} passos)`);
             addEvent('apk_restart_auto', 'App do carro reiniciado automaticamente');
             sendPush('🔄 Reiniciei o app do carro',
               'O painel estava congelado com o carro andando. Deve voltar a marcar em ~1 min.',
@@ -4476,10 +4492,10 @@ setInterval(() => {
       }
     }
     _alert('car_can_frozen',
-      canCongelado,
+      v.congelado,
       'Carro andando e o painel não vê',
       `O app do carro está publicando, mas a leitura do barramento está parada `
-      + `(velocidade 0 com ${(andou / 1000).toFixed(1)} km percorridos). `
+      + `(velocidade 0 com ${(v.andou / 1000).toFixed(1)} km percorridos). `
       + `Viagem não está sendo gravada — reiniciar a multimídia recupera.`,
       'high', ['car']);
   }
@@ -7734,8 +7750,11 @@ app.get('/api/wall/detail', requireAuth, (req, res) => {
       }
       if (sp.finished) add('Última recarga', `${sp.finishedKwh} kWh → ${sp.finishedSoc}%`, idade(sp.finishedAtMs));
       const pt = _songProTrail[_songProTrail.length - 1];
-      add('Onde está', _spAddr.txt || (pt ? 'resolvendo endereço…' : null),
-          pt ? `${pt.lat.toFixed(5)}, ${pt.lng.toFixed(5)}` : null);
+      {
+        const pl = (pt && pt.lat != null) ? matchKnownPlace(pt.lat, pt.lng, 60) : null;
+        const end = _spAddr.txt || (pt ? 'resolvendo endereço…' : null);
+        add('Onde está', pl ? pl.name : end, pl ? end : null);
+      }
       add('Leitura de', idade(sp.updatedAtMs));
       return res.json({ title: 'BYD Song Pro (Grasi)', rows: R });
     }
@@ -7743,9 +7762,16 @@ app.get('/api/wall/detail', requireAuth, (req, res) => {
     add('Carregando', state.charging_state === 'Carregando' ? 'sim' : (state.charging_state || 'não'));
     add('Potência de recarga', state.charge_power_kw != null ? `${state.charge_power_kw} kW` : null);
     add('Acordado', _carIsAwake() ? 'sim' : 'não');
-    add('Onde está', String(state.current_address || '').replace(/,\s*\d{5}-?\d{3}\s*$/, '') || null,
-        (state.gps_lat != null && state.gps_lng != null)
-          ? `${(+state.gps_lat).toFixed(5)}, ${(+state.gps_lng).toFixed(5)}` : null);
+    // Nome do local conhecido na frente; o endereço vira a nota embaixo. No
+    // detalhe cabe o endereço — o que não cabia era ele NO LUGAR do nome.
+    // A coordenada saiu: ela nunca respondeu "onde está" pra ninguém, e o
+    // endereço na nota é mais útil no mesmo espaço.
+    {
+      const end = String(state.current_address || '').replace(/,\s*\d{5}-?\d{3}\s*$/, '') || null;
+      const pl = (state.gps_lat != null && state.gps_lng != null)
+                 ? matchKnownPlace(+state.gps_lat, +state.gps_lng, 60) : null;
+      add('Onde está', pl ? pl.name : end, pl ? end : null);
+    }
     add('Última publicação do APK', idade(state.last_apk_ms));
     add('Última leitura da GWM', idade(state.last_gwm_ms));
     return res.json({ title: 'Haval H6 GT', rows: R });
@@ -7981,6 +8007,31 @@ app.get('/api/wall', requireAuth, (_req, res) => {
   // `_familyGeoMem` evita bater no Nominatim a cada ciclo. O Haval não precisa
   // disso: ele já publica `current_address` pronto.
   const semCep = (a) => a ? String(a).replace(/,\s*\d{5}-?\d{3}\s*$/, '') : null;
+  // "Avenida Guatapará, Vila Maria Rosa, Goiânia" é o endereço certo e a
+  // informação errada: quem olha quer saber que o carro está NA EMPRESA. Os 23
+  // locais conhecidos já existem (mesma base do geofence), então o nome deles
+  // ganha do reverse-geocode sempre que o ponto cai dentro do raio.
+  //
+  // `tol` de 60m: garagem e estacionamento coberto desviam o GPS, e ficar
+  // alternando entre "Casa" e o nome da rua é pior que qualquer um dos dois.
+  const ondeEsta = (lat, lng, endereco) => {
+    const p = (lat != null && lng != null) ? matchKnownPlace(lat, lng, 60) : null;
+    return p ? p.name : (endereco || null);
+  };
+  // Forma CURTA, pra caber embaixo do gauge sem quebrar linha. Sem local
+  // conhecido, o bairro é o que responde "onde" — a rua é detalhe e a cidade é
+  // sempre a mesma. Os dois formatos de endereço convivem: a GWM manda com
+  // vírgula, o reverse-geocode da família manda com "·".
+  const ondeCurto = (lat, lng, endereco) => {
+    const p = (lat != null && lng != null) ? matchKnownPlace(lat, lng, 60) : null;
+    if (p) return p.name;
+    if (!endereco) return null;
+    const partes = String(endereco).split(/\s*[·,]\s*/).map(x => x.trim()).filter(Boolean);
+    // Última é a cidade; a penúltima é o bairro. Com menos de 2 pedaços não há
+    // o que escolher — devolve o que veio.
+    const alvo = partes.length >= 2 ? partes[partes.length - 2] : partes[0];
+    return alvo && alvo.length <= 24 ? alvo : (alvo || '').slice(0, 23) + '…';
+  };
   const spEndereco = () => {
     const pt = _songProTrail[_songProTrail.length - 1];
     if (!pt || pt.lat == null || pt.lng == null) return null;
@@ -8007,7 +8058,18 @@ app.get('/api/wall', requireAuth, (_req, res) => {
       charging: state.charging_state === 'Carregando',
       power_kw: +state.charge_power_kw || 0,
       awake: _carIsAwake(),
-      addr: semCep(state.current_address),
+      // Três situações, não duas: enchendo, gastando (ligado, rodando) e
+      // parado. "Parado" é o único em que o número não muda — e é por isso
+      // que leitura velha continua valendo só nele.
+      fluxo: state.charging_state === 'Carregando' ? 'carrega'
+           : _carIsAwake() === true ? 'consome' : 'parado',
+      addr: ondeEsta(state.gps_lat, state.gps_lng, semCep(state.current_address)),
+      // `local` separado do endereço: quem consome a API pode querer os dois, e
+      // no detalhe da parede dá pra mostrar o endereço embaixo do nome.
+      local: (state.gps_lat != null && state.gps_lng != null)
+             ? (matchKnownPlace(state.gps_lat, state.gps_lng, 60)?.name || null) : null,
+      onde_curto: ondeCurto(state.gps_lat, state.gps_lng, semCep(state.current_address)),
+      endereco: semCep(state.current_address),
       ts: Math.max(state.last_apk_ms || 0, state.last_gwm_ms || 0) || null },
     (() => {
       const sp = songProStatus();          // BYD Song Pro (Grasi)
@@ -8015,7 +8077,25 @@ app.get('/api/wall', requireAuth, (_req, res) => {
       return { key: 'songpro', label: 'Song Pro',
                soc: sp.soc != null ? Math.round(sp.soc) : null,
                charging: !!sp.charging, power_kw: +sp.powerKw || 0,
-               awake: null, addr: spEndereco(), ts: sp.updatedAtMs || null };
+               // O Song Pro não reporta "acordado", então não dá pra afirmar
+               // que está consumindo: ou carrega, ou fica em 'parado'.
+               fluxo: sp.charging ? 'carrega' : 'parado',
+               awake: null,
+               addr: (() => {
+                 const pt = _songProTrail[_songProTrail.length - 1];
+                 return ondeEsta(pt?.lat, pt?.lng, spEndereco());
+               })(),
+               local: (() => {
+                 const pt = _songProTrail[_songProTrail.length - 1];
+                 return (pt && pt.lat != null)
+                        ? (matchKnownPlace(pt.lat, pt.lng, 60)?.name || null) : null;
+               })(),
+               onde_curto: (() => {
+                 const pt = _songProTrail[_songProTrail.length - 1];
+                 return ondeCurto(pt?.lat, pt?.lng, spEndereco());
+               })(),
+               endereco: spEndereco(),
+               ts: sp.updatedAtMs || null };
     })(),
   ].filter(Boolean);
   // Percentual é grandeza LIMITADA (0-100) e vira arco. Autonomia só significa
@@ -8023,9 +8103,26 @@ app.get('/api/wall', requireAuth, (_req, res) => {
   const batArr = ['casa', 'sitio'].map(k => {
     const b = _bluettiState?.[k];
     if (!b) return null;
+    const saida = (b.ac_out_w ?? 0) + (b.dc_out_w ?? 0);
+    const semMedida = !b.reachable || (b.power_stale_ms ?? 0) > 5 * 60_000;
     return { key: k, label: b.label || k, pct: b.battery_pct ?? null,
              offgrid: b.offgrid ?? null, grid_w: b.grid_in_w ?? null,
+             saida_w: b.ac_out_w == null && b.dc_out_w == null ? null : saida,
+             pv_w: b.pv_in_w ?? null,
+             // Para onde a energia está indo. NÃO deriva descarga de
+             // `grid_in_w === 0`: esse zero é transitório e já enganou antes —
+             // quem decide é o `offgrid` do bridge, que tem histerese.
+             // Sem medição de potência, `null`: ausência não é "em espera".
+             fluxo: semMedida ? null
+                  : b.offgrid === true ? 'descarrega'
+                  : (b.grid_in_w ?? 0) > 0 ? (saida > 0 ? 'passa' : 'carrega')
+                  : 'espera',
              autonomy_min: b.battery_time_min ?? null,
+             cheia_em_min: b.full_charge_min ?? null,
+             // O que cai junto se esta estação morrer. É a resposta pra "por
+             // que eu me importo com essa bateria?" — e é o que faz a linha
+             // valer o espaço num dia em que nada está acontecendo.
+             alimenta: (_BLUETTI[k] || {}).feeds || null,
              reachable: !!b.reachable,
              // Buraco de telemetria: potência toda zerada depois de ter medido.
              sem_potencia_ms: b.power_stale_ms ?? null,
@@ -8253,6 +8350,47 @@ app.get('/api/wall', requireAuth, (_req, res) => {
       const todas = ['catalao', 'ivonei', 'palmeiras'];
       return Object.fromEntries([['total', serie(todas)], ...todas.map(k => [k, serie([k])])]);
     })(),
+    // A silhueta do DIA TÍPICO: mediana do que se gera em CADA hora, nos dias
+    // anteriores. É o que transforma a barra de hoje em resposta — sem ela é
+    // preciso ler o número no canto pra saber se 12 kWh às 10h é bom.
+    //
+    // Mediana, não média: um dia de chuva puxa a média pra baixo e passa a
+    // "normalizar" o ruim. E por HORA, porque a curva do dia não é reta: comparar
+    // 8h com a média do dia inteiro não diz nada.
+    spark_tipico: (() => {
+      const hoje = _todayDateStr();
+      const serie = (chaves) => {
+        // Produção da hora h = acumulado em h+1 menos acumulado em h. O snap
+        // guarda acumulado, então a diferença é o que entrou naquela hora.
+        const porHora = {};
+        for (const k of chaves) {
+          for (const dia of (_solarHistory[k] || [])) {
+            if (dia.date === hoje) continue;          // hoje não entra na própria régua
+            const sn = dia.snaps || {};
+            const hs = Object.keys(sn).map(Number).sort((a, b) => a - b);
+            for (let i = 0; i < hs.length - 1; i++) {
+              const h = hs[i];
+              const v = (sn[hs[i + 1]].kwh || 0) - (sn[h].kwh || 0);
+              if (!(v >= 0)) continue;                 // virada de dia / leitura ruim
+              ((porHora[h] || (porHora[h] = {}))[dia.date] =
+                (porHora[h][dia.date] || 0) + v);
+            }
+          }
+        }
+        const out = [];
+        for (const h of Object.keys(porHora).map(Number).sort((a, b) => a - b)) {
+          const vals = Object.values(porHora[h]).sort((a, b) => a - b);
+          // Menos de 5 dias não faz mediana: silhueta inventada é pior que
+          // silhueta nenhuma, porque parece medida.
+          if (vals.length < 5) continue;
+          out.push({ h, kwh: +vals[Math.floor(vals.length / 2)].toFixed(2),
+                     dias: vals.length });
+        }
+        return out;
+      };
+      const todas = ['catalao', 'ivonei', 'palmeiras'];
+      return Object.fromEntries([['total', serie(todas)], ...todas.map(k => [k, serie([k])])]);
+    })(),
     // Últimos 14 dias, somando as 3 usinas por data. O "121% do normal" de hoje
     // só quer dizer algo contra a série — e um dia ruim isolado vira nuvem, três
     // seguidos viram problema. Dia sem registro de alguma usina soma o que há.
@@ -8288,11 +8426,19 @@ app.get('/api/wall', requireAuth, (_req, res) => {
     // Backup é a falha mais silenciosa que existe: some e ninguém percebe até
     // precisar. Cada um tem o próprio prazo (`max_age_h`), então a régua é essa,
     // não um número fixo.
+    // Ordenado pelo quanto FALTA pro prazo, não pelo nome: a primeira linha
+    // passa a ser sempre a que merece olhar. Cada backup tem limite próprio,
+    // então "mais velho" não é o mesmo que "mais perto de atrasar".
     backups: (_backups || []).map(b => ({
       nome: b.name, ok: b.ok !== false,
       horas: b.age_hours != null ? +b.age_hours.toFixed(1) : null,
       limite: b.max_age_h ?? null,
-    })),
+    })).sort((x, y) => {
+      // Quem já estourou vem primeiro, depois por fração do prazo consumida.
+      if (x.ok !== y.ok) return x.ok ? 1 : -1;
+      const f = (b) => (b.horas != null && b.limite) ? b.horas / b.limite : -1;
+      return f(y) - f(x);
+    }),
     // Ritmo do dia. Comparar o dia PELA METADE com a mediana do dia INTEIRO dá
     // ~40% às 11h e assusta à toa — o dia não acabou. A comparação honesta é
     // contra a mediana ACUMULADA NESTA MESMA HORA nos dias anteriores, que é
@@ -8421,17 +8567,46 @@ app.get('/api/wall', requireAuth, (_req, res) => {
     // "estava tudo bem de manhã?".
     events: (() => {
       const out = [];
-      // Repetição consecutiva do mesmo tipo vira UMA linha com contagem: sete
-      // "Bridge iniciado" seguidos enchiam o card e diziam uma coisa só.
+      // Um episódio que começou e terminou ocupava DUAS linhas ("Memória alta"
+      // + "Recuperado: Memória alta"), e o card ficava cheio dizendo metade.
+      // Aqui o par vira UMA linha com começo, fim e a marca de resolvido.
+      //
+      // Como a lista é percorrida do mais novo pro mais velho, a recuperação
+      // aparece ANTES do disparo: guarda-se a recuperação pendente e, quando o
+      // disparo correspondente aparece, os dois se fundem.
+      const pendente = new Map();          // tipo base → linha da recuperação
+      const base = (t) => String(t).replace(/_recovery$/, '');
       for (const e of _healthEvents.slice().reverse()) {
+        const ehRecovery = /_recovery$/.test(e.type);
+        const b = base(e.type);
         const last = out[out.length - 1];
+        // Repetição consecutiva do mesmo tipo vira UMA linha com contagem: sete
+        // "Bridge iniciado" seguidos enchiam o card e diziam uma coisa só.
         if (last && last.type === e.type) { last.n++; continue; }
+
+        if (!ehRecovery && pendente.has(b)) {
+          // Achei o disparo do que já recuperou: funde na linha existente.
+          const linha = pendente.get(b);
+          pendente.delete(b);
+          linha.ts_inicio = e.ts;
+          linha.resolvido = true;
+          linha.kind = 'resolvido';
+          // O texto do DISPARO é o que diz o que houve; o da recuperação só
+          // diz que acabou. Fica o do disparo.
+          linha.msg = String(e.msg || '').split('\n')[0].slice(0, 160);
+          continue;
+        }
         if (out.length >= 20) break;
-        out.push({ ts: e.ts, type: e.type, n: 1,
+        const linha = { ts: e.ts, type: e.type, n: 1,
           kind: e.type === 'restart' ? 'restart'
-              : /_recovery$/.test(e.type) ? 'recovery' : 'alert',
+              : ehRecovery ? 'recovery' : 'alert',
           // 160 pra o hover da linha ter o que mostrar além do que já cabe nela.
-          msg: String(e.msg || '').split('\n')[0].slice(0, 160) });
+          msg: String(e.msg || '').split('\n')[0].slice(0, 160) };
+        out.push(linha);
+        // Recuperação sem disparo à vista ainda pode encontrar o dele mais
+        // adiante. Se não encontrar (disparo fora da janela), fica como está —
+        // "Recuperado: X" sozinho continua sendo notícia verdadeira.
+        if (ehRecovery) pendente.set(b, linha);
       }
       return out;
     })(),
@@ -24593,6 +24768,7 @@ setInterval(() => {
 
 function applyMqttMessage(key, value, isRetained = false) {
   const _now = Date.now();
+  canFrozen.marcaCanVivo(_canMem, key, value, isRetained, _now);
   if (!key.startsWith('cmd/')) {
     // Crash-loop detector: se o APK estava mudo há >60s e volta agora, é um
     // reconnect (LWT dropped + reconnect). ≥4 reconnects em 15min = zombie.
@@ -25235,7 +25411,13 @@ function applyMqttMessage(key, value, isRetained = false) {
     }
     case 'gps_lng': {
       const lng = parseFloat(value);
-      if (lng && lng !== 0) { state.gps_lng = lng; state.gps_ts = Date.now(); _maybeUpdateCarHeading(); checkGeofence(); checkTheft(); _liveTripAppend(); }
+      if (lng && lng !== 0) {
+        state.gps_lng = lng; state.gps_ts = Date.now();
+        // Trilha do detector de barramento congelado: precisa do ritmo do GPS
+        // (~1/s), não do tick de alerta (1/min). Só o par completo entra.
+        canFrozen.registraPos(_canMem, +state.gps_lat, lng, +state.speed_kmh || 0, state.gps_ts);
+        _maybeUpdateCarHeading(); checkGeofence(); checkTheft(); _liveTripAppend();
+      }
       break;
     }
 
