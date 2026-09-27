@@ -287,6 +287,7 @@
     <div class="cell"><div class="v" id="v-odo">—</div><div class="l">odômetro km</div></div>
     <div class="cell"><div class="v" id="v-kmleq">—</div><div class="l">km/L eq viagem</div></div>
     <div class="cell"><div class="v" id="v-net">—</div><div class="l net" id="l-net">conexão</div></div>
+    <div class="cell"><div class="v" id="v-chega">—</div><div class="l">chega às</div></div>
   </div>
   <div class="chips" id="chips"></div>
 </div>
@@ -695,6 +696,7 @@ async function poll(){
   if (j.on === false && !retroFeita) { tentaRetro(); }
   else if (j.on === true && retroFeita) { escondeRetro(); }
   if (retroFeita) return;
+  window.carroLigado = (j.on === true);
   aplicaCar3d(j.carro3d);
   if (j.lat && j.lng){
     const ll = [j.lat, j.lng];
@@ -810,6 +812,14 @@ function renderEtaLine(distKm, etaMin) {
   // destino do carro, e as duas com formato parecido se confundiam.
   document.getElementById('eta-line').innerHTML =
     `<span>🧭 O carro está a <span class="km">${distKm.toFixed(1).replace('.', ',')} km</span> de você · ${etaMin} min de carro</span>`;
+  // Quem espera pensa em relógio, não em duração — a conta já estava feita, só
+  // faltava somar no agora. Mas "chega às" é promessa: com o carro desligado
+  // ninguém está vindo, e o horário seria invenção. Aí fica em branco.
+  const cel = document.getElementById('v-chega');
+  if (!cel) return;
+  if (!window.carroLigado || !(etaMin >= 0)) { cel.textContent = '—'; return; }
+  const t = new Date(Date.now() + etaMin * 60_000);
+  cel.textContent = t.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 }
 
 // Projeção local, roda a cada poll (1s) sem tocar na rede.
