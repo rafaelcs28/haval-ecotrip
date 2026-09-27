@@ -209,38 +209,52 @@ enum TrajV2 {
 ///
 /// Sem isto o filtro descartava a viagem inteira: o abastecimento de 23/09 às
 /// 14:06 caiu no meio de uma viagem de 388 km (11:47→16:39), e a estatística
-/// "desde o abastecimento" ficava sem os 200 km que vieram depois da bomba —
+/// "desde o abastecimento" ficava sem os 192 km que vieram depois da bomba —
 /// justamente os que o tanque novo pagou.
 ///
-/// O corte sai das amostras do trajeto, que já trazem distância e energia
-/// acumuladas: a fração é medida, não estimada por regra de três no tempo.
-/// `fuelL` é a exceção — não há gasolina por amostra, então ela vai rateada pela
-/// distância, que é a melhor aproximação disponível aqui.
+/// A fração vem do bridge (`/api/autotrips/<id>/corte`), que já tem o arquivo no
+/// disco e devolve ~80 B. A primeira versão disto baixava /api/telemetry inteiro
+/// pra fazer a conta no aparelho: 3 MB e 22 mil amostras viravam 22 mil
+/// dicionários no parser a cada abertura da aba, e o app ficou lento e começou a
+/// ser morto por memória. Conta barata com dado caro se resolve no servidor.
+///
+/// Offline devolve nil: sem a fração, incluir a viagem inteira mentiria e
+/// estimar por tempo (esta teve 40 min parada) mentiria diferente.
 enum ParcialV2 {
+    private static func num(_ v: Any?) -> Double {
+        switch v {
+        case let d as Double: return d
+        case let i as Int: return Double(i)
+        case let n as NSNumber: return n.doubleValue
+        case let s as String: return Double(s) ?? 0
+        default: return 0
+        }
+    }
+
     static func recorta(_ t: Trip, desde corte: Date) async -> Trip? {
         guard corte > t.date, corte < t.fim else { return nil }
-        guard let r = await TrajV2.load(t), let ultimo = r.samples.last else { return nil }
-        let tCorte = corte.timeIntervalSince(t.date)
-        // Última amostra ANTES do corte — o que já tinha rodado quando abasteceu.
-        guard let antes = r.samples.last(where: { $0.t <= tCorte }) else { return nil }
+        let u = BridgeRouter.shared.currentURL
+        let base = u.hasSuffix("/") ? String(u.dropLast()) : u
+        let ms = Int(corte.timeIntervalSince1970 * 1000)
+        guard let url = URL(string: "\(base)/api/autotrips/\(t.tripId)/corte?ms=\(ms)") else { return nil }
+        var req = URLRequest(url: url); req.timeoutInterval = 12
+        req.addValue("Bearer " + Settings.bridgeToken, forHTTPHeaderField: "Authorization")
+        guard let (d, resp) = try? await URLSession.shared.data(for: req),
+              (resp as? HTTPURLResponse)?.statusCode == 200,
+              let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+              (o["depois"] as? Bool) == true else { return nil }
 
-        let kmTotal = ultimo.cumKm, kmAntes = antes.cumKm
-        guard kmTotal > 0.5, kmTotal - kmAntes > 0.1 else { return nil }
-        let fracKm = (kmTotal - kmAntes) / kmTotal
-
-        // Energia tem medição própria; só cai no rateio por distância quando o
-        // acumulado é pequeno demais pra dividir sem amplificar ruído (viagem só
-        // a gasolina fecha perto de zero, e às vezes negativa, de tanto regenerar).
-        // A fração pode ser negativa de propósito: descida longa depois do corte
-        // devolve energia, e zerar isso apagaria a regeneração do trecho.
-        let kwhTotal = ultimo.cumKwh, kwhAntes = antes.cumKwh
-        let fracKwh = kwhTotal > 0.1 ? (kwhTotal - kwhAntes) / kwhTotal : fracKm
+        let fracKm  = num(o["fracKm"])
+        let fracKwh = num(o["fracKwh"])
+        guard fracKm > 0.0005 else { return nil }
 
         var raw = t.raw
         raw["distKm"]  = t.distKm * fracKm
         raw["netKwh"]  = t.netKwh * fracKwh
+        // Não há gasolina por amostra: fuelL vai rateado pela distância, que é a
+        // melhor aproximação disponível.
         raw["fuelL"]   = t.fuelL * fracKm
-        raw["timeSec"] = t.fim.timeIntervalSince(corte)
+        raw["timeSec"] = num(o["timeSec"])
         raw["_parcialDesde"] = corte.timeIntervalSince1970 * 1000
         // Elevação e score descrevem a viagem inteira; recortados viram invenção.
         raw["elevGainM"] = 0; raw["elevLossM"] = 0

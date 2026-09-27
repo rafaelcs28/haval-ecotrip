@@ -937,8 +937,32 @@ function _sustainedFor(key) {
   return st && st.since ? Math.round((Date.now() - st.since) / 60_000) : 0;
 }
 
+// ── janelas de silêncio (manutenção programada) ─────────────────────────────
+// "Vou desligar o computador do sítio até as 18h" não pode virar uma tarde de
+// pushes sobre algo que EU desliguei. Silencia o PUSH, nunca o estado: a parede
+// continua mostrando que está fora — esconder seria mentir pra mim mesmo.
+//
+// Expira sozinha e persiste em disco: silêncio que sobrevive a um restart do
+// bridge mas não sobrevive ao horário marcado.
+const SILENCIO_FILE = path.join(DATA_DIR, 'silencios.json');
+let _silencios = [];
+try { _silencios = JSON.parse(fs.readFileSync(SILENCIO_FILE, 'utf8')) || []; } catch (_) { _silencios = []; }
+function _salvaSilencios() {
+  try { atomicWriteFileSync(SILENCIO_FILE, JSON.stringify(_silencios, null, 2)); } catch (_) {}
+}
+/** Janela ativa que cobre este alerta, ou null. Limpa as vencidas de passagem. */
+function _silenciado(id) {
+  const now = Date.now();
+  const antes = _silencios.length;
+  _silencios = _silencios.filter(j => j.ate_ms > now);
+  if (_silencios.length !== antes) _salvaSilencios();
+  return _silencios.find(j => { try { return new RegExp(j.padrao).test(id); } catch (_) { return false; } }) || null;
+}
+
 function _alert(id, firing, title, body, priority = 'default', tags = [], opts = {}) {
   if (AGENT_OWNED.has(id)) opts = { ...opts, silent: true };
+  const janela = _silenciado(id);
+  if (janela) opts = { ...opts, silent: true };
   const prev = _alertState.get(id) || { firing: false, firedAt: 0, lastNotifiedAt: 0, notified: false };
   const now  = Date.now();
   const repeatEvery = opts.repeatEvery ?? NTFY_COOLDOWN;  // intervalo entre repetições "(ainda)"
@@ -950,7 +974,9 @@ function _alert(id, firing, title, body, priority = 'default', tags = [], opts =
     if (fireDelay <= 0) {
       _alertState.set(id, { firing: true, firedAt: now, lastNotifiedAt: now, notified: true, title, priority });
       if (!opts.silent) _ntfy(title, body, priority, tags);
-      _recordHealthEvent(id, title + ': ' + body);
+      // O evento entra no histórico dizendo que estava silenciado: daqui a uma
+      // semana, "por que ninguém me avisou?" tem resposta no próprio log.
+      _recordHealthEvent(id, title + (janela ? ` [silenciado: ${janela.motivo || 'manutenção'}]` : '') + ': ' + body);
     } else {
       _alertState.set(id, { firing: true, firedAt: now, lastNotifiedAt: 0, notified: false, title, priority });
     }
@@ -5883,7 +5909,13 @@ app.post('/api/departure/snooze', (req, res) => {
 // BLUETTI_SOURCE=cloud|ha|auto (default auto = cloud com fallback pro HA).
 const _BLUETTI = {
   casa:  { id: 'el100v22541111662131', sn: 'EL100V22541111662131', label: 'Casa',  feeds: 'Mac Mini + Roteador' },
-  sitio: { id: 'el100v22541111602913', sn: 'EL100V22541111602913', label: 'Sítio', feeds: 'Starlink' },
+  // A do sítio sustenta TRÊS coisas desde 26/09/2026 (o computador do HA entrou
+  // na tomada dela). Isso importa pro diagnóstico: se ela cair, o Starlink, o
+  // HA e o roteador caem JUNTOS — e o bridge veria três alertas de uma causa só.
+  sitio: { id: 'el100v22541111602913', sn: 'EL100V22541111602913', label: 'Sítio',
+           // Curto porque cabe numa linha do gauge (o teste barra corte). A
+           // lista completa vive no texto do alerta de energia, onde há espaço.
+           feeds: 'Starlink, HA, rede' },
 };
 const _BLUETTI_SOURCE = (process.env.BLUETTI_SOURCE || 'auto').toLowerCase();
 let _bluettiCache = { data: null, ts: 0 };
@@ -6120,6 +6152,23 @@ function _evalBluettiAlerts() {
   for (const key of ['casa', 'sitio']) {
     const s = _bluettiState[key]; if (!s) continue;
     _pushBluettiHist(key, s.battery_pct);
+    if (key === 'sitio') {
+      // Guarda o último estado BOM: quando o sítio emudecer, é ele que vai
+      // dizer se foi a bateria ou o link.
+      _lembraSitio();
+      // O único aviso acionável sobre a bateria do sítio sai ANTES de apagar.
+      // Depois não há o que fazer remoto — e, pior, não haverá quem avise:
+      // Starlink, HA e a própria Bluetti caem juntos e o sítio fica mudo.
+      const aut = s.battery_time_min;
+      const perto = s.offgrid === true && s.reachable && aut != null && aut > 0 && aut <= 180;
+      _alert('sitio_vai_apagar', perto,
+        '🔌 Sítio vai ficar sem energia',
+        `Bluetti do sítio em ${s.battery_pct}% e descarregando — ` +
+        `~${Math.round(aut / 60)}h${String(aut % 60).padStart(2, '0')} de autonomia. ` +
+        `Quando acabar, Starlink, HA e roteador caem juntos e o sítio fica ` +
+        `incomunicável: este é o último aviso que consegue sair.`,
+        'urgent', ['battery', 'warning'], { repeatEvery: 30 * 60_000 });
+    }
     const emoji = key === 'casa' ? '🏠 Casa' : '🌱 Sítio';
     const feeds = s.feeds || (key === 'casa' ? 'Mac Mini + Roteador' : 'Starlink');
     const unreachable = !s.reachable;
@@ -6359,6 +6408,52 @@ let _slLastRestart = null;
 function _pushSl(arr, v) { if (v == null) return; arr.push(v); if (arr.length > 3) arr.shift(); }
 const _slAllAbove = (arr, lim) => arr.length === 3 && arr.every(v => v > lim);
 
+// ── Sítio: tudo depende da mesma bateria, INCLUSIVE a testemunha ────────────
+// A Bluetti do sítio alimenta Starlink + computador do HA + roteador. Uma
+// versão anterior disto (26/09/2026) assumia que ela seguiria visível durante
+// uma queda, porque é lida pela nuvem dela e não pelo HA. **Estava errado**: a
+// Bluetti fala com a nuvem pelo Wi-Fi do roteador, que ela mesma alimenta e que
+// depende da Starlink. Quando a bateria acaba, ela emudece junto — a condição
+// "saída em 0 W" nunca chegaria a ser observada.
+//
+// O que sobra de verdadeiro são duas coisas:
+//   1. ANTES: enquanto descarrega e ainda há link, dá pra avisar com hora certa.
+//      É o único aviso acionável — depois que apaga, não há o que fazer remoto.
+//   2. DEPOIS: tudo do sítio emudece JUNTO. Isso não prova "acabou a bateria"
+//      (queda de link puro dá a mesma assinatura), mas o último estado conhecido
+//      da bateria diz qual das duas é provável.
+let _sitioUltimo = null;   // { pct, offgrid, autonomia_min, ts } — última leitura boa
+
+function _lembraSitio() {
+  const b = _bluettiState?.sitio;
+  if (!b || !b.reachable || b.battery_pct == null) return;
+  _sitioUltimo = { pct: b.battery_pct, offgrid: b.offgrid === true,
+                   autonomia_min: b.battery_time_min ?? null, ts: Date.now() };
+}
+
+/** Tudo do sítio calado ao mesmo tempo (bateria + HA). */
+function _sitioMudo() {
+  const b = _bluettiState?.sitio;
+  const bateriaMuda = !b || !b.reachable;
+  const haMudo = _extMonitorLastBeat != null
+                 && (Date.now() - _extMonitorLastBeat) > EXT_MONITOR_TIMEOUT;
+  return bateriaMuda && haMudo;
+}
+
+/** O que o último estado conhecido sugere. Nunca afirma: sugere. */
+function _pistaDoSitio() {
+  if (!_sitioUltimo) return 'sem leitura anterior pra comparar';
+  const quando = new Date(_sitioUltimo.ts).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  if (_sitioUltimo.offgrid) {
+    const aut = _sitioUltimo.autonomia_min;
+    return `a bateria estava em ${_sitioUltimo.pct}% DESCARREGANDO às ${quando}` +
+           (aut ? ` (autonomia estimada ${Math.round(aut / 60)}h)` : '') +
+           ' — provavelmente acabou a energia';
+  }
+  return `a bateria estava em ${_sitioUltimo.pct}% e na rede às ${quando}` +
+         ' — energia não parece ser a causa; mais provável o link ou o túnel';
+}
+
 function _evalStarlinkAlerts() {
   const st = starlink.status();
   if (!st.configured) return;
@@ -6372,12 +6467,23 @@ function _evalStarlinkAlerts() {
   // link (ou do HA, ou do túnel — não dá pra desempatar daqui). Último estado
   // conhecido vai no corpo pra dar contexto de qual das três é mais provável.
   const lastSeen = st.last_ok_at ? new Date(st.last_ok_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : 'nunca';
+  // Energia é CAUSA; "sem dados" é sintoma. Com a causa identificada o alerta
+  // muda de texto e não empurra push — quem avisa é o alerta de energia, um só,
+  // apontando pro lugar certo.
+  // Tudo calado junto (bateria + HA + este) é UM acontecimento, não três. O
+  // último estado da bateria entra pra dizer qual causa é provável — sem
+  // afirmar, porque queda de link pura dá exatamente a mesma assinatura.
+  const mudo = _sitioMudo();
+  const semLeitura = st.stale_s == null ? '—' : Math.round(st.stale_s / 60) + 'min';
   _alert('starlink_no_data', stale,
-    '🛰️ Sítio sem dados',
-    `Sem leitura da Starlink há ${st.stale_s == null ? '—' : Math.round(st.stale_s / 60) + 'min'} (última ${lastSeen}). ` +
-    `Último estado: ${d ? (d.online ? 'online, ping ' + Math.round(d.ping_ms || 0) + 'ms' : 'offline') : 'desconhecido'}. ` +
-    `Pode ser link, HA do sítio ou o túnel — o dado vem pelo próprio link. Erro: ${st.last_error || '—'}`,
-    'high', ['satellite', 'warning']);
+    mudo ? '🔌 Sítio incomunicável — tudo calado junto' : '🛰️ Sítio sem dados',
+    mudo
+      ? `Starlink, HA e a própria Bluetti pararam de responder ao mesmo tempo — ` +
+        `os três dependem da mesma bateria. ${_pistaDoSitio()}. Sem leitura há ${semLeitura}.`
+      : `Sem leitura da Starlink há ${semLeitura} (última ${lastSeen}). ` +
+        `Último estado: ${d ? (d.online ? 'online, ping ' + Math.round(d.ping_ms || 0) + 'ms' : 'offline') : 'desconhecido'}. ` +
+        `A Bluetti do sítio continua respondendo, então energia não é a causa. Erro: ${st.last_error || '—'}`,
+    mudo ? 'urgent' : 'high', ['satellite', 'warning']);
   if (stale || !d) {
     for (const id of ['starlink_offline', 'starlink_integration_down', 'starlink_stowed',
                       'starlink_obstructed', 'starlink_thermal', 'starlink_hw',
@@ -8612,6 +8718,11 @@ app.get('/api/wall', requireAuth, (_req, res) => {
     })(),
     // Só timestamps: quem decide se houve pulso é o cliente, comparando com o que
     // viu no ciclo anterior.
+    // Silêncio programado tem que ser VISÍVEL: alerta mudo sem aviso na tela é
+    // indistinguível de alerta quebrado, e é assim que uma manutenção de uma
+    // tarde vira um mês sem monitoramento.
+    silencios: _silencios.filter(j => j.ate_ms > now)
+      .map(j => ({ id: j.id, padrao: j.padrao, ate_ms: j.ate_ms, motivo: j.motivo })),
     pulse_ms: [state.last_apk_live_ms, state.last_gwm_ms].filter(Boolean),
     // O carro PUBLICA (MQTT) e por isso pulsava sozinho; o resto o bridge
     // CONSULTA, e nada disso acendia — a tela parecia ter um nó vivo e seis
@@ -11488,6 +11599,38 @@ if (_mapkitCfg.teamId && _mapkitCfg.keyId && _mapkitCfg.p8Path) {
 }
 
 // ── API Locais Conhecidos ─────────────────────────────────────────────────────
+// ── janelas de silêncio ─────────────────────────────────────────────────────
+// Criar, listar e cancelar. `ate_ms` absoluto ou `minutos` relativo — quem
+// silencia costuma saber a HORA de volta ("até as 18h"), não a duração.
+app.get('/api/silencios', requireAuth, (_req, res) => {
+  const now = Date.now();
+  res.json({ silencios: _silencios.filter(j => j.ate_ms > now) });
+});
+app.post('/api/silencios', requireAuth, (req, res) => {
+  const b = req.body || {};
+  const padrao = String(b.padrao || '').trim();
+  if (!padrao) return res.status(400).json({ error: 'padrao obrigatório' });
+  try { new RegExp(padrao); } catch (e) { return res.status(400).json({ error: 'regex inválida: ' + e.message }); }
+  const ate = Number(b.ate_ms) || (b.minutos ? Date.now() + b.minutos * 60_000 : 0);
+  if (!ate || ate <= Date.now()) return res.status(400).json({ error: 'informe ate_ms futuro ou minutos' });
+  // Teto de 7 dias: silêncio sem prazo vira alerta desligado pra sempre, e
+  // ninguém lembra de religar.
+  if (ate > Date.now() + 7 * 86400_000) return res.status(400).json({ error: 'máximo 7 dias' });
+  const j = { id: Date.now().toString(36), padrao, ate_ms: ate,
+              motivo: String(b.motivo || '').slice(0, 120) || null, criado_ms: Date.now() };
+  _silencios.push(j); _salvaSilencios();
+  _recordHealthEvent('silencio_criado',
+    `Alertas silenciados: ${padrao} até ${new Date(ate).toLocaleString('pt-BR')}` +
+    (j.motivo ? ` (${j.motivo})` : ''));
+  res.json({ ok: true, silencio: j });
+});
+app.delete('/api/silencios/:id', requireAuth, (req, res) => {
+  const antes = _silencios.length;
+  _silencios = _silencios.filter(j => j.id !== req.params.id);
+  if (_silencios.length !== antes) _salvaSilencios();
+  res.json({ ok: true, removidos: antes - _silencios.length });
+});
+
 app.get('/api/known-places', (_req, res) => res.json(knownPlaces));
 
 app.post('/api/known-places', (req, res) => {
@@ -14491,6 +14634,75 @@ app.get('/api/telemetry/:tripId', (req, res) => {
   const filePath = path.join(AUTOTRIPS_DIR, `${safeId}.json`);
   if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'not found' });
   res.sendFile(filePath);
+});
+
+/**
+ * GET /api/autotrips/:tripId/corte?ms=<epoch_ms>
+ *
+ * Que fração da viagem aconteceu DEPOIS de um instante. Serve o filtro
+ * "desde a última recarga/abastecimento" do app: quando o evento cai no meio de
+ * uma viagem, ela entra pelo trecho posterior em vez de sumir da estatística.
+ *
+ * Existe como endpoint porque a conta é barata e o dado é caro. O app fazia isso
+ * baixando /api/telemetry inteiro — 3 MB e 22 mil amostras na viagem de 388 km
+ * que motivou o recurso —, virando 22 mil dicionários no parser do iPhone toda
+ * vez que a aba abria. Aqui o arquivo já está no disco e a resposta tem ~80 B.
+ */
+app.get('/api/autotrips/:tripId/corte', (req, res) => {
+  const safeId = String(req.params.tripId).replace(/\D/g, '');
+  const corte  = +req.query.ms || 0;
+  const filePath = path.join(AUTOTRIPS_DIR, `${safeId}.json`);
+  if (!corte) return res.status(400).json({ error: 'ms obrigatório' });
+  if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'not found' });
+  try {
+    const d  = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    const at = d.autoTrip || {};
+    const startMs = +at.startMs || +safeId;
+    const ss = d.samples || [];
+    if (!ss.length) return res.status(404).json({ error: 'sem amostras' });
+
+    const tCorte = (corte - startMs) / 1000;   // segundos desde o início
+    // Corte antes do começo: a viagem inteira é "depois". Não acontece pelo app
+    // (ele só pergunta por viagem que atravessa), mas responder 0 aqui seria uma
+    // resposta errada pra uma pergunta bem formada.
+    if (tCorte <= 0) return res.json({ depois: true, fracKm: 1, fracKwh: 1, timeSec: +at.timeSec || 0 });
+
+    // Mesma acumulação do app: velocidade e potência integradas no tempo, com o
+    // mesmo teto de 30 s por intervalo (buraco de amostragem não vira distância).
+    let cumKm = 0, cumKwh = 0, kmCorte = null, kwhCorte = null;
+    // Tempo EM MOVIMENTO depois do corte, somado do mesmo jeito que o `timeSec`
+    // da viagem: parada longa não conta. Usar (fim − corte) misturaria tempo
+    // decorrido com tempo de viagem — nesta viagem dá 40 min de diferença.
+    let segDepois = 0;
+    let last = 0, first = true;
+    for (const x of ss) {
+      const t = +x.t || 0;
+      if (!first) {
+        const dt0 = t - last;
+        const dt  = (dt0 > 0 && dt0 < 30) ? dt0 : 0;
+        cumKm  += (+x.spd || 0) * dt / 3600;
+        cumKwh += (x.evKw != null ? +x.evKw : (+x.pwr || 0)) * dt / 3600;
+        if (t > tCorte) segDepois += dt;
+      }
+      first = false; last = t;
+      if (t <= tCorte) { kmCorte = cumKm; kwhCorte = cumKwh; }
+    }
+    if (kmCorte === null || cumKm <= 0.5) return res.json({ fracKm: 0, fracKwh: 0, depois: false });
+
+    const fracKm = (cumKm - kmCorte) / cumKm;
+    // Energia só usa medição própria quando o acumulado dá pra dividir sem
+    // amplificar ruído — viagem a gasolina fecha perto de zero, às vezes negativa.
+    // A fração pode ser negativa de propósito: descida longa depois do corte
+    // devolve carga, e zerar apagaria a regeneração do trecho.
+    const fracKwh = cumKwh > 0.1 ? (cumKwh - kwhCorte) / cumKwh : fracKm;
+    res.json({
+      depois:  fracKm > 0.0005,
+      fracKm, fracKwh,
+      timeSec: segDepois,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // Última localização GPS conhecida do carro (pega do arquivo de telemetria mais recente)
