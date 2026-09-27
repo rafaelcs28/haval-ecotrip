@@ -26,13 +26,13 @@
   .car3d { position:absolute; right:6px; bottom:var(--car3d-bottom, 190px); z-index:510;
            width:132px; height:96px; cursor:pointer; transition:opacity .25s;
            filter:drop-shadow(0 6px 10px rgba(0,0,0,.45)); }
-  .car3d iframe { width:100%; height:100%; border:0; display:block; background:transparent;
-                  pointer-events:none; }
+  /* O iframe RECEBE o toque: é ele que gira o carro com o dedo. O toque simples
+     volta pelo postMessage, porque evento de dentro do iframe não sobe pra cá. */
+  .car3d iframe { width:100%; height:100%; border:0; display:block; background:transparent; }
   /* Ampliado ganha fundo: aí sim precisa separar o carro do mapa pra enxergar. */
   .car3d.grande { right:10px; left:10px; bottom:10px; width:auto; height:62vh;
                   background:rgba(11,13,16,.92); border-radius:16px; filter:none;
                   border:1px solid rgba(255,255,255,.10); }
-  .car3d.grande iframe { pointer-events:auto; }
   /* Retrospectiva: o que o link vira depois que a viagem acaba. Mesma linguagem
      do painel, mas centrado e sem nada ao vivo — não é mais um monitor. */
   .retro { position:absolute; inset:0; z-index:900; display:none; align-items:flex-end;
@@ -720,11 +720,18 @@ const car3d = document.getElementById('car3d');
 const car3dFrame = document.getElementById('car3d-frame');
 let car3dPronto = false, car3dUlt = null;
 
-car3d.addEventListener('click', () => {
+/** Arrastar sobre o carro gira 360°; toque simples amplia. */
+window.addEventListener('message', (e) => {
+  if (e.origin !== location.origin) return;
+  if (e.data && e.data.tipo === 'carro-toque') alternaCar3d();
+});
+car3d.addEventListener('click', alternaCar3d);
+
+function alternaCar3d(){
   car3d.classList.toggle('grande');
   // O canvas precisa saber que mudou de tamanho; o viewer escuta resize.
   setTimeout(() => { try { car3dFrame.contentWindow.dispatchEvent(new Event('resize')); } catch(_){} }, 260);
-});
+}
 
 /** Encosta o cartão logo acima do painel, que muda de altura ao minimizar. */
 function ajustaCar3d(){

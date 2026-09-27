@@ -150,10 +150,23 @@
 
   // Arrastar gira. Sem OrbitControls: só preciso de um eixo, e o arquivo dele
   // custaria mais que estas dez linhas.
-  var arrastando = false, x0 = 0, g0 = 0;
-  cv.addEventListener('pointerdown', function (e) { arrastando = true; x0 = e.clientX; g0 = giro; cv.setPointerCapture(e.pointerId); });
+  var arrastando = false, x0 = 0, g0 = 0, y0 = 0, t0 = 0;
+  cv.addEventListener('pointerdown', function (e) {
+    arrastando = true; x0 = e.clientX; y0 = e.clientY; g0 = giro; t0 = Date.now();
+    cv.setPointerCapture(e.pointerId);
+  });
   cv.addEventListener('pointermove', function (e) { if (!arrastando) return; giro = g0 - (e.clientX - x0) * 0.008; pede(); });
-  cv.addEventListener('pointerup',   function () { arrastando = false; });
+  cv.addEventListener('pointerup',   function (e) {
+    arrastando = false;
+    // Evento dentro de iframe não sobe pro documento de fora, então quem embute
+    // (share.html) não consegue distinguir sozinho um toque de um arrasto — e
+    // precisa, porque toque amplia e arrasto gira. Avisa só o toque.
+    if (window !== window.top
+        && Math.abs(e.clientX - x0) < 6 && Math.abs(e.clientY - y0) < 6
+        && Date.now() - t0 < 400) {
+      try { window.parent.postMessage({ tipo: 'carro-toque' }, window.location.origin); } catch (_) {}
+    }
+  });
 
   // O GLB traz geometria Draco E textura KTX2/Basis. Faltando qualquer um dos dois
   // transcodificadores o load falha inteiro — foi o que me pegou: sem o KTX2Loader
