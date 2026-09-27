@@ -810,14 +810,21 @@ function haversineKm(aLat, aLng, bLat, bLng) {
 function renderEtaLine(distKm, etaMin) {
   // Deixa explícito que esta distância é ATÉ QUEM ESTÁ VENDO — a linha de cima fala do
   // destino do carro, e as duas com formato parecido se confundiam.
-  document.getElementById('eta-line').innerHTML =
-    `<span>🧭 O carro está a <span class="km">${distKm.toFixed(1).replace('.', ',')} km</span> de você · ${etaMin} min de carro</span>`;
+  // Perto demais pra falar em distância e tempo: "a 0,1 km de você · 0 min de
+  // carro" é tecnicamente verdade e não diz nada — a pessoa está olhando pro
+  // carro. 150 m cobre a imprecisão do GPS parado sem engolir quarteirão.
+  const juntos = distKm < 0.15;
+  document.getElementById('eta-line').innerHTML = juntos
+    ? `<span>🧭 <span class="km">O carro está bem aqui</span></span>`
+    : `<span>🧭 O carro está a <span class="km">${distKm.toFixed(1).replace('.', ',')} km</span> de você · `
+      + `${etaMin < 1 ? 'menos de 1 min' : etaMin + ' min'} de carro</span>`;
   // Quem espera pensa em relógio, não em duração — a conta já estava feita, só
   // faltava somar no agora. Mas "chega às" é promessa: com o carro desligado
   // ninguém está vindo, e o horário seria invenção. Aí fica em branco.
   const cel = document.getElementById('v-chega');
   if (!cel) return;
-  if (!window.carroLigado || !(etaMin >= 0)) { cel.textContent = '—'; return; }
+  // Já estando junto do carro, hora de chegada é ruído.
+  if (juntos || !window.carroLigado || !(etaMin >= 0)) { cel.textContent = '—'; return; }
   const t = new Date(Date.now() + etaMin * 60_000);
   cel.textContent = t.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 }
