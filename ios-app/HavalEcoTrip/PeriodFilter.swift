@@ -16,12 +16,18 @@ enum PeriodUtil {
     /// não cai em nenhum intervalo de calendário.
     static let kindSinceCharge = 6
     static let kindSinceRefuel = 7
+    /// Janela ancorada em viagens escolhidas na lista: de uma, até outra, ou as
+    /// duas. Nenhum intervalo de calendário responde "quanto rendeu daquela
+    /// viagem do meio da manhã pra cá".
+    static let kindTripRange = 8
 
     /// - Parameter since: data do evento de corte para os modos 6 e 7. Sem ela
     ///   esses modos não filtram nada — e devolver `true` mostraria o histórico
     ///   inteiro sob um rótulo que promete o contrário, então devolvem `false`.
+    /// - Parameter until: limite superior do modo 8. Com `since` nil o corte é
+    ///   só de cima, e vice-versa — marcar uma ponta só é um uso legítimo.
     static func contains(kind: Int, monthOffset: Int, from: Date, to: Date, _ date: Date,
-                         now: Date = Date(), since: Date? = nil) -> Bool {
+                         now: Date = Date(), since: Date? = nil, until: Date? = nil) -> Bool {
         let cal = Calendar.current
         switch kind {
         case 0: return cal.isDateInToday(date)
@@ -34,6 +40,13 @@ enum PeriodUtil {
         case kindSinceCharge, kindSinceRefuel:
             guard let since else { return false }
             return date >= since
+        case kindTripRange:
+            // Sem ponta nenhuma marcada não há janela — devolver tudo seria
+            // mentir sobre o que o filtro diz estar fazendo.
+            if since == nil && until == nil { return false }
+            if let since, date < since { return false }
+            if let until, date > until { return false }
+            return true
         default:
             let lo = cal.startOfDay(for: from)
             let hi = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: to)) ?? to
@@ -51,6 +64,7 @@ enum PeriodUtil {
         case kindAll: return "tudo"
         case kindSinceCharge: return "desde a recarga"
         case kindSinceRefuel: return "desde o abastecimento"
+        case kindTripRange: return "entre viagens"
         default: return "período"
         }
     }
@@ -81,6 +95,13 @@ struct PeriodFilterBar: View {
     /// oferecer "desde a recarga" sem recarga nenhuma só produz lista vazia.
     var sinceCharge: Date? = nil
     var sinceRefuel: Date? = nil
+    /// Só a tela que tem a lista de viagens oferece âncora por viagem — é lá que
+    /// dá pra escolher. Os closures avisam qual ponta o usuário quer marcar.
+    var escolherDe: (() -> Void)? = nil
+    var escolherAte: (() -> Void)? = nil
+    /// Tela sem lista (Insights) que quer só ATIVAR a janela já marcada na aba
+    /// Viagens. Escolher, só lá — é onde as viagens estão.
+    var entreViagensPronta = false
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -102,7 +123,7 @@ struct PeriodFilterBar: View {
                 // a recarga"/"Desde o abastecimento") ficariam fora da tela, e a
                 // barra já corta em ~"Personalizado" no iPhone. Um menu só, no
                 // mesmo molde do de mês, cabe e diz qual está ativo.
-                if sinceCharge != nil || sinceRefuel != nil { energiaMenu }
+                if sinceCharge != nil || sinceRefuel != nil || escolherDe != nil || entreViagensPronta { energiaMenu }
                 chip("Hoje", 0)
                 chip("7 dias", 1)
                 chip("30 dias", 2)
@@ -119,6 +140,15 @@ struct PeriodFilterBar: View {
 
     private var energiaAtiva: Bool {
         kind == PeriodUtil.kindSinceCharge || kind == PeriodUtil.kindSinceRefuel
+            || kind == PeriodUtil.kindTripRange
+    }
+
+    private var energiaIcone: String {
+        switch kind {
+        case PeriodUtil.kindSinceRefuel: return "fuelpump.fill"
+        case PeriodUtil.kindTripRange:   return "flag.checkered"
+        default: return "bolt.fill"
+        }
     }
 
     private var energiaMenu: some View {
@@ -133,10 +163,23 @@ struct PeriodFilterBar: View {
                     Label("Último abastecimento", systemImage: "fuelpump.fill")
                 }
             }
+            if let escolherDe, let escolherAte {
+                Divider()
+                Button { escolherDe() } label: {
+                    Label("Desde uma viagem…", systemImage: "flag.fill")
+                }
+                Button { escolherAte() } label: {
+                    Label("Até uma viagem…", systemImage: "flag.checkered")
+                }
+            } else if entreViagensPronta {
+                Divider()
+                Button { kind = PeriodUtil.kindTripRange } label: {
+                    Label("Entre as viagens marcadas", systemImage: "flag.checkered")
+                }
+            }
         } label: {
             pill(energiaAtiva ? PeriodUtil.label(kind: kind, monthOffset: 0).capitalizedFirst : "Desde…",
-                 on: energiaAtiva, chevron: true,
-                 icon: kind == PeriodUtil.kindSinceRefuel ? "fuelpump.fill" : "bolt.fill")
+                 on: energiaAtiva, chevron: true, icon: energiaIcone)
         }
     }
 

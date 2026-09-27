@@ -263,6 +263,9 @@ enum ParcialV2 {
     }
 }
 
+/// Ponta da janela "entre viagens".
+enum PontaViagem { case de, ate }
+
 // MARK: - 5a · aba Viagens
 
 struct ViagensV2View: View {
@@ -282,6 +285,13 @@ struct ViagensV2View: View {
     // novos, e só neles: os modos de data nunca tocam nestas datas.
     @State private var ultimaRecarga: Date?
     @State private var ultimoAbastecimento: Date?
+    // Âncoras por viagem (startMs; 0 = nenhuma). Ficam em @AppStorage e não em
+    // @State pra sobreviver a trocar de aba — marcar a viagem da manhã e perder
+    // a marca ao ir ver a recarga seria pior que não ter o filtro.
+    @AppStorage("via2_tripDe") private var tripDeMs: Double = 0
+    @AppStorage("via2_tripAte") private var tripAteMs: Double = 0
+    /// Qual ponta o usuário está escolhendo agora (nil = navegação normal).
+    @State private var escolhendo: PontaViagem?
     @AppStorage("via2_kind") private var kind = 2          // 0 hoje · 1 7d · 2 30d · 3 mês · 4 personalizado
     @AppStorage("via2_month") private var monthOffset = 0
     @AppStorage("via2_from") private var fromTS: Double = 0
@@ -325,6 +335,8 @@ struct ViagensV2View: View {
     }
 
     private func toggle(_ t: Trip) {
+        // Em modo de escolha o toque marca a ponta em vez de abrir o card.
+        if let p = escolhendo { marca(t, como: p); return }
         var exp = parseIds(expandedCSV), col = parseIds(collapsedCSV)
         if isExpanded(t) { exp.remove(t.id); col.insert(t.id) }
         else { col.remove(t.id); exp.insert(t.id) }
@@ -361,6 +373,64 @@ struct ViagensV2View: View {
         await atualizaParcial()
     }
 
+    /// Instrução durante a escolha. Sem ela o toque muda de significado sem
+    /// aviso: o card que expandia passa a marcar a ponta da janela.
+    private func escolhaBanner(_ p: PontaViagem) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: p == .de ? "flag.fill" : "flag.checkered")
+                .font(.system(size: 11, weight: .bold))
+            Text(p == .de ? "Toque na viagem que começa a conta"
+                          : "Toque na viagem que fecha a conta")
+                .font(.system(size: 12.5, weight: .semibold))
+            Spacer(minLength: 8)
+            Button("Cancelar") { escolhendo = nil }
+                .font(.system(size: 12, weight: .semibold)).foregroundStyle(DS.text2)
+        }
+        .foregroundStyle(DS.green)
+        .padding(.horizontal, 12).padding(.vertical, 9)
+        .background(DS.green.opacity(0.10), in: RoundedRectangle(cornerRadius: 11))
+        .overlay(RoundedRectangle(cornerRadius: 11).stroke(DS.green.opacity(0.35), lineWidth: 1))
+    }
+
+    /// As duas pontas, cada uma tocável pra trocar e com X pra soltar. Uma ponta
+    /// só é uso legítimo: "daquela viagem pra cá" e "até aquela viagem".
+    private var ancorasLegenda: some View {
+        HStack(spacing: 6) {
+            ancoraChip(.de, tripDeMs)
+            Image(systemName: "arrow.right").font(.system(size: 9, weight: .bold)).foregroundStyle(DS.muted)
+            ancoraChip(.ate, tripAteMs)
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func ancoraChip(_ p: PontaViagem, _ ms: Double) -> some View {
+        let t = loader.trips.first { $0.id == ms }
+        let vazio = p == .de ? "início" : "agora"
+        return HStack(spacing: 5) {
+            Button { escolhendo = p } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: p == .de ? "flag.fill" : "flag.checkered")
+                        .font(.system(size: 9, weight: .bold))
+                    Text(t.map { "\(dayLabel($0.date)) \(Self.hm.string(from: $0.date))" } ?? vazio)
+                        .font(.system(size: 11.5, weight: .semibold)).lineLimit(1)
+                }
+            }.buttonStyle(.plain)
+            if ms > 0 {
+                Button {
+                    if p == .de { tripDeMs = 0 } else { tripAteMs = 0 }
+                    // Sem nenhuma ponta o modo não filtra nada; volta pro padrão
+                    // em vez de deixar a lista vazia sem explicação.
+                    if tripDeMs == 0, tripAteMs == 0 { kind = 2 }
+                } label: {
+                    Image(systemName: "xmark").font(.system(size: 8, weight: .bold))
+                }.buttonStyle(.plain)
+            }
+        }
+        .foregroundStyle(ms > 0 ? DS.text2 : DS.muted)
+        .padding(.horizontal, 9).padding(.vertical, 6)
+        .background(DS.panel2, in: Capsule())
+    }
+
     /// Diz QUAL evento está cortando a lista. Sem isso "desde a recarga" é uma
     /// promessa sem data — e a lista encolhe sem explicar por quê.
     private func corteLegenda(_ c: Date) -> some View {
@@ -392,26 +462,54 @@ struct ViagensV2View: View {
         switch kind {
         case PeriodUtil.kindSinceCharge: return ultimaRecarga
         case PeriodUtil.kindSinceRefuel: return ultimoAbastecimento
+        case PeriodUtil.kindTripRange:   return dataDe
         default: return nil
         }
+    }
+    /// Limite superior — só o modo por viagem tem.
+    private var corteAte: Date? {
+        kind == PeriodUtil.kindTripRange ? dataAte : nil
+    }
+
+    private var dataDe:  Date? { tripDeMs  > 0 ? Date(timeIntervalSince1970: tripDeMs  / 1000) : nil }
+    private var dataAte: Date? { tripAteMs > 0 ? Date(timeIntervalSince1970: tripAteMs / 1000) : nil }
+
+    /// Marca uma ponta. Se as duas ficarem trocadas, troca de volta — quem
+    /// escolhe rolando a lista marca na ordem que enxerga, não na cronológica.
+    private func marca(_ t: Trip, como ponta: PontaViagem) {
+        switch ponta {
+        case .de:  tripDeMs  = t.id
+        case .ate: tripAteMs = t.id
+        }
+        if tripDeMs > 0, tripAteMs > 0, tripDeMs > tripAteMs {
+            let x = tripDeMs; tripDeMs = tripAteMs; tripAteMs = x
+        }
+        kind = PeriodUtil.kindTripRange
+        escolhendo = nil
     }
 
     private var filtered: [Trip] {
         let q = search.trimmingCharacters(in: .whitespaces)
         if !q.isEmpty { return loader.trips.filter { loader.displayName($0).localizedCaseInsensitiveContains(q) } }
+        // Escolhendo ponta: mostra tudo. O filtro por viagem sem âncora nenhuma
+        // não devolve nada, e a lista vazia não teria onde tocar.
+        if escolhendo != nil { return loader.trips }
         // Fora do closure: dentro, era recalculado uma vez por viagem da lista.
-        let corte = corteEnergia
-        let base = loader.trips.filter { PeriodUtil.contains(kind: kind, monthOffset: monthOffset, from: fromDate.wrappedValue, to: toDate.wrappedValue, $0.date, since: corte) }
+        let corte = corteEnergia, ate = corteAte
+        let base = loader.trips.filter { PeriodUtil.contains(kind: kind, monthOffset: monthOffset, from: fromDate.wrappedValue, to: toDate.wrappedValue, $0.date, since: corte, until: ate) }
         // A viagem atravessada entra recortada, no fim: a lista vem da mais nova
-        // pra mais velha e ela começou antes de todas.
-        if corte != nil, let p = parcial { return base + [p] }
+        // pra mais velha e ela começou antes de todas. Só nos modos de energia —
+        // âncora por viagem tem borda exata, a viagem escolhida entra inteira.
+        if corte != nil, kind != PeriodUtil.kindTripRange, let p = parcial { return base + [p] }
         return base
     }
 
     /// Recorte da viagem que atravessa o corte. Refeito só quando o corte muda —
     /// baixar trajeto a cada recomposição de body seria um request por segundo.
     private func atualizaParcial() async {
-        let corte = corteEnergia
+        // Âncora por viagem não recorta nada: a borda é a própria viagem, que
+        // entra inteira. Recortar ali inventaria um trecho que ninguém pediu.
+        let corte = kind == PeriodUtil.kindTripRange ? nil : corteEnergia
         let chave = corte.map { "\(kind)@\($0.timeIntervalSince1970)" } ?? ""
         guard chave != parcialChave else { return }
         parcialChave = chave
@@ -429,8 +527,12 @@ struct ViagensV2View: View {
                     headerRow
                     hero
                     PeriodFilterBar(kind: $kind, monthOffset: $monthOffset, earliest: loader.trips.last?.date,
-                                    sinceCharge: ultimaRecarga, sinceRefuel: ultimoAbastecimento)
-                    if let c = corteEnergia { corteLegenda(c) }
+                                    sinceCharge: ultimaRecarga, sinceRefuel: ultimoAbastecimento,
+                                    escolherDe:  { escolhendo = .de },
+                                    escolherAte: { escolhendo = .ate })
+                    if let p = escolhendo { escolhaBanner(p) }
+                    else if kind == PeriodUtil.kindTripRange { ancorasLegenda }
+                    else if let c = corteEnergia { corteLegenda(c) }
                     if kind == 4 && search.isEmpty { PeriodCalendarCard(from: fromDate, to: toDate) }
                     if showSearch { searchBar }
                     if filtered.isEmpty {
@@ -694,7 +796,9 @@ struct ViagensV2View: View {
 
     private var rows: some View {
         let all = filtered
-        let visible = showAll ? all : Array(all.prefix(6))
+        // Mais linhas enquanto escolhe: a viagem procurada raramente é uma das
+        // seis últimas.
+        let visible = showAll ? all : Array(all.prefix(escolhendo != nil ? 15 : 6))
         let newest = search.isEmpty ? all.first?.id : nil
         return VStack(spacing: 8) {
             ForEach(visible) { t in
@@ -1180,6 +1284,9 @@ struct InsightsV2View: View {
     // novos, e só neles: os modos de data nunca tocam nestas datas.
     @State private var ultimaRecarga: Date?
     @State private var ultimoAbastecimento: Date?
+    // Mesmas chaves da aba Viagens de propósito: marca lá, analisa aqui.
+    @AppStorage("via2_tripDe") private var tripDeMs: Double = 0
+    @AppStorage("via2_tripAte") private var tripAteMs: Double = 0
     @State private var showMilestones = false
     @State private var showReport = false
     @State private var showByMode = false
@@ -1206,16 +1313,21 @@ struct InsightsV2View: View {
         switch kind {
         case PeriodUtil.kindSinceCharge: return ultimaRecarga
         case PeriodUtil.kindSinceRefuel: return ultimoAbastecimento
+        case PeriodUtil.kindTripRange:   return tripDeMs > 0 ? Date(timeIntervalSince1970: tripDeMs / 1000) : nil
         default: return nil
         }
+    }
+    private var corteAte: Date? {
+        kind == PeriodUtil.kindTripRange && tripAteMs > 0
+            ? Date(timeIntervalSince1970: tripAteMs / 1000) : nil
     }
 
     private var periodTrips: [Trip] {
         // Fora do closure: dentro, era recalculado uma vez por viagem da lista.
-        let corte = corteEnergia
-        let base = loader.trips.filter { PeriodUtil.contains(kind: kind, monthOffset: monthOffset, from: fromDate.wrappedValue, to: toDate.wrappedValue, $0.date, since: corte) }
+        let corte = corteEnergia, ate = corteAte
+        let base = loader.trips.filter { PeriodUtil.contains(kind: kind, monthOffset: monthOffset, from: fromDate.wrappedValue, to: toDate.wrappedValue, $0.date, since: corte, until: ate) }
         // Mesmo recorte da lista: a viagem atravessada conta só do corte pra cá.
-        if corte != nil, let p = parcial { return base + [p] }
+        if corte != nil, kind != PeriodUtil.kindTripRange, let p = parcial { return base + [p] }
         return base
     }
 
@@ -1250,7 +1362,8 @@ struct InsightsV2View: View {
             VStack(alignment: .leading, spacing: 14) {
                 hero
                 PeriodFilterBar(kind: $kind, monthOffset: $monthOffset, earliest: loader.trips.last?.date,
-                                sinceCharge: ultimaRecarga, sinceRefuel: ultimoAbastecimento)
+                                sinceCharge: ultimaRecarga, sinceRefuel: ultimoAbastecimento,
+                                entreViagensPronta: tripDeMs > 0 || tripAteMs > 0)
                 if kind == 4 { PeriodCalendarCard(from: fromDate, to: toDate) }
                 HStack(spacing: 10) {
                     Button { showEcoScore = true } label: { ecoScoreCard }.buttonStyle(.plain)
