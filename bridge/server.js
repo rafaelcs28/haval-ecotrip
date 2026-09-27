@@ -17301,6 +17301,8 @@ function _handleWsConnection(ws, req) {
   clients.add(ws);
   ws.isAlive = true;
   ws.on('pong', () => { ws.isAlive = true; });
+  // full_state é o baseline do delta: manda o state inteiro pra quem chega,
+  // independente do que os outros clientes já receberam.
   ws.send(JSON.stringify({ type: 'full_state', data: state, startedAt: SERVER_START_AT, bridge_version: BRIDGE_VERSION }));
   ws.on('close', () => clients.delete(ws));
   ws.on('error', () => clients.delete(ws));
@@ -17756,11 +17758,47 @@ function broadcast(type, data) {
 // 16ms (1 frame a 60fps): múltiplas mensagens MQTT viram 1 broadcast WS.
 // Mantém latência ~imperceptível e reduz tráfego/CPU do PWA significativamente.
 let _stateBroadcastTimer = null;
+/// Último state enviado, pra mandar só a diferença no próximo frame.
+let _stateEnviado = {};
+/// Quando saiu o último snapshot completo.
+let _ultimoFullMs = 0;
+/**
+ * Só o que MUDOU desde o último broadcast.
+ *
+ * O `update` carregava o state inteiro — 215 chaves, ~12 KB — a cada janela de
+ * 16 ms, mesmo quando só a velocidade tinha mexido. Dirigindo isso é megabyte
+ * por minuto em cima do 4G do carro, e do lado do iPhone cada chave virava uma
+ * notificação de @Published.
+ *
+ * Todos os clientes já aplicam `update` por merge (deepMerge no PWA e no
+ * cluster, merge() no app iOS), então o delta entra sem mudança de protocolo. O
+ * que o delta NÃO expressa é remoção de chave — mas o state tem chaves fixas, e
+ * quem conecta recebe `full_state` inteiro antes de qualquer delta.
+ */
 function scheduleStateBroadcast() {
   if (_stateBroadcastTimer) return;
   _stateBroadcastTimer = setTimeout(() => {
     _stateBroadcastTimer = null;
-    broadcast('update', state);
+    // A cada 5 s vai o state inteiro. Não é só saúde da sincronia: o PWA confirma
+    // comando comparando o valor que CHEGA com o esperado, e num comando que pede
+    // o que o carro já tem não haveria delta nenhum — a confirmação ficaria
+    // pendurada até dar timeout. Com o snapshot periódico ela fecha.
+    const agora = Date.now();
+    const completo = (agora - _ultimoFullMs) > 5000;
+    if (completo) _ultimoFullMs = agora;
+
+    const delta = {};
+    let n = 0;
+    for (const k of Object.keys(state)) {
+      const v = state[k];
+      // Comparação por JSON: os valores aqui são escalares e objetos pequenos
+      // vindos de JSON, e === dava falso em objeto recriado com o mesmo conteúdo.
+      const ser = typeof v === 'object' && v !== null ? JSON.stringify(v) : v;
+      if (!completo && _stateEnviado[k] === ser) continue;
+      _stateEnviado[k] = ser;
+      delta[k] = v; n++;
+    }
+    if (n) broadcast('update', delta);
   }, 16);
 }
 

@@ -301,18 +301,50 @@ final class CarStore: ObservableObject {
         }
     }
 
+    /// Igualdade pro que veio do JSONSerialization — tudo ali é NSObject
+    /// (NSString/NSNumber/NSNull/NSArray/NSDictionary), então `isEqual` também
+    /// compara aninhado.
+    private static func mesmoValor(_ a: Any?, _ b: Any?) -> Bool {
+        switch (a, b) {
+        case (nil, nil): return true
+        case let (x as NSObject, y as NSObject): return x.isEqual(y)
+        default: return false
+        }
+    }
+
+    /// Escreve UMA vez, e só o que mudou.
+    ///
+    /// `raw` é @Published: cada `raw[k] = v` era um `objectWillChange` pros 31
+    /// views que observam o CarStore. O bridge manda o state inteiro — 215
+    /// chaves — a cada janela de 16 ms, então dirigindo isso passava de 12 mil
+    /// notificações por segundo pra mudar meia dúzia de campos. Montar o
+    /// dicionário fora e atribuir no fim troca isso por uma notificação, e
+    /// comparar valor a valor mata até essa quando nada mudou de fato.
     private func merge(_ jsonString: String) {
         guard let data = jsonString.data(using: .utf8),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
         let skipLan = lanConnected
+        var novo = raw
+        var mudou = false
         for (k, v) in obj {
             if skipLan && Self.lanOwnedKeys.contains(k) { continue }
-            raw[k] = v
+            if Self.mesmoValor(novo[k], v) { continue }
+            novo[k] = v; mudou = true
         }
-        lastUpdate = Date()
+        if mudou { raw = novo }
+        marcaAtualizado()
         updateAddressIfNeeded()
         ParkingStore.shared.onCarUpdate(engineOn: engineOn, lat: lat, lng: lng)
         scheduleSnapSave()
+    }
+
+    /// `lastUpdate` também é @Published e só é lido com precisão de segundo
+    /// ("há 3s"). Republicar a cada snapshot devolveria o flood pela porta dos
+    /// fundos — uma notificação por segundo diz a mesma coisa.
+    private func marcaAtualizado() {
+        let agora = Date()
+        if let u = lastUpdate, agora.timeIntervalSince(u) < 0.9 { return }
+        lastUpdate = agora
     }
 
     private func scheduleSnapSave() {
@@ -450,6 +482,9 @@ final class CarStore: ObservableObject {
     private func mergeLAN(_ jsonString: String) {
         guard let data = jsonString.data(using: .utf8),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+        // Mesmo cuidado do merge da nuvem, e aqui pesa mais: a LAN entrega a 10 Hz.
+        var novo = raw
+        var mudou = false
         for (k, v) in obj {
             if v is NSNull { continue }
             // Zero NÃO é leitura nestes campos — é "o APK não conseguiu ler". O bridge já
@@ -457,10 +492,12 @@ final class CarStore: ObservableObject {
             // `odometer_km: 0` do servidor local dele apagava os 33.867 que a GWM
             // entregava fresco (19/08: painel mostrando 0 km).
             if Self.lanNaoZero.contains(k), Self.ehZero(v) { continue }
-            if Self.lanPassthrough.contains(k) { raw[k] = v }
-            else if let renamed = Self.lanRename[k] { raw[renamed] = v }
+            let destino = Self.lanPassthrough.contains(k) ? k : Self.lanRename[k]
+            guard let destino, !Self.mesmoValor(novo[destino], v) else { continue }
+            novo[destino] = v; mudou = true
         }
-        lastUpdate = Date()
+        if mudou { raw = novo }
+        marcaAtualizado()
     }
 
     /// Envia comando pela LAN se conectado. `cmd` no formato do APK (ex.: "drive_mode",

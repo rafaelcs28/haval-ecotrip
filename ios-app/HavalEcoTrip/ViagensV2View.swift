@@ -306,7 +306,17 @@ struct ViagensV2View: View {
     private func parseIds(_ csv: String) -> Set<Double> { Set(csv.split(separator: ",").compactMap { Double($0) }) }
     private func serializeIds(_ s: Set<Double>) -> String { s.map { String($0) }.joined(separator: ",") }
 
+    /// A mais recente do período abre sozinha. Recebe o id pronto quando quem
+    /// chama já tem a lista: `filtered` varre as 575 viagens, e isto era chamado
+    /// duas vezes por card — 13 varreduras por recomposição de body, que a
+    /// telemetria dispara a cada 2 s.
     private var newestId: Double? { search.isEmpty ? filtered.first?.id : nil }
+
+    private func isExpanded(_ t: Trip, newest: Double?) -> Bool {
+        if parseIds(collapsedCSV).contains(t.id) { return false }
+        if t.id == newest { return true }
+        return parseIds(expandedCSV).contains(t.id)
+    }
 
     private func isExpanded(_ t: Trip) -> Bool {
         if parseIds(collapsedCSV).contains(t.id) { return false }
@@ -685,10 +695,12 @@ struct ViagensV2View: View {
     private var rows: some View {
         let all = filtered
         let visible = showAll ? all : Array(all.prefix(6))
+        let newest = search.isEmpty ? all.first?.id : nil
         return VStack(spacing: 8) {
             ForEach(visible) { t in
-                tripCard(t, expanded: isExpanded(t))
-                    .animation(.easeInOut(duration: 0.18), value: isExpanded(t))
+                let aberto = isExpanded(t, newest: newest)
+                tripCard(t, expanded: aberto)
+                    .animation(.easeInOut(duration: 0.18), value: aberto)
             }
             if !showAll && all.count > visible.count {
                 Button { withAnimation { showAll = true } } label: {

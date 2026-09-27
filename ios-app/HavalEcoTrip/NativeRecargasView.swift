@@ -71,9 +71,16 @@ final class ChargesLoader: ObservableObject {
     @Published var diag = ""
     private var bag: AnyCancellable?
 
-    init() { bag = sync.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() } }
+    // Cacheado pelo mesmo motivo do TripsLoader.trips: era computed refeito a
+    // cada acesso — map + filter + sort das 113 recargas por leitura, e as telas
+    // leem isso várias vezes por render.
+    @Published private(set) var charges: [Charge] = []
 
-    var charges: [Charge] { sync.items.map(Charge.init).filter { $0.isCharge }.sorted { $0.id > $1.id } }
+    init() {
+        bag = sync.$items.sink { [weak self] items in
+            self?.charges = items.map(Charge.init).filter { $0.isCharge }.sorted { $0.id > $1.id }
+        }
+    }
 
     func load() async {
         loading = sync.items.isEmpty
@@ -122,8 +129,12 @@ final class RefuelsLoader: ObservableObject {
     let sync = SyncedList(name: "refuels", path: "/api/refuels", idKeys: ["timestamp_ms", "id"], incremental: false, arrayKey: "refuels")
     @Published var diag = ""
     private var bag: AnyCancellable?
-    init() { bag = sync.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() } }
-    var refuels: [Refuel] { sync.items.map(Refuel.init).filter { $0.valid }.sorted { $0.id > $1.id } }
+    @Published private(set) var refuels: [Refuel] = []
+    init() {
+        bag = sync.$items.sink { [weak self] items in
+            self?.refuels = items.map(Refuel.init).filter { $0.valid }.sorted { $0.id > $1.id }
+        }
+    }
     func load() async { await sync.sync() }
     /// Registro MANUAL. A detecção automática errava os litros (compara duas leituras
     /// do sensor do tanque) e depende do evento de motor ligado, que o bridge às vezes

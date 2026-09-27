@@ -83,6 +83,8 @@ struct LogsSheet: View {
         return url
     }
 
+    // `all` remapeia e reordena o histórico inteiro a cada leitura, e `filtered`
+    // é lido duas vezes por render do console. Guardado num let em `terminal`.
     private var filtered: [LogEvent] {
         let now = Date(); let cal = Calendar.current
         return all.filter { e in
@@ -139,13 +141,14 @@ struct LogsSheet: View {
 
     // Console mono: "timestamp topic payload", topic tingido por semântica.
     private var terminal: some View {
-        ScrollView {
+        let eventos = filtered
+        return ScrollView {
             LazyVStack(alignment: .leading, spacing: 3) {
-                if filtered.isEmpty && !loading {
+                if eventos.isEmpty && !loading {
                     Text("nenhum evento").font(.system(size: 13, design: .monospaced))
                         .foregroundStyle(DS.muted).padding(.top, 30)
                 }
-                ForEach(filtered) { e in
+                ForEach(eventos) { e in
                     HStack(alignment: .top, spacing: 8) {
                         Text(Self.tf.string(from: e.ts))
                             .font(.system(size: 11.5, design: .monospaced)).foregroundStyle(DS.muted)

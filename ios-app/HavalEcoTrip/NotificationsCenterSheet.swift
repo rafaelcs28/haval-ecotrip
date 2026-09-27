@@ -53,33 +53,37 @@ struct NotificationsCenterSheet: View {
     /// Marcador de leitura persistido: notificações com id (=ts ms) acima deste são não lidas.
     @AppStorage("notif_last_read_ts") private var lastReadTs: Double = 0
 
+    // Computados UMA vez por body (ver `body`), não a cada leitura: entre a lista
+    // vazia, as duas seções e o overlay, `items` era remapeado e reordenado umas
+    // sete vezes por render.
     private var items: [NotifItem] { hist.items.map(NotifItem.init).sorted { $0.id > $1.id } }
-    private var unread: [NotifItem] { items.filter { $0.id > lastReadTs } }
-    private var earlier: [NotifItem] { items.filter { $0.id <= lastReadTs } }
     private static let df: DateFormatter = {
         let f = DateFormatter(); f.locale = Locale(identifier: "pt_BR"); f.dateFormat = "d MMM · HH:mm"; return f
     }()
 
     var body: some View {
-        NavigationStack {
+        let todas   = items
+        let unread  = todas.filter { $0.id > lastReadTs }
+        let earlier = todas.filter { $0.id <= lastReadTs }
+        return NavigationStack {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 16) {
-                    if items.isEmpty && !loading {
+                    if todas.isEmpty && !loading {
                         Text("Nenhuma notificação.").font(.subheadline).foregroundStyle(DS.muted)
                             .frame(maxWidth: .infinity).padding(.top, 40)
                     }
                     if !unread.isEmpty {
                         section("NÃO LIDAS") {
-                            ForEach(unread) { n in row(n, unread: true) }
+                            ForEach(unread) { n in row(n, unread: true, ultimoId: unread.last?.id) }
                         }
                     }
                     if !earlier.isEmpty {
                         section("ANTERIORES") {
-                            ForEach(earlier) { n in row(n, unread: false) }
+                            ForEach(earlier) { n in row(n, unread: false, ultimoId: earlier.last?.id) }
                         }
                     }
                     // Ação de rodapé: o que vira notificação
-                    if !items.isEmpty {
+                    if !todas.isEmpty {
                         Button { } label: {
                             HStack {
                                 Text("O que vira notificação").font(.system(size: 13, weight: .medium)).foregroundStyle(DS.text)
@@ -94,7 +98,7 @@ struct NotificationsCenterSheet: View {
                 }.padding(16)
             }
             .background(DS.bg.ignoresSafeArea())
-            .overlay { if loading && items.isEmpty { ProgressView().tint(DS.green) } }
+            .overlay { if loading && todas.isEmpty { ProgressView().tint(DS.green) } }
             .navigationTitle("Notificações").navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) {
@@ -112,7 +116,7 @@ struct NotificationsCenterSheet: View {
                 ToolbarItem(placement: .cancellationAction) {
                     if !unread.isEmpty {
                         Button("Marcar lidas") { markRead() }.foregroundStyle(DS.blue)
-                    } else if !items.isEmpty {
+                    } else if !todas.isEmpty {
                         Button("Limpar") { Task { await clear() } }.foregroundStyle(.red).disabled(clearing)
                     }
                 }
@@ -132,7 +136,7 @@ struct NotificationsCenterSheet: View {
     }
 
     @ViewBuilder
-    private func row(_ n: NotifItem, unread: Bool) -> some View {
+    private func row(_ n: NotifItem, unread: Bool, ultimoId: Double?) -> some View {
         let accent = unread ? n.tint : DS.muted
         VStack(spacing: 0) {
             HStack(alignment: .top, spacing: 11) {
@@ -152,7 +156,9 @@ struct NotificationsCenterSheet: View {
             .padding(.horizontal, 14).padding(.vertical, 12)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(unread ? n.tint.opacity(0.06) : Color.clear)
-            if n.id != (unread ? self.unread.last?.id : self.earlier.last?.id) {
+            // Recebido pronto: antes cada linha remontava a lista inteira só pra
+            // saber se era a última da seção.
+            if n.id != ultimoId {
                 Divider().overlay(DS.divider).padding(.leading, 47)
             }
         }

@@ -54,9 +54,14 @@ final class RulesLoader: ObservableObject {
     let sync = SyncedList(name: "rules", path: "/api/rules", idKeys: ["id"], incremental: true, tombstoneKey: "rules")
     @Published var loading = false
     private var bag: AnyCancellable?
-    init() { bag = sync.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() } }
+    // Cacheado como TripsLoader.trips: computed era refeito a cada leitura.
+    @Published private(set) var rules: [AutoRule] = []
 
-    var rules: [AutoRule] { sync.items.map(AutoRule.init).sorted { $0.name < $1.name } }
+    init() {
+        bag = sync.$items.sink { [weak self] items in
+            self?.rules = items.map(AutoRule.init).sorted { $0.name < $1.name }
+        }
+    }
 
     func load() async { loading = sync.items.isEmpty; await sync.sync(); loading = false }
 
