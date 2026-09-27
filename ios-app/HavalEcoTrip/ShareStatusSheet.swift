@@ -159,7 +159,7 @@ struct ShareStatusSheet: View {
                             // Cartões primeiro: são os atalhos que mandam sozinhos.
                             // Grasi e "Outra pessoa" continuam sendo outra coisa —
                             // app pareado e nome avulso — e ficam depois.
-                            FlowRow(spacing: 8) {
+                            FlowRow(spacing: 6) {
                                 ForEach(cartoes.cartoes) { c in
                                     Button {
                                         cartaoId = c.id; recipientKind = .other; otherName = c.nome
@@ -318,15 +318,19 @@ struct ShareStatusSheet: View {
         }
     }
 
+    /// Chip compacto: a lista cresce com o uso, então cada ponto de padding a
+    /// mais custa um cartão por linha. O aviãozinho fica só nos cartões — é o que
+    /// separa "manda sozinho no WhatsApp" de Grasi (Live Activity) e do nome
+    /// avulso, que não disparam nada.
     private func chipDestinatario(_ texto: String, ativo: Bool, icone: String?) -> some View {
-        HStack(spacing: 5) {
-            if let icone { Image(systemName: icone).font(.system(size: 10, weight: .bold)) }
-            Text(texto).font(.system(size: 13, weight: .semibold))
+        HStack(spacing: 4) {
+            if let icone { Image(systemName: icone).font(.system(size: 9, weight: .bold)) }
+            Text(texto).font(.system(size: 12.5, weight: .semibold)).lineLimit(1)
         }
-        .padding(.horizontal, 14).padding(.vertical, 10)
+        .padding(.horizontal, 11).padding(.vertical, 8)
         .background(ativo ? DS.teal.opacity(0.22) : DS.panel2)
         .foregroundStyle(ativo ? DS.teal : DS.text)
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
     }
 
     /// Nome pra chip "ativo · <nome>": destino resolvido, senão o destinatário escolhido.

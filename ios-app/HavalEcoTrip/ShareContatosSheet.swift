@@ -42,13 +42,18 @@ struct ShareCartao: Identifiable, Hashable {
     var id: String
     var nome: String
     var alvos: [ShareAlvo]
+    /// "grasi" amarra o cartão a quem já recebe Live Activity. A LA vive na tela
+    /// de bloqueio e some; o link no WhatsApp fica — com o papel marcado, vão os
+    /// dois. Só um cartão pode ter.
+    var role: String
 
-    init(id: String = "", nome: String = "", alvos: [ShareAlvo] = []) {
-        self.id = id; self.nome = nome; self.alvos = alvos
+    init(id: String = "", nome: String = "", alvos: [ShareAlvo] = [], role: String = "") {
+        self.id = id; self.nome = nome; self.alvos = alvos; self.role = role
     }
     init?(_ d: [String: Any]) {
         guard let i = d["id"] as? String, let n = d["nome"] as? String else { return nil }
         id = i; nome = n
+        role = (d["role"] as? String) ?? ""
         alvos = ((d["alvos"] as? [[String: Any]]) ?? []).compactMap(ShareAlvo.init)
     }
     /// Uma linha dizendo pra onde vai. É o que separa "mandei" de "mandei pra quem".
@@ -90,13 +95,21 @@ final class ShareCartoesStore: ObservableObject {
     @discardableResult
     func salva(_ c: ShareCartao) async -> Bool {
         guard var r = req("/api/share/contacts", "POST") else { return false }
-        var body: [String: Any] = ["nome": c.nome, "alvos": c.alvos.map { $0.dict }]
+        var body: [String: Any] = ["nome": c.nome, "alvos": c.alvos.map { $0.dict }, "role": c.role]
         if !c.id.isEmpty { body["id"] = c.id }
         r.httpBody = try? JSONSerialization.data(withJSONObject: body)
         guard let (_, resp) = try? await URLSession.shared.data(for: r),
               (resp as? HTTPURLResponse)?.statusCode == 200 else { erro = "Não consegui salvar."; return false }
         await carrega()
         return true
+    }
+
+    /// Grava a ordem atual. A ordem é a da tela de compartilhar, então é
+    /// conteúdo: quem manda pra mesma pessoa todo dia quer ela em primeiro.
+    func salvaOrdem() async {
+        guard var r = req("/api/share/contacts/order", "POST") else { return }
+        r.httpBody = try? JSONSerialization.data(withJSONObject: ["ids": cartoes.map { $0.id }])
+        _ = try? await URLSession.shared.data(for: r)
     }
 
     func apaga(_ c: ShareCartao) async {
@@ -141,37 +154,60 @@ struct ShareContatosSheet: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Cada cartão vira um botão na tela de compartilhar. Ao tocar, o link sai no WhatsApp pra todos os destinos do cartão.")
-                        .font(.system(size: 12.5)).foregroundStyle(DS.muted)
-                        .padding(.bottom, 2)
-
+            // List (e não o ScrollView de antes) porque é o que traz o arrastar
+            // pra reordenar de graça. O visual escuro se mantém escondendo o
+            // fundo e os separadores.
+            List {
+                Section {
                     ForEach(store.cartoes) { c in
-                        Button { editando = c } label: { linha(c) }.buttonStyle(.plain)
+                        Button { editando = c } label: { linha(c) }
+                            .buttonStyle(.plain)
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                            .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
                     }
-
-                    Button { editando = ShareCartao() } label: {
-                        HStack(spacing: 7) {
-                            Image(systemName: "plus.circle.fill")
-                            Text("Novo cartão").font(.system(size: 13.5, weight: .semibold))
-                        }
-                        .foregroundStyle(DS.green)
-                        .frame(maxWidth: .infinity).padding(.vertical, 13)
-                        .background(DS.green.opacity(0.10), in: RoundedRectangle(cornerRadius: 13))
-                    }.buttonStyle(.plain)
-
-                    if store.cartoes.isEmpty && !store.carregando {
-                        Text("Nenhum cartão ainda.").font(.system(size: 12.5))
-                            .foregroundStyle(DS.muted).padding(.top, 6)
+                    .onMove { origem, destino in
+                        store.cartoes.move(fromOffsets: origem, toOffset: destino)
+                        Task { await store.salvaOrdem() }
                     }
+                } header: {
+                    Text("Cada cartão vira um botão na tela de compartilhar. Ao tocar, o link sai no WhatsApp pra todos os destinos do cartão. Arraste pra mudar a ordem.")
+                        .font(.system(size: 12.5)).foregroundStyle(DS.muted)
+                        .textCase(nil).padding(.bottom, 4)
                 }
-                .padding(16)
+
+                Button { editando = ShareCartao() } label: {
+                    HStack(spacing: 7) {
+                        Image(systemName: "plus.circle.fill")
+                        Text("Novo cartão").font(.system(size: 13.5, weight: .semibold))
+                    }
+                    .foregroundStyle(DS.green)
+                    .frame(maxWidth: .infinity).padding(.vertical, 13)
+                    .background(DS.green.opacity(0.10), in: RoundedRectangle(cornerRadius: 13))
+                }
+                .buttonStyle(.plain)
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 4, trailing: 16))
+
+                if store.cartoes.isEmpty && !store.carregando {
+                    Text("Nenhum cartão ainda.").font(.system(size: 12.5))
+                        .foregroundStyle(DS.muted)
+                        .listRowBackground(Color.clear).listRowSeparator(.hidden)
+                }
             }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .environment(\.defaultMinListRowHeight, 0)
             .background(DS.bg.ignoresSafeArea())
             .navigationTitle("Compartilhar com")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Concluído") { dismiss() } } }
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    if store.cartoes.count > 1 { EditButton().foregroundStyle(DS.green) }
+                }
+                ToolbarItem(placement: .confirmationAction) { Button("Concluído") { dismiss() } }
+            }
             .task { await store.carrega() }
             .sheet(item: $editando) { c in ShareCartaoEditor(cartao: c) }
         }
@@ -180,7 +216,12 @@ struct ShareContatosSheet: View {
     private func linha(_ c: ShareCartao) -> some View {
         HStack(spacing: 11) {
             VStack(alignment: .leading, spacing: 3) {
-                Text(c.nome).font(.system(size: 14.5, weight: .semibold)).foregroundStyle(DS.text)
+                HStack(spacing: 5) {
+                    Text(c.nome).font(.system(size: 14.5, weight: .semibold)).foregroundStyle(DS.text)
+                    if c.role == "grasi" {
+                        Image(systemName: "bell.badge.fill").font(.system(size: 10)).foregroundStyle(DS.teal)
+                    }
+                }
                 Text(c.resumo).font(.system(size: 11.5)).foregroundStyle(DS.muted).lineLimit(1)
             }
             Spacer(minLength: 8)
@@ -207,13 +248,15 @@ struct ShareCartaoEditor: View {
     @Environment(\.dismiss) private var dismiss
     @State private var nome: String
     @State private var alvos: [ShareAlvo]
+    @State private var ehGrasi: Bool
     @State private var escolhendo = false
     private let idOriginal: String
 
     init(cartao: ShareCartao) {
         idOriginal = cartao.id
-        _nome  = State(initialValue: cartao.nome)
-        _alvos = State(initialValue: cartao.alvos)
+        _nome    = State(initialValue: cartao.nome)
+        _alvos   = State(initialValue: cartao.alvos)
+        _ehGrasi = State(initialValue: cartao.role == "grasi")
     }
 
     private var podeSalvar: Bool {
@@ -257,9 +300,20 @@ struct ShareCartaoEditor: View {
                         .background(DS.green.opacity(0.10), in: RoundedRectangle(cornerRadius: 11))
                     }.buttonStyle(.plain)
 
+                    Toggle(isOn: $ehGrasi) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("É a Grasi").font(.system(size: 13.5, weight: .semibold)).foregroundStyle(DS.text)
+                            Text("Escolher \"Grasi\" na tela de compartilhar manda a Live Activity e também este WhatsApp.")
+                                .font(.system(size: 11)).foregroundStyle(DS.muted)
+                        }
+                    }
+                    .tint(DS.green)
+                    .padding(12)
+                    .background(DS.panel2, in: RoundedRectangle(cornerRadius: 11))
+
                     if !idOriginal.isEmpty {
                         Button(role: .destructive) {
-                            Task { await store.apaga(ShareCartao(id: idOriginal, nome: nome, alvos: alvos)); dismiss() }
+                            Task { await store.apaga(ShareCartao(id: idOriginal, nome: nome, alvos: alvos, role: "")); dismiss() }
                         } label: {
                             Text("Apagar cartão").font(.system(size: 13, weight: .semibold))
                                 .frame(maxWidth: .infinity).padding(.vertical, 12)
@@ -278,7 +332,8 @@ struct ShareCartaoEditor: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Salvar") {
                         Task {
-                            let c = ShareCartao(id: idOriginal, nome: nome.trimmingCharacters(in: .whitespaces), alvos: alvos)
+                            let c = ShareCartao(id: idOriginal, nome: nome.trimmingCharacters(in: .whitespaces),
+                                                alvos: alvos, role: ehGrasi ? "grasi" : "")
                             if await store.salva(c) { dismiss() }
                         }
                     }.disabled(!podeSalvar)

@@ -24131,11 +24131,37 @@ app.post('/api/share/contacts', (req, res) => {
   if (!nome) return res.status(400).json({ erro: 'nome obrigatório' });
   if (!alvos.length) return res.status(400).json({ erro: 'pelo menos um destino' });
   const id = String(b.id || '').trim() || `sc_${Date.now().toString(36)}`;
+  // `role: 'grasi'` amarra o cartão a quem já recebe Live Activity: escolher
+  // "Grasi" na tela passa a mandar a LA E o WhatsApp. Só um cartão pode ter o
+  // papel — dois seriam duas mensagens pra mesma pessoa.
+  const role = String(b.role || '').trim() === 'grasi' ? 'grasi' : '';
+  if (role) _shareContacts = _shareContacts.map(c => c.id === id ? c : { ...c, role: '' });
   const i = _shareContacts.findIndex(c => c.id === id);
-  const card = { id, nome, alvos };
+  const card = { id, nome, alvos, role };
   if (i >= 0) _shareContacts[i] = card; else _shareContacts.push(card);
   _saveShareContacts();
   res.json({ ok: true, contact: card });
+});
+
+/**
+ * Nova ordem dos cartões. A ordem é a da tela de compartilhar, então ela é
+ * conteúdo, não enfeite: quem manda pra mesma pessoa todo dia quer ela primeiro.
+ * Ids desconhecidos são ignorados e os que faltarem na lista vão pro fim — assim
+ * um app com cartão a menos (ou a mais) não apaga nada de quem ficou de fora.
+ */
+app.post('/api/share/contacts/order', (req, res) => {
+  const ids = Array.isArray(req.body && req.body.ids) ? req.body.ids.map(String) : [];
+  if (!ids.length) return res.status(400).json({ erro: 'lista de ids vazia' });
+  const porId = new Map(_shareContacts.map(c => [c.id, c]));
+  const nova = [];
+  for (const id of ids) {
+    const c = porId.get(id);
+    if (c) { nova.push(c); porId.delete(id); }
+  }
+  for (const c of porId.values()) nova.push(c);
+  _shareContacts = nova;
+  _saveShareContacts();
+  res.json({ ok: true, contacts: _shareContacts });
 });
 
 app.delete('/api/share/contacts/:id', (req, res) => {
@@ -24228,8 +24254,13 @@ app.post('/api/share/create', async (req, res) => {
   // "enviado" sem saber seria a mesma mentira do "Carro trancado" da Siri.
   let whats = null;
   const card = b.contactId ? _shareContacts.find(c => c.id === b.contactId) : null;
-  if (card) {
-    whats = await _mandaTrajetoPorCartao(card, out.url, out.destName);
+  // Grasi recebe a LA por ter app pareado, mas LA é aviso que vive na tela de
+  // bloqueio e some; o link no WhatsApp fica. Se existe cartão marcado como dela,
+  // manda os dois.
+  const cardGrasi = out.recipientRole === 'grasi'
+    ? _shareContacts.find(c => c.role === 'grasi') : null;
+  if (card || cardGrasi) {
+    whats = await _mandaTrajetoPorCartao(card || cardGrasi, out.url, out.destName);
   } else if (out.recipientRole === 'ivone') {
     // Caminho antigo: app ainda não atualizado continua funcionando.
     whats = await _mandaTrajetoPorWhats(IVONE_WHATSAPP, out.url, out.destName);
