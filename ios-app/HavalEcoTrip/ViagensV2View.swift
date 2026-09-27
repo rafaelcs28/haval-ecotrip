@@ -275,6 +275,13 @@ struct ViagensV2View: View {
     @StateObject private var refuels = RefuelsLoader()
     @State private var parcial: Trip?
     @State private var parcialChave = ""
+    // Guardadas, não derivadas na hora: `charges.charges` remapeia, filtra e
+    // ordena as 113 recargas a CADA leitura, e esta data era lida de DENTRO do
+    // filtro das 575 viagens — 65 mil structs por recomposição de body, que a
+    // telemetria dispara sem parar. Era isto que travava a tela nos dois modos
+    // novos, e só neles: os modos de data nunca tocam nestas datas.
+    @State private var ultimaRecarga: Date?
+    @State private var ultimoAbastecimento: Date?
     @AppStorage("via2_kind") private var kind = 2          // 0 hoje · 1 7d · 2 30d · 3 mês · 4 personalizado
     @AppStorage("via2_month") private var monthOffset = 0
     @AppStorage("via2_from") private var fromTS: Double = 0
@@ -334,6 +341,8 @@ struct ViagensV2View: View {
     private func carregaEnergia() async {
         await charges.load()
         await refuels.load()
+        ultimaRecarga = charges.charges.first?.date
+        ultimoAbastecimento = refuels.refuels.first?.date
         // Filtro ativo sem evento correspondente deixa a tela vazia e nenhum chip
         // aceso — nada na barra explicaria o sumiço. Só depois dos dois loads,
         // senão o primeiro frame (tudo nil) derrubaria uma escolha legítima.
@@ -368,8 +377,6 @@ struct ViagensV2View: View {
     private var fromDate: Binding<Date> { Binding(get: { fromTS > 0 ? Date(timeIntervalSince1970: fromTS) : Date() }, set: { fromTS = $0.timeIntervalSince1970 }) }
     private var toDate: Binding<Date> { Binding(get: { toTS > 0 ? Date(timeIntervalSince1970: toTS) : Date() }, set: { toTS = $0.timeIntervalSince1970 }) }
 
-    private var ultimaRecarga: Date? { charges.charges.first?.date }
-    private var ultimoAbastecimento: Date? { refuels.refuels.first?.date }
     /// Corte dos modos "desde…" — nil nos modos de data, que não usam.
     private var corteEnergia: Date? {
         switch kind {
@@ -382,10 +389,12 @@ struct ViagensV2View: View {
     private var filtered: [Trip] {
         let q = search.trimmingCharacters(in: .whitespaces)
         if !q.isEmpty { return loader.trips.filter { loader.displayName($0).localizedCaseInsensitiveContains(q) } }
-        let base = loader.trips.filter { PeriodUtil.contains(kind: kind, monthOffset: monthOffset, from: fromDate.wrappedValue, to: toDate.wrappedValue, $0.date, since: corteEnergia) }
+        // Fora do closure: dentro, era recalculado uma vez por viagem da lista.
+        let corte = corteEnergia
+        let base = loader.trips.filter { PeriodUtil.contains(kind: kind, monthOffset: monthOffset, from: fromDate.wrappedValue, to: toDate.wrappedValue, $0.date, since: corte) }
         // A viagem atravessada entra recortada, no fim: a lista vem da mais nova
         // pra mais velha e ela começou antes de todas.
-        if corteEnergia != nil, let p = parcial { return base + [p] }
+        if corte != nil, let p = parcial { return base + [p] }
         return base
     }
 
@@ -1152,6 +1161,13 @@ struct InsightsV2View: View {
     @StateObject private var refuels = RefuelsLoader()
     @State private var parcial: Trip?
     @State private var parcialChave = ""
+    // Guardadas, não derivadas na hora: `charges.charges` remapeia, filtra e
+    // ordena as 113 recargas a CADA leitura, e esta data era lida de DENTRO do
+    // filtro das 575 viagens — 65 mil structs por recomposição de body, que a
+    // telemetria dispara sem parar. Era isto que travava a tela nos dois modos
+    // novos, e só neles: os modos de data nunca tocam nestas datas.
+    @State private var ultimaRecarga: Date?
+    @State private var ultimoAbastecimento: Date?
     @State private var showMilestones = false
     @State private var showReport = false
     @State private var showByMode = false
@@ -1173,8 +1189,6 @@ struct InsightsV2View: View {
     private var toDate: Binding<Date> { Binding(get: { toTS > 0 ? Date(timeIntervalSince1970: toTS) : Date() }, set: { toTS = $0.timeIntervalSince1970 }) }
     private var periodLabel: String { PeriodUtil.label(kind: kind, monthOffset: monthOffset) }
 
-    private var ultimaRecarga: Date? { charges.charges.first?.date }
-    private var ultimoAbastecimento: Date? { refuels.refuels.first?.date }
     /// Corte dos modos "desde…" — nil nos modos de data, que não usam.
     private var corteEnergia: Date? {
         switch kind {
@@ -1185,9 +1199,11 @@ struct InsightsV2View: View {
     }
 
     private var periodTrips: [Trip] {
-        let base = loader.trips.filter { PeriodUtil.contains(kind: kind, monthOffset: monthOffset, from: fromDate.wrappedValue, to: toDate.wrappedValue, $0.date, since: corteEnergia) }
+        // Fora do closure: dentro, era recalculado uma vez por viagem da lista.
+        let corte = corteEnergia
+        let base = loader.trips.filter { PeriodUtil.contains(kind: kind, monthOffset: monthOffset, from: fromDate.wrappedValue, to: toDate.wrappedValue, $0.date, since: corte) }
         // Mesmo recorte da lista: a viagem atravessada conta só do corte pra cá.
-        if corteEnergia != nil, let p = parcial { return base + [p] }
+        if corte != nil, let p = parcial { return base + [p] }
         return base
     }
 
@@ -1242,6 +1258,8 @@ struct InsightsV2View: View {
             await loader.load()
             await charges.load()
             await refuels.load()
+            ultimaRecarga = charges.charges.first?.date
+            ultimoAbastecimento = refuels.refuels.first?.date
             // Filtro ativo sem evento correspondente deixa a tela vazia e nenhum
             // chip aceso — nada na barra explicaria o sumiço. Só depois dos dois
             // loads, senão o primeiro frame (tudo nil) derrubaria uma escolha
