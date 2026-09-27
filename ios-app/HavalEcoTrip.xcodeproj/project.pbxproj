@@ -40,6 +40,7 @@
 		3F3BD6924FA83F04DB29CF0B /* CarHeroView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA1A634027D62C075536F879 /* CarHeroView.swift */; };
 		40FD4BDFC584EDCEDD3A24E6 /* ModeEconomySheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00A892D7A0CA83BABF2920BE /* ModeEconomySheet.swift */; };
 		42169A88F8E36FD03EA47301 /* ConfigStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD7173E45A0E0AAFE9AD301F /* ConfigStore.swift */; };
+		4432415D43F9D6D8EA87E92B /* ShareContatosSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EA653D97DD1E01DFA795F0D /* ShareContatosSheet.swift */; };
 		447016E58ECF062223D41618 /* TripActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = E612200FCE6AA9F646191052 /* TripActivityAttributes.swift */; };
 		4AC88532EF1E06F2F60CAF5F /* PhoneLocationReporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34DDF3B14C6A69EC6D8F3A6F /* PhoneLocationReporter.swift */; };
 		4C94F890D15203640F57B31D /* LiveActivityPush.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19F1EE1E1159233D66EEAFA8 /* LiveActivityPush.swift */; };
@@ -258,6 +259,7 @@
 		5A0BF2317E99D3BCDB34E075 /* SpeedFenceSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeedFenceSheet.swift; sourceTree = "<group>"; };
 		5B6819E27B57380D580AC0FF /* LeaveBySheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LeaveBySheet.swift; sourceTree = "<group>"; };
 		5C78BF7DF42C2CEA8466E30F /* BydRecarga.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = BydRecarga.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		5EA653D97DD1E01DFA795F0D /* ShareContatosSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareContatosSheet.swift; sourceTree = "<group>"; };
 		60050A5D1678A9235BEB0730 /* BydLiveActivityPush.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BydLiveActivityPush.swift; sourceTree = "<group>"; };
 		60686867184476F78E4F1691 /* ZonasSilencioView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZonasSilencioView.swift; sourceTree = "<group>"; };
 		6160C161401773B289CF8215 /* ShareExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ShareExtension.entitlements; sourceTree = "<group>"; };
@@ -456,6 +458,7 @@
 				B1F322C191BA5762BDB4C8C4 /* RouteCompareSheet.swift */,
 				1D49A69E4850202A417ACB89 /* SavingsSheet.swift */,
 				E4593E338CE49445D2B4E37A /* Settings.swift */,
+				5EA653D97DD1E01DFA795F0D /* ShareContatosSheet.swift */,
 				B1529D67B256468DE1C71396 /* ShareStatusSheet.swift */,
 				33D5F8203565F8E20D91E100 /* ShortcutManager.swift */,
 				5A0BF2317E99D3BCDB34E075 /* SpeedFenceSheet.swift */,
@@ -1009,6 +1012,7 @@
 				D4EC9B88AD285F862CE45A32 /* SavingsSheet.swift in Sources */,
 				5CF964F8F567C8A30A20996D /* SecurityActivityAttributes.swift in Sources */,
 				5258D112C16CFD21020F41B2 /* Settings.swift in Sources */,
+				4432415D43F9D6D8EA87E92B /* ShareContatosSheet.swift in Sources */,
 				08B039C04CAA4A37091C5D1D /* ShareStatusSheet.swift in Sources */,
 				BA989F1F5994F2921A13B3D3 /* ShortcutManager.swift in Sources */,
 				7DCDE6AF8C143F57C59F7D86 /* SpeedFenceSheet.swift in Sources */,

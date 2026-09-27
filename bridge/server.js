@@ -24058,6 +24058,134 @@ function _destinoAtualConhecido() {
   return nomeRota || '';
 }
 
+// ── Cartões de compartilhamento ──────────────────────────────────────────────
+//
+// Antes eram dois nomes no código: Grasi (que tem app) e Ivone (número fixo em
+// env). Cada pessoa nova exigia deploy. Agora o dono monta os cartões no app: um
+// nome, e por trás dele quantos destinos quiser — contato ou grupo, no WhatsApp
+// pessoal ou no da empresa, misturados no mesmo cartão.
+//
+// Quem entrega é o recados, que já tem as duas sessões de pé e resolve nome,
+// número e id de grupo. O bridge só guarda a lista e reenvia.
+const SHARE_CONTACTS_FILE = path.join(DATA_DIR, 'share_contacts.json');
+const RECADOS_EMPRESA = process.env.RECADOS_URL_EMPRESA || 'http://127.0.0.1:3060';
+let _shareContacts = [];
+try { _shareContacts = JSON.parse(fs.readFileSync(SHARE_CONTACTS_FILE, 'utf8')) || []; } catch (_) {}
+// Semente: a Ivone existia antes disso e não pode sumir de uma atualização.
+if (!_shareContacts.length && IVONE_WHATSAPP) {
+  _shareContacts = [{
+    id: 'sc_ivone', nome: 'Ivone',
+    alvos: [{ instancia: 'pessoal', tipo: 'contato', alvo: IVONE_WHATSAPP, rotulo: 'Ivone' }],
+  }];
+}
+function _saveShareContacts() {
+  try { atomicWriteFileSync(SHARE_CONTACTS_FILE, JSON.stringify(_shareContacts, null, 2)); }
+  catch (e) { console.warn('[share] falha ao salvar cartões:', e.message); }
+}
+function _recadosBase(instancia) {
+  return String(instancia) === 'empresa' ? RECADOS_EMPRESA : RECADOS_PESSOAL;
+}
+
+/** Proxy autenticado pro recados — o app fala só com o bridge. */
+async function _recadosGet(instancia, caminho, timeoutMs = 20000) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const r = await fetch(_recadosBase(instancia) + caminho, {
+      headers: { Authorization: `Bearer ${BRIDGE_TOKEN_HASH}` },
+      signal: ctrl.signal,
+    });
+    return await r.json();
+  } finally { clearTimeout(t); }
+}
+
+app.get('/api/share/wa/contatos', async (req, res) => {
+  const q = String(req.query.q || '').trim();
+  if (q.length < 2) return res.json({ contatos: [] });
+  try {
+    const d = await _recadosGet(req.query.instancia, '/api/contatos?q=' + encodeURIComponent(q), 8000);
+    res.json({ contatos: (d.contatos || []).slice(0, 30) });
+  } catch (e) { res.status(503).json({ erro: e.message, contatos: [] }); }
+});
+
+app.get('/api/share/wa/grupos', async (req, res) => {
+  try {
+    const d = await _recadosGet(req.query.instancia, '/api/grupos', 25000);
+    res.json({ grupos: (d.grupos || []).map(g => ({ id: g.id, nome: g.nome, participantes: g.participantes })) });
+  } catch (e) { res.status(503).json({ erro: e.message, grupos: [] }); }
+});
+
+app.get('/api/share/contacts', (_req, res) => res.json({ contacts: _shareContacts }));
+
+app.post('/api/share/contacts', (req, res) => {
+  const b = req.body || {};
+  const nome = String(b.nome || '').trim().slice(0, 40);
+  const alvos = (Array.isArray(b.alvos) ? b.alvos : [])
+    .map(a => ({
+      instancia: String(a.instancia) === 'empresa' ? 'empresa' : 'pessoal',
+      tipo:      String(a.tipo) === 'grupo' ? 'grupo' : 'contato',
+      alvo:      String(a.alvo || '').trim(),
+      rotulo:    String(a.rotulo || '').trim().slice(0, 60),
+    }))
+    .filter(a => a.alvo);
+  if (!nome) return res.status(400).json({ erro: 'nome obrigatório' });
+  if (!alvos.length) return res.status(400).json({ erro: 'pelo menos um destino' });
+  const id = String(b.id || '').trim() || `sc_${Date.now().toString(36)}`;
+  const i = _shareContacts.findIndex(c => c.id === id);
+  const card = { id, nome, alvos };
+  if (i >= 0) _shareContacts[i] = card; else _shareContacts.push(card);
+  _saveShareContacts();
+  res.json({ ok: true, contact: card });
+});
+
+app.delete('/api/share/contacts/:id', (req, res) => {
+  const antes = _shareContacts.length;
+  _shareContacts = _shareContacts.filter(c => c.id !== req.params.id);
+  if (_shareContacts.length !== antes) _saveShareContacts();
+  res.json({ ok: true, removidos: antes - _shareContacts.length });
+});
+
+/**
+ * Manda o link pros destinos de um cartão.
+ *
+ * Agrupa por instância porque cada uma é uma sessão de WhatsApp diferente, e
+ * devolve o resultado POR DESTINO: dizer "enviado" quando metade falhou seria a
+ * mesma mentira do "Carro trancado" da Siri.
+ */
+async function _mandaTrajetoPorCartao(card, url, destName) {
+  const porInstancia = new Map();
+  for (const a of card.alvos) {
+    if (!porInstancia.has(a.instancia)) porInstancia.set(a.instancia, []);
+    porInstancia.get(a.instancia).push(a);
+  }
+  const resultados = [];
+  for (const [instancia, alvos] of porInstancia) {
+    try {
+      const recados = require('/Users/consorciolimpagyn/recados/cliente');
+      const alvo = String(destName || '').trim() || _destinoAtualConhecido();
+      const texto = alvo
+        ? `Rafael está a caminho de ${alvo}. Acompanhe por aqui: ${url}`
+        : `Rafael compartilhou o trajeto dele. Acompanhe por aqui: ${url}`;
+      const r = await recados.enviar({
+        para: alvos.map(a => a.alvo), texto,
+        base: _recadosBase(instancia), token: BRIDGE_TOKEN_HASH, timeoutMs: 15_000,
+      });
+      const ids = (r && (r.ids || (r.id ? [r.id] : []))) || [];
+      alvos.forEach((a, i) => resultados.push({
+        rotulo: a.rotulo || a.alvo, instancia, ok: true, id: ids[i] || null,
+      }));
+    } catch (e) {
+      console.warn(`[share] cartão "${card.nome}" falhou em ${instancia}:`, e.message);
+      alvos.forEach(a => resultados.push({
+        rotulo: a.rotulo || a.alvo, instancia, ok: false, erro: e.message,
+      }));
+    }
+  }
+  const enviados = resultados.filter(r => r.ok).length;
+  console.log(`[share] cartão "${card.nome}": ${enviados}/${resultados.length} destinos`);
+  return { ok: enviados > 0, total: resultados.length, enviados, destinos: resultados };
+}
+
 async function _mandaTrajetoPorWhats(numero, url, destName) {
   try {
     const recados = require('/Users/consorciolimpagyn/recados/cliente');
@@ -24096,10 +24224,14 @@ app.post('/api/share/create', async (req, res) => {
     const fromName = String(b.fromName || 'Rafael').slice(0, 40);
     _startSharedTripLA(out.token, fromName).catch(() => {});
   }
-  // Ivone: manda o link por WhatsApp e ESPERA, pra a tela poder dizer se foi.
-  // Dizer "enviado" sem saber seria a mesma mentira do "Carro trancado" da Siri.
+  // Manda o link por WhatsApp e ESPERA, pra a tela poder dizer se foi. Dizer
+  // "enviado" sem saber seria a mesma mentira do "Carro trancado" da Siri.
   let whats = null;
-  if (out.recipientRole === 'ivone') {
+  const card = b.contactId ? _shareContacts.find(c => c.id === b.contactId) : null;
+  if (card) {
+    whats = await _mandaTrajetoPorCartao(card, out.url, out.destName);
+  } else if (out.recipientRole === 'ivone') {
+    // Caminho antigo: app ainda não atualizado continua funcionando.
     whats = await _mandaTrajetoPorWhats(IVONE_WHATSAPP, out.url, out.destName);
   }
   res.json({ ok: true, ...out, paired, whats });

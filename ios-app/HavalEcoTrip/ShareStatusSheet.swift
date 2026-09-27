@@ -14,9 +14,11 @@ final class ShareStatusStore: ObservableObject {
     @Published var error: String?
     @Published var grasiPaired: Bool = false   // se a Grasi já pareou pelo Grasi Recarga
     @Published var grasiName: String = "Grasi"
-    /// Resultado do envio por WhatsApp (só no atalho da Ivone): nil = não tentou.
+    /// Resultado do envio por WhatsApp: nil = não tentou.
     @Published var whatsOk: Bool? = nil
     @Published var whatsErro: String? = nil
+    /// Por destino — um cartão pode ter vários, e metade pode falhar.
+    @Published var whatsDestinos: [(rotulo: String, ok: Bool)] = []
     @Published var deliveredViaLA: Bool = false   // último share caiu direto na LA dela
 
     private var base: String {
@@ -25,7 +27,7 @@ final class ShareStatusStore: ObservableObject {
     }
 
     func create(ttlMin: Int, recipientName: String?, recipientRole: String?,
-                destName: String? = nil, includeSoc: Bool = true) async {
+                destName: String? = nil, includeSoc: Bool = true, contactId: String? = nil) async {
         guard !base.isEmpty, let u = URL(string: "\(base)/api/share/create") else { error = "Bridge não configurado."; return }
         loading = true; error = nil; defer { loading = false }
         var r = URLRequest(url: u); r.httpMethod = "POST"; r.timeoutInterval = 12
@@ -35,6 +37,7 @@ final class ShareStatusStore: ObservableObject {
         if let n = recipientName, !n.isEmpty { body["recipientName"] = n }
         if let role = recipientRole, !role.isEmpty { body["recipientRole"] = role }
         if let dn = destName?.trimmingCharacters(in: .whitespacesAndNewlines), !dn.isEmpty { body["destName"] = dn }
+        if let c = contactId, !c.isEmpty { body["contactId"] = c }
         r.httpBody = try? JSONSerialization.data(withJSONObject: body)
         do {
             let (data, resp) = try await URLSession.shared.data(for: r)
@@ -49,7 +52,17 @@ final class ShareStatusStore: ObservableObject {
             if let w = j["whats"] as? [String: Any] {
                 self.whatsOk = (w["ok"] as? Bool) ?? false
                 self.whatsErro = w["erro"] as? String
-            } else { self.whatsOk = nil; self.whatsErro = nil }
+                self.whatsDestinos = ((w["destinos"] as? [[String: Any]]) ?? []).map {
+                    (rotulo: ($0["rotulo"] as? String) ?? "?", ok: ($0["ok"] as? Bool) ?? false)
+                }
+                // Parcial não é sucesso: se algum destino falhou, a tela tem que
+                // dizer — o link continua aí pra mandar na mão pra quem faltou.
+                if !self.whatsDestinos.isEmpty, self.whatsDestinos.contains(where: { !$0.ok }) {
+                    self.whatsOk = false
+                    let faltou = self.whatsDestinos.filter { !$0.ok }.map { $0.rotulo }.joined(separator: ", ")
+                    self.whatsErro = "não foi pra: \(faltou)"
+                }
+            } else { self.whatsOk = nil; self.whatsErro = nil; self.whatsDestinos = [] }
         } catch { self.error = "Erro de rede: \(error.localizedDescription)" }
     }
 
@@ -82,21 +95,24 @@ struct ShareStatusSheet: View {
     @StateObject private var store = ShareStatusStore()
     @Environment(\.dismiss) private var dismiss
     @State private var ttlMin = 120
+    @ObservedObject private var cartoes = ShareCartoesStore.shared
     @State private var recipientKind: RecipientKind = .other
+    /// Cartão escolhido (nil = Grasi ou "Outra pessoa"). Mandar pra quem tem app
+    /// e pra quem recebe link são caminhos diferentes, então convivem.
+    @State private var cartaoId: String?
+    @State private var gerenciando = false
     @State private var otherName = ""
     @State private var includeSoc = true
     @State private var pulse = false
 
+    // A Ivone saiu daqui: virou cartão configurável (ShareContatosSheet). Sobram
+    // os dois caminhos que não são "mandar link por WhatsApp": a Grasi, que tem
+    // app pareado e recebe Live Activity, e o avulso, que só registra o nome.
     enum RecipientKind: String, CaseIterable, Identifiable {
         case grasi = "Grasi"
-        case ivone = "Ivone"
         case other = "Outra pessoa"
         var id: String { rawValue }
-        // A Grasi recebe na Live Activity (app pareado); a Ivone não tem app, e o
-        // link vai por WhatsApp pessoal — quem faz isso é o bridge, não o iPhone.
-        var role: String {
-            switch self { case .grasi: return "grasi"; case .ivone: return "ivone"; case .other: return "other" }
-        }
+        var role: String { self == .grasi ? "grasi" : "other" }
     }
 
     private let options: [(String, Int)] = [
@@ -132,33 +148,50 @@ struct ShareStatusSheet: View {
                             // Destinatário: Grasi → link pareia o iPhone dela com o app Grasi
                             // Recarga (vira o destino das LAs "indo até você"). Outra pessoa →
                             // só nome registrado pra auditoria.
-                            Text("Pra quem?").font(.caption).foregroundStyle(DS.muted)
-                            HStack(spacing: 8) {
-                                ForEach(RecipientKind.allCases) { k in
-                                    Button { recipientKind = k } label: {
-                                        Text(k.rawValue).font(.subheadline.weight(.semibold))
-                                            .frame(maxWidth: .infinity).padding(.vertical, 11)
-                                            .background(recipientKind == k ? DS.teal.opacity(0.22) : DS.panel2)
-                                            .foregroundStyle(recipientKind == k ? DS.teal : DS.text)
-                                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            HStack {
+                                Text("Pra quem?").font(.caption).foregroundStyle(DS.muted)
+                                Spacer()
+                                Button { gerenciando = true } label: {
+                                    Label("Editar", systemImage: "slider.horizontal.3")
+                                        .font(.system(size: 11.5, weight: .semibold)).foregroundStyle(DS.text2)
+                                }.buttonStyle(.plain)
+                            }
+                            // Cartões primeiro: são os atalhos que mandam sozinhos.
+                            // Grasi e "Outra pessoa" continuam sendo outra coisa —
+                            // app pareado e nome avulso — e ficam depois.
+                            FlowRow(spacing: 8) {
+                                ForEach(cartoes.cartoes) { c in
+                                    Button {
+                                        cartaoId = c.id; recipientKind = .other; otherName = c.nome
+                                    } label: {
+                                        chipDestinatario(c.nome, ativo: cartaoId == c.id, icone: "paperplane.fill")
                                     }.buttonStyle(.plain)
                                 }
+                                ForEach(RecipientKind.allCases) { k in
+                                    Button { recipientKind = k; cartaoId = nil; if k == .other { otherName = "" } } label: {
+                                        chipDestinatario(k.rawValue, ativo: cartaoId == nil && recipientKind == k, icone: nil)
+                                    }.buttonStyle(.plain)
+                                }
+                            }
+                            if let c = cartoes.cartoes.first(where: { $0.id == cartaoId }) {
+                                Text("Vai por WhatsApp pra \(c.resumo).")
+                                    .font(.caption).foregroundStyle(DS.muted)
                             }
                             if recipientKind == .other {
                                 TextField("Nome (ex.: João)", text: $otherName)
                                     .padding(10).background(DS.panel2)
                                     .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                                     .foregroundStyle(DS.text).autocorrectionDisabled()
-                            } else if recipientKind == .ivone {
+                            } else if cartaoId != nil {
                                 // A Ivone não tem app: o link vai por WhatsApp, do número
                                 // pessoal, mandado pelo bridge assim que for gerado.
                                 HStack(spacing: 6) {
                                     Image(systemName: "message.fill").foregroundStyle(DS.green)
                                     Text(store.whatsOk == false
-                                         ? "Não consegui mandar no WhatsApp\(store.whatsErro.map { " (\($0))" } ?? "") — o link está aí pra mandar na mão."
+                                         ? "Não consegui mandar no WhatsApp\(store.whatsErro.map { " — \($0)" } ?? "") — o link está aí pra mandar na mão."
                                          : store.whatsOk == true
-                                         ? "Link enviado no WhatsApp dela ✓"
-                                         : "O link vai por WhatsApp pro número dela assim que for gerado.")
+                                         ? "Link enviado no WhatsApp ✓\(store.whatsDestinos.count > 1 ? " (\(store.whatsDestinos.count) destinos)" : "")"
+                                         : "O link vai por WhatsApp assim que for gerado.")
                                         .font(.caption)
                                         .foregroundStyle(store.whatsOk == false ? DS.orange : DS.green)
                                 }
@@ -264,9 +297,9 @@ struct ShareStatusSheet: View {
                     } else {
                         DSActionButton(icon: "link.badge.plus", title: "Gerar link", color: DS.green, busy: store.loading) {
                             let name: String? = recipientKind == .grasi ? "Grasi" :
-                                recipientKind == .ivone ? "Ivone" :
                                 otherName.trimmingCharacters(in: .whitespaces).isEmpty ? nil : otherName.trimmingCharacters(in: .whitespaces)
-                            Task { await store.create(ttlMin: ttlMin, recipientName: name, recipientRole: recipientKind.role) }
+                            Task { await store.create(ttlMin: ttlMin, recipientName: name,
+                                                      recipientRole: recipientKind.role, contactId: cartaoId) }
                         }
                     }
 
@@ -277,18 +310,29 @@ struct ShareStatusSheet: View {
                 .padding(16)
             }
             .background(DS.bg.ignoresSafeArea())
-            .task { await store.loadPaired() }
+            .task { await store.loadPaired(); await cartoes.carrega() }
+            .sheet(isPresented: $gerenciando) { ShareContatosSheet() }
             .navigationTitle("Compartilhar status")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Fechar") { dismiss() } } }
         }
     }
 
+    private func chipDestinatario(_ texto: String, ativo: Bool, icone: String?) -> some View {
+        HStack(spacing: 5) {
+            if let icone { Image(systemName: icone).font(.system(size: 10, weight: .bold)) }
+            Text(texto).font(.system(size: 13, weight: .semibold))
+        }
+        .padding(.horizontal, 14).padding(.vertical, 10)
+        .background(ativo ? DS.teal.opacity(0.22) : DS.panel2)
+        .foregroundStyle(ativo ? DS.teal : DS.text)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
     /// Nome pra chip "ativo · <nome>": destino resolvido, senão o destinatário escolhido.
     private var activeName: String {
         if let n = store.destName?.trimmingCharacters(in: .whitespacesAndNewlines), !n.isEmpty { return n }
         if recipientKind == .grasi { return store.grasiName }
-        if recipientKind == .ivone { return "Ivone" }
         return otherName.trimmingCharacters(in: .whitespaces)
     }
 
