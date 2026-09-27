@@ -1118,9 +1118,22 @@ function _markHealedThisBoot() {
 function _checkLocalPermission() {
   if (_haStatus.up === true) {
     _haEverUp = true;
+    // O `return` daqui pulava a chamada de `_alert`, então o alerta ficava
+    // FIRING pra sempre depois que a permissão voltava: nó vermelho na parede
+    // com o problema resolvido, e nenhum "Recuperado" no histórico. Apareceu de
+    // verdade em 27/09/2026, depois de reciclar o pm2 — HA em 3ms e a parede
+    // crítica por 4 minutos até eu ir ler o código.
+    //
+    // Fechar o alerta é parte do caminho bom, não um detalhe: sinal que só sabe
+    // acender é indistinguível de sinal quebrado.
+    _sustained('localperm', true, false, LOCALPERM_SUSTAIN_MS);   // zera o relógio da sustentação
+    _alert('local_perm_lost', false, 'Bridge sem permissão de Rede Local',
+      'Permissão de Rede Local restaurada — o bridge voltou a alcançar o HA.',
+      'urgent', ['satellite']);
     // Carimba mesmo no caminho bom: `checked_at: 0` faria o vigia não saber
     // diferenciar "verificado e está tudo bem" de "nunca verificado".
-    _localPerm = { lost: false, since_ms: null, ha_error: null, checked_at: Date.now() };
+    _localPerm = { lost: false, since_ms: null, ha_error: null, ever_up: true,
+                   checked_at: Date.now() };
     return;
   }
   const err = String(_haStatus.error || '');
@@ -1139,8 +1152,14 @@ function _checkLocalPermission() {
   // MESMO responsible process — nasce sem a permissão de novo. Quem consegue é um
   // processo de fora do pm2: o `servicos-vigia.sh`, que roda por launchd e já
   // alcança o HA. Aqui fica só o diagnóstico, exposto pra ele ler.
+  // `ever_up` vai mesmo com `lost:false`. O veredicto tem sustentação de 4min,
+  // e o diagnóstico automático dispara ANTES disso — em 27/09/2026 ele culpou a
+  // VM às 14:54 porque `lost` ainda era false; o alerta de permissão só saiu
+  // 14:56. Quem decide é a ASSINATURA crua (EHOSTUNREACH + nunca respondeu
+  // nesta encarnação), disponível desde o primeiro ciclo.
   _localPerm = { lost: firing, since_ms: firing ? (_sustain.get('localperm') || {}).since || null : null,
-                 ha_error: firing ? err.slice(0, 180) : null, checked_at: Date.now() };
+                 ha_error: err.slice(0, 180) || null, ever_up: _haEverUp,
+                 assinatura_permissao: assinatura, checked_at: Date.now() };
 }
 let _localPerm = { lost: false, since_ms: null, ha_error: null, checked_at: 0 };
 
@@ -10164,7 +10183,7 @@ app.use('/api', (req, res, next) => {
   // Compartilhamento de status: páginas públicas validadas pelo token na própria URL.
   // `call` e `call/end`: a página share.html liga pro carro; o gate é o token do
   // share (+ cooldown/TTL/owner na própria rota), não o token do bridge.
-  if (/^\/share\/[^/]+\/(state|eta|call|call\/end|message|message-audio)$/.test(req.path)) return next();
+  if (/^\/share\/[^/]+\/(state|eta|resumo|call|call\/end|message|message-audio)$/.test(req.path)) return next();
   // Áudio do recado: quem baixa é o MediaPlayer do carro, que não manda header
   // de Authorization. O gate é o id aleatório de 24 hex no path (+ TTL de 24h).
   if (/^\/voice\/[a-f0-9]{24}\.[a-z0-9]{2,4}$/.test(req.path)) return next();
@@ -23940,11 +23959,27 @@ const SHARE_TOKENS_FILE = path.join(DATA_DIR, 'share_tokens.json');
 let _shareTokens = {};   // { token: { createdMs, expiresMs } }
 try { _shareTokens = JSON.parse(fs.readFileSync(SHARE_TOKENS_FILE, 'utf8')) || {}; } catch (_) {}
 function _saveShareTokens() { try { fs.writeFileSync(SHARE_TOKENS_FILE, JSON.stringify(_shareTokens)); } catch (_) {} }
+/// Quanto o token sobrevive depois de expirar, só pra contar como foi a viagem.
+const SHARE_RETRO_MS = 24 * 3600_000;
+
 function _shareValid(token) {
   const t = _shareTokens[token];
   if (!t) return false;
-  if (Date.now() > t.expiresMs) { delete _shareTokens[token]; _saveShareTokens(); return false; }
+  // Expirado deixa de dar acesso AO VIVO na hora, mas o registro fica mais um
+  // dia: é o que sustenta a retrospectiva. Quem recebeu o link já acompanhou a
+  // viagem inteira ao vivo — mostrar depois o resumo dela não entrega nada novo,
+  // e um cadeado seco joga fora a única parte que a pessoa ia querer guardar.
+  if (Date.now() > t.expiresMs) {
+    if (Date.now() > t.expiresMs + SHARE_RETRO_MS) { delete _shareTokens[token]; _saveShareTokens(); }
+    return false;
+  }
   return true;
+}
+
+/// Token que ainda pode mostrar o resumo (vale ativo OU dentro da carência).
+function _shareRetroValido(token) {
+  const t = _shareTokens[token];
+  return !!t && Date.now() <= t.expiresMs + SHARE_RETRO_MS;
 }
 // Base dos links que saem PRO CARRO e pra terceiros: trajeto compartilhado
 // (/s/, share.html) e áudio de recado que o MediaPlayer do carro baixa. Tudo
@@ -24458,6 +24493,25 @@ app.get('/api/share/:token/state', (req, res) => {
     evRemainKm: Math.max(0, Math.round(+state.autonomy_ev_km || +state.ev_remain_km || +state.range_ev_km || 0)),
     iceRemainKm: Math.max(0, Math.round(+state.autonomy_ice_km || +state.fuel_remain_km || 0)),
     odometer: Math.round(+state.odometer_km || 0),
+    // Estado pro carro 3D da página. Porta, vidro, tampa, teto e farol: tudo que
+    // é visível de fora e não conta nada que já não se veja olhando o carro.
+    //
+    // A TRAVA fica de fora de propósito. Na tela do dono ela é útil; aqui ela
+    // juntaria "está destrancado" com "está exatamente aqui" pra quem tiver o
+    // link — que é justamente a combinação que não interessa entregar.
+    carro3d: {
+      porta_fl:     state.door_fl === 'on',
+      porta_fr:     state.door_fr === 'on',
+      porta_rl:     state.door_rl === 'on',
+      porta_rr:     state.door_rr === 'on',
+      porta_malas:  state.door_trunk === 'on',
+      vidro_fl:     state.window_fl === 'on',
+      vidro_fr:     state.window_fr === 'on',
+      vidro_rl:     state.window_rl === 'on',
+      vidro_rr:     state.window_rr === 'on',
+      teto:         state.sunroof === 'on',
+      farol:        state.light_state === 'on',
+    },
     // Onde o carro está conectado: Wi-Fi (com o nome da rede) ou dados móveis.
     //
     // O sinal primário é o `icone` do Impulse, NÃO o `routingMode`. Derivar do modo
@@ -24502,6 +24556,70 @@ app.get('/api/share/:token/state', (req, res) => {
 });
 
 // Público: ETA de carro (posição atual) até onde o destinatário está.
+/**
+ * GET /api/share/:token/resumo — como foi a viagem que este link acompanhou.
+ *
+ * Existe porque o link morria num cadeado. A pessoa acompanhou o carro por uma
+ * hora e, no fim, o que sobrava era "Link expirado" — jogando fora justamente a
+ * parte que ela ia querer ver e mostrar pros outros.
+ *
+ * Só serve viagem que TERMINOU e que cruza a janela do link: resumo de viagem
+ * que o link não acompanhou seria entregar trajeto que ninguém compartilhou.
+ */
+app.get('/api/share/:token/resumo', (req, res) => {
+  const tk = _shareTokens[req.params.token];
+  if (!tk || !_shareRetroValido(req.params.token)) return res.status(404).json({ error: 'expirado' });
+
+  const abriu = +tk.createdMs || 0;
+  const fechou = (+tk.expiresMs || 0) + SHARE_RETRO_MS;
+  // Viagem encerrada cuja janela encosta na do link.
+  const t = [...autoTripsArr].reverse().find(x => {
+    const ini = +x.startMs || 0;
+    const fim = +x.endMs || (ini + (+x.timeSec || 0) * 1000);
+    return ini && fim && fim <= Date.now() && fim >= abriu && ini <= fechou;
+  });
+  if (!t) return res.json({ ok: false });
+
+  // Trajeto reduzido: o arquivo tem milhares de amostras e isto vai pro celular
+  // de quem recebeu o link.
+  let trajeto = [];
+  try {
+    const f = path.join(AUTOTRIPS_DIR, `${t.startMs}.json`);
+    const d = JSON.parse(fs.readFileSync(f, 'utf8'));
+    const ss = (d.samples || []).filter(x => x.lat && x.lng);
+    const passo = Math.max(1, Math.ceil(ss.length / 400));
+    trajeto = ss.filter((_, i) => i % passo === 0 || i === ss.length - 1)
+                .map(x => [Math.round(x.lat * 1e5) / 1e5, Math.round(x.lng * 1e5) / 1e5]);
+  } catch (_) {}
+
+  const km = +(t.distKm || 0), kwh = +(t.netKwh || 0), litros = +(t.fuelL || 0);
+  // Mesma conta do app: as duas energias somadas, senão num PHEV que acionou o
+  // motor o número vira fantasia.
+  const litrosEq = (kwh / 9.1) + litros;
+  const precoGas = +state.tank_avg_price_per_l || +state.price_gasoline_per_l || 0;
+  const precoKwh = +state.battery_avg_price_per_kwh || +state.price_energy_per_kwh || 0;
+  const custo = kwh * precoKwh + litros * precoGas;
+  // "Se fosse só gasolina": mesma baseline do Insights (9 km/L).
+  const seGasolina = precoGas > 0 ? (km / 9.0) * precoGas : 0;
+
+  res.json({
+    ok: true,
+    nome: t.name || null,
+    de: t.startKp || t.knownStart || null,
+    para: t.endKp || t.knownEnd || tk.destName || null,
+    inicioMs: +t.startMs || 0,
+    fimMs: +t.endMs || ((+t.startMs || 0) + (+t.timeSec || 0) * 1000),
+    km: +km.toFixed(1),
+    minutos: Math.round((+t.timeSec || 0) / 60),
+    kmPorLeq: (km > 1 && litrosEq > 0.05) ? +(km / litrosEq).toFixed(1) : null,
+    kwh: +kwh.toFixed(1),
+    litros: +litros.toFixed(2),
+    custo: custo > 0 ? +custo.toFixed(2) : null,
+    economia: (seGasolina > custo && custo > 0) ? +(seGasolina - custo).toFixed(2) : null,
+    trajeto,
+  });
+});
+
 app.get('/api/share/:token/eta', async (req, res) => {
   if (!_shareValid(req.params.token)) return res.status(404).json({ error: 'link expirado' });
   const toLat = +req.query.to_lat, toLng = +req.query.to_lng;
@@ -24511,7 +24629,20 @@ app.get('/api/share/:token/eta', async (req, res) => {
   try {
     const route = await _fetchRoute(carLat, carLng, toLat, toLng);
     if (!route) return res.json({ ok: false });
-    res.json({ ok: true, distKm: Math.round(route.distance / 100) / 10, etaMin: Math.round(route.duration / 60) });
+    // A geometria já vinha na resposta do roteador e era jogada fora: a página
+    // mostrava distância e tempo, e o mapa continuava sendo um ponto solto. Vai
+    // reduzida porque o caminho todo pode ter milhares de vértices e isto é
+    // rebuscado a cada 20 s — 240 pontos desenham a mesma linha no celular.
+    const pts = Array.isArray(route.coords) ? route.coords : [];
+    const passo = Math.max(1, Math.ceil(pts.length / 240));
+    const linha = pts.filter((_, i) => i % passo === 0 || i === pts.length - 1)
+                     .map(c => [Math.round(c[1] * 1e5) / 1e5, Math.round(c[0] * 1e5) / 1e5]);
+    res.json({
+      ok: true,
+      distKm: Math.round(route.distance / 100) / 10,
+      etaMin: Math.round(route.duration / 60),
+      rota: linha,
+    });
   } catch (e) { res.status(500).json({ error: String((e && e.message) || e) }); }
 });
 

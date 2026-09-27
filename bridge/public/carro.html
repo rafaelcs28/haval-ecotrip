@@ -296,6 +296,10 @@
 
     montaPecas();
     reaplica();   // estado que chegou durante o carregamento
+    // Sinal pra quem embute o viewer (share.html): antes disto o canvas está
+    // vazio, e mostrar o cartão nesse intervalo é um retângulo preto piscando.
+    window.__carroPronto = true;
+    try { window.dispatchEvent(new Event('carro-pronto')); } catch (_) {}
 
     // ── Aro ───────────────────────────────────────────────────────────────────
     // O corpo vem com pneu e cubo, mas SEM aro: o viewer monta o aro de um GLB do

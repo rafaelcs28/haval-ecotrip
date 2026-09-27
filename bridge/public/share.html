@@ -18,6 +18,45 @@
   .badge { display:inline-block; font-size:12px; font-weight:700; padding:3px 9px; border-radius:999px; margin-left:8px; }
   .badge.on { background:rgba(34,197,94,.2); color:var(--green); }
   .badge.off { background:rgba(251,146,60,.2); color:var(--orange); }
+  /* Carro 3D: cartão flutuante no canto, acima do painel e fora dele — o painel
+     é retrátil, e o 3D some junto seria perder justamente o que chama atenção.
+     `bottom` acompanha a altura do painel por variável, setada no JS. */
+  /* Sem moldura: o carro flutua sobre o mapa. O viewer já desenha com fundo
+     transparente, então cartão aqui só acrescentava uma caixa preta. */
+  .car3d { position:absolute; right:6px; bottom:var(--car3d-bottom, 190px); z-index:510;
+           width:132px; height:96px; cursor:pointer; transition:opacity .25s;
+           filter:drop-shadow(0 6px 10px rgba(0,0,0,.45)); }
+  .car3d iframe { width:100%; height:100%; border:0; display:block; background:transparent;
+                  pointer-events:none; }
+  /* Rótulo some depois do primeiro toque — serve pra descobrir, não pra morar lá.
+     Sem faixa atrás: contorno no próprio texto, que é o que dá pra ler tanto
+     sobre mapa claro quanto sobre parque verde. */
+  .car3d .dica { position:absolute; left:0; right:0; bottom:-2px; text-align:center;
+                 font-size:9.5px; font-weight:800; letter-spacing:.3px; color:#fff;
+                 text-shadow:0 1px 3px rgba(0,0,0,.9), 0 0 2px rgba(0,0,0,.9); }
+  /* Ampliado ganha fundo: aí sim precisa separar o carro do mapa pra enxergar. */
+  .car3d.grande { right:10px; left:10px; bottom:10px; width:auto; height:62vh;
+                  background:rgba(11,13,16,.92); border-radius:16px; filter:none;
+                  border:1px solid rgba(255,255,255,.10); }
+  .car3d.grande iframe { pointer-events:auto; }
+  .car3d.grande .dica { display:none; }
+  /* Retrospectiva: o que o link vira depois que a viagem acaba. Mesma linguagem
+     do painel, mas centrado e sem nada ao vivo — não é mais um monitor. */
+  .retro { position:absolute; inset:0; z-index:900; display:none; align-items:flex-end;
+           background:linear-gradient(transparent 30%, rgba(11,13,16,.55) 55%, rgba(11,13,16,.96)); }
+  .retro .card { width:100%; padding:18px 16px calc(18px + env(safe-area-inset-bottom)); }
+  .retro h2 { margin:0 0 2px; font-size:19px; font-weight:800; }
+  .retro .sub { color:var(--muted); font-size:12.5px; margin-bottom:14px; }
+  .retro .big { display:flex; align-items:baseline; gap:8px; margin-bottom:12px; }
+  .retro .big b { font-size:40px; font-weight:800; letter-spacing:-1px; line-height:1; }
+  .retro .big span { color:var(--muted); font-size:13px; }
+  .retro .grid { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+  .retro .c { background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.08);
+              border-radius:12px; padding:10px 8px; text-align:center; }
+  .retro .c .v { font-size:16px; font-weight:800; }
+  .retro .c .l { font-size:9.5px; color:var(--muted); text-transform:uppercase; letter-spacing:.4px; margin-top:2px; }
+  .retro .eco { margin-top:12px; background:rgba(34,197,94,.12); border:1px solid rgba(34,197,94,.3);
+                border-radius:12px; padding:11px 12px; font-size:13px; color:#86efac; }
   .panel { position:absolute; left:10px; right:10px; bottom:10px; z-index:500;
            background:rgba(22,24,29,.92); border:1px solid rgba(255,255,255,.08); border-radius:16px;
            padding:14px; backdrop-filter:blur(8px); }
@@ -196,7 +235,7 @@
 </head>
 <body>
 <div id="map"></div>
-<div class="top">
+<div class="top" id="topbar">
   <span class="title">🚗 Haval ao vivo</span>
   <span id="state-badge" class="badge on">conectando…</span>
 </div>
@@ -217,6 +256,17 @@
   <span class="ico">♪</span>
   <span class="np-t" id="np-title"></span>
   <span class="np-a" id="np-artist"></span>
+</div>
+<div class="car3d" id="car3d" hidden>
+  <!-- Cinza: 17191c é MUITO mais escuro que o cinza que se quer ver. A lataria
+       recebe ambiente claro e o tone mapping levanta o resultado, então 7c828a
+       (um cinza de verdade) sai branco na tela e só um quase-preto lê como prata.
+       SEM loading="lazy": o iframe nasce dentro de um container `hidden`, e
+       iframe lazy invisível nunca é carregado — o viewer não rodava, logo
+       `setCarState` não existia, logo o cartão nunca saía do hidden. Laço
+       fechado, e a tela ficava sem o 3D sem erro nenhum no console. -->
+  <iframe id="car3d-frame" src="/carro.html?cor=17191c" title="Carro em 3D"></iframe>
+  <div class="dica" id="car3d-dica">toque pra ampliar</div>
 </div>
 <div class="panel" id="panel">
   <!-- Alça de minimizar/restaurar: um toque esconde tudo menos a chegada. -->
@@ -323,6 +373,17 @@
   <button class="btn-hang" id="call-hang">Desligar</button>
 </div>
 
+<div class="retro" id="retro"><div class="card">
+  <h2 id="retro-titulo">Viagem concluída</h2>
+  <div class="sub" id="retro-sub"></div>
+  <div class="big"><b id="retro-km">—</b><span>km percorridos</span></div>
+  <div class="grid">
+    <div class="c"><div class="v" id="retro-tempo">—</div><div class="l">tempo</div></div>
+    <div class="c"><div class="v" id="retro-kml">—</div><div class="l">km/L eq</div></div>
+    <div class="c"><div class="v" id="retro-custo">—</div><div class="l">custo</div></div>
+  </div>
+  <div class="eco" id="retro-eco" style="display:none"></div>
+</div></div>
 <div class="expired" id="expired"><div><div style="font-size:40px">🔒</div><div style="font-size:18px;font-weight:700;margin-top:8px">Link expirado</div><div style="color:var(--muted);margin-top:6px">Peça um novo link ao dono do carro.</div><div id="exp-tok" style="color:#475569;margin-top:14px;font-size:11px;word-break:break-all"></div></div></div>
 
 <script>
@@ -390,16 +451,118 @@ const meIcon  = L.divIcon({ className:'car-ico', html:'<div style="width:16px;he
 let carMarker=null, meMarker=null, me=null, autoFollow=true;
 map.on('dragstart', () => autoFollow=false);
 
+// ── Linhas do mapa ─────────────────────────────────────────────────────────
+//
+// Até aqui o mapa era um ponto andando: nem o caminho já percorrido nem a rota
+// até quem está olhando apareciam — e a rota o servidor já buscava, só jogava a
+// geometria fora. Duas linhas, com papéis diferentes:
+//
+//   rastro  = por onde o carro passou desde que o link foi aberto. Sólido.
+//   rota    = por onde ele ainda vai passar pra chegar em você. Tracejado, pra
+//             não competir com o rastro nem parecer histórico.
+const rastro = L.polyline([], { color:'#22d3ee', weight:4, opacity:0.85, lineJoin:'round' }).addTo(map);
+const rota   = L.polyline([], { color:'#38bdf8', weight:4, opacity:0.55, dashArray:'8 8', lineJoin:'round' }).addTo(map);
+let rastroUlt = null;
+
+/** Só grava ponto que andou de verdade: GPS parado tremendo vira rabisco. */
+function empilhaRastro(ll){
+  if (rastroUlt && haversineKm(rastroUlt[0], rastroUlt[1], ll[0], ll[1]) * 1000 < 12) return;
+  rastroUlt = ll;
+  const pts = rastro.getLatLngs();
+  pts.push(ll);
+  // Teto de pontos: viagem longa não pode virar polyline de 20 mil vértices no
+  // celular de quem recebeu o link.
+  if (pts.length > 1500) pts.splice(0, pts.length - 1500);
+  rastro.setLatLngs(pts);
+}
+
 function fmtTime(s){ s=Math.max(0,Math.round(s)); const h=Math.floor(s/3600), m=Math.floor((s%3600)/60); return h>0?`${h}h${String(m).padStart(2,'0')}`:`${m}min`; }
 
 let _fail = 0, _everOK = false;
+// ── Fim da viagem ──────────────────────────────────────────────────────────
+//
+// O link morria num cadeado. Quem acompanhou o carro por uma hora recebia
+// "Link expirado" — e ia embora sem ver como foi. Antes de mostrar o cadeado,
+// pergunta se existe resumo: se existe, o link vira a retrospectiva da viagem,
+// com o trajeto desenhado no mapa por trás.
+let retroFeita = false, retroUltTentativa = 0;
+async function tentaRetro(){
+  if (retroFeita) return false;
+  // O poll roda a 1s; com o carro parado e sem viagem fechada isto viraria um
+  // request por segundo pra sempre.
+  if (Date.now() - retroUltTentativa < 20000) return false;
+  retroUltTentativa = Date.now();
+  try {
+    const r = await fetch(API('/resumo') + '?_=' + Date.now(), {cache:'no-store'});
+    if (!r.ok) return false;
+    const j = await r.json();
+    if (!j || !j.ok) return false;
+    retroFeita = true;
+    desenhaRetro(j);
+    return true;
+  } catch(_) { return false; }
+}
+
+/** Volta pro ao vivo: o carro religou depois de já ter chegado. */
+function escondeRetro(){
+  if (!retroFeita) return;
+  retroFeita = false;
+  document.getElementById('retro').style.display = 'none';
+  for (const id of ['panel','speed-sign','msg-fab','call-fab','topbar','car3d']) {
+    const el = document.getElementById(id); if (el) el.style.display = '';
+  }
+  rastro.setLatLngs([]); rastroUlt = null;
+  autoFollow = true;
+}
+
+function desenhaRetro(j){
+  // O mapa continua embaixo: o trajeto inteiro desenhado é metade do efeito.
+  if (Array.isArray(j.trajeto) && j.trajeto.length > 1) {
+    rastro.setLatLngs(j.trajeto);
+    rota.setLatLngs([]);
+    autoFollow = false;
+    try { map.fitBounds(rastro.getBounds(), { padding:[40, 40], maxZoom:15 }); } catch(_){}
+  }
+  // Painel ao vivo, placa de velocidade e carro 3D não fazem mais sentido aqui.
+  // "ao vivo" e os botões de falar com o carro não valem mais: a viagem acabou.
+  for (const id of ['panel','speed-sign','nowplaying','msg-fab','call-fab','topbar','car3d','recipient-banner']) {
+    const el = document.getElementById(id); if (el) el.style.display = 'none';
+  }
+  if (carMarker) { map.removeLayer(carMarker); carMarker = null; }
+
+  const f = (n, d = 0) => Number(n).toLocaleString('pt-BR', { minimumFractionDigits:d, maximumFractionDigits:d });
+  const hora = ms => new Date(ms).toLocaleTimeString('pt-BR', { hour:'2-digit', minute:'2-digit' });
+  document.getElementById('retro-titulo').textContent =
+    j.nome || (j.de && j.para ? `${j.de} → ${j.para}` : 'Viagem concluída');
+  document.getElementById('retro-sub').textContent =
+    j.inicioMs && j.fimMs ? `${hora(j.inicioMs)} – ${hora(j.fimMs)}` : '';
+  document.getElementById('retro-km').textContent = f(j.km, 1);
+  const h = Math.floor((j.minutos || 0) / 60), m = (j.minutos || 0) % 60;
+  document.getElementById('retro-tempo').textContent = h > 0 ? `${h}h${String(m).padStart(2,'0')}` : `${m}min`;
+  document.getElementById('retro-kml').textContent = j.kmPorLeq != null ? f(j.kmPorLeq, 1) : '—';
+  document.getElementById('retro-custo').textContent = j.custo != null ? 'R$ ' + f(j.custo, 2) : '—';
+  if (j.economia != null && j.economia > 0) {
+    const eco = document.getElementById('retro-eco');
+    eco.textContent = `Economizou R$ ${f(j.economia, 2)} em relação a fazer esse trajeto só a gasolina.`;
+    eco.style.display = '';
+  }
+  document.getElementById('retro').style.display = 'flex';
+}
+
 function showExpired(){ document.getElementById('exp-tok').textContent = 'token: ' + (TOKEN || '(vazio)'); document.getElementById('expired').style.display='flex'; }
 function hideExpired(){ document.getElementById('expired').style.display='none'; }
 async function poll(){
   let j;
   try {
     const r = await fetch(API('/state') + '?_=' + Date.now(), {cache:'no-store'});
-    if (r.status === 404) { _fail++; if (_fail >= 3 && !_everOK) showExpired(); return; }
+    if (r.status === 404) {
+      _fail++;
+      // Expirou: tenta a retrospectiva antes do cadeado. O `_everOK` some da
+      // condição de propósito — quem acompanhou a viagem inteira é justamente
+      // quem mais merece ver o resumo, e ele já tinha passado por aqui.
+      if (_fail >= 3 && !(await tentaRetro()) && !_everOK) showExpired();
+      return;
+    }
     if (!r.ok) return;                 // transitório (502/timeout do funnel) → tenta de novo
     j = await r.json();
   } catch(_) { return; }
@@ -531,6 +694,13 @@ async function poll(){
     dl.innerHTML = html;
     dl.style.display = '';
   } else { dl.style.display = 'none'; }
+  // Chegou: carro desligado e existe viagem fechada nesta janela. É aqui que o
+  // link vira retrospectiva — esperar o token expirar mostraria o resumo horas
+  // depois, quando ninguém está mais olhando.
+  if (j.on === false && !retroFeita) { tentaRetro(); }
+  else if (j.on === true && retroFeita) { escondeRetro(); }
+  if (retroFeita) return;
+  aplicaCar3d(j.carro3d);
   if (j.lat && j.lng){
     const ll = [j.lat, j.lng];
     window.carPos = ll;   // usado pela projeção local do ETA (ver projectEta)
@@ -539,10 +709,57 @@ async function poll(){
     // Aponta a seta pro rumo do carro. Só gira em movimento — parado o heading
     // antigo não significa nada e ficaria girando à toa.
     if (j.moving) { const rot = document.getElementById('car-rot'); if (rot) rot.style.transform = `rotate(${j.heading||0}deg)`; }
+    empilhaRastro(ll);
     if (autoFollow) map.setView(ll, Math.max(map.getZoom(),14), {animate:true});
     // Reprojeta a distância/ETA com a posição nova — sem rede, a cada poll.
     projectEta();
   }
+}
+
+// ── Carro 3D ───────────────────────────────────────────────────────────────
+//
+// O mesmo /carro.html do app, num iframe: porta que abre, vidro que desce, teto,
+// farol. Same-origin, então o estado entra pela API que o Painel já usa
+// (`setCarState`) em vez de postMessage.
+//
+// Só aparece depois que o modelo carregou — cartão preto piscando no canto seria
+// pior que cartão nenhum.
+const car3d = document.getElementById('car3d');
+const car3dFrame = document.getElementById('car3d-frame');
+let car3dPronto = false, car3dUlt = null;
+
+car3d.addEventListener('click', () => {
+  car3d.classList.toggle('grande');
+  const d = document.getElementById('car3d-dica');
+  if (d) d.remove();
+  // O canvas precisa saber que mudou de tamanho; o viewer escuta resize.
+  setTimeout(() => { try { car3dFrame.contentWindow.dispatchEvent(new Event('resize')); } catch(_){} }, 260);
+});
+
+/** Encosta o cartão logo acima do painel, que muda de altura ao minimizar. */
+function ajustaCar3d(){
+  const p = document.getElementById('panel');
+  if (p) document.documentElement.style.setProperty('--car3d-bottom', (p.offsetHeight + 18) + 'px');
+}
+window.addEventListener('resize', ajustaCar3d);
+
+function aplicaCar3d(estado){
+  if (!estado) return;
+  // Só manda o que mudou: o viewer acumula, e reenviar tudo a cada segundo
+  // reanimaria porta parada.
+  const delta = {};
+  for (const k in estado) if (!car3dUlt || car3dUlt[k] !== estado[k]) delta[k] = estado[k];
+  car3dUlt = estado;
+  if (!Object.keys(delta).length && car3dPronto) return;
+  try {
+    const w = car3dFrame.contentWindow;
+    if (!w || typeof w.setCarState !== 'function') return;
+    // Manda mesmo antes do modelo abrir — o viewer acumula e reaplica sozinho.
+    w.setCarState(car3dPronto ? delta : estado);
+    // Mas só MOSTRA quando o carro está desenhado: `setCarState` existe assim que
+    // o script do iframe roda, muito antes do GLB chegar.
+    if (!car3dPronto && w.__carroPronto) { car3dPronto = true; car3d.hidden = false; ajustaCar3d(); }
+  } catch(_) {}
 }
 
 // ── Distância/ETA até quem está vendo ──────────────────────────────────────
@@ -610,10 +827,21 @@ async function updateEta(){
         straightKm: car ? haversineKm(car[0], car[1], me[0], me[1]) : 0,
       };
       renderEtaLine(j.distKm, j.etaMin);
+      if (Array.isArray(j.rota) && j.rota.length > 1) rota.setLatLngs(j.rota);
     }
   } catch(_){}
 }
 function askGeo(){
+  // `?me=lat,lng` fixa a posição de quem vê, sem GPS. Existe pra conferir o
+  // desenho da rota (e o ETA) sem depender de permissão de localização — foi o
+  // que faltou pra validar a linha no mapa quando ela foi escrita.
+  const forc = new URLSearchParams(location.search).get('me');
+  if (forc && /^-?\d+(\.\d+)?,-?\d+(\.\d+)?$/.test(forc)) {
+    me = forc.split(',').map(Number);
+    if (!meMarker) meMarker = L.marker(me,{icon:meIcon}).addTo(map); else meMarker.setLatLng(me);
+    updateEta();
+    return;
+  }
   if (!navigator.geolocation){ alert('Geolocalização não suportada.'); return; }
   navigator.geolocation.watchPosition(p => {
     me = [p.coords.latitude, p.coords.longitude];
