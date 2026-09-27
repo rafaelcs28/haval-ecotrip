@@ -744,6 +744,15 @@ function ajustaCar3d(){
   if (p) document.documentElement.style.setProperty('--car3d-bottom', (p.offsetHeight + 18) + 'px');
 }
 window.addEventListener('resize', ajustaCar3d);
+// Observa a ALTURA do painel, e não o clique no grip: ele encolhe ao minimizar,
+// mas também cresce quando a linha de chegada quebra em duas ou o endereço muda
+// de tamanho. Amarrar no clique consertaria um caso e deixaria os outros — e
+// como o ResizeObserver dispara durante a animação, o carro desce junto em vez
+// de pular no fim.
+(() => {
+  const p = document.getElementById('panel');
+  if (p && window.ResizeObserver) new ResizeObserver(ajustaCar3d).observe(p);
+})();
 
 // `?carro3d=portas,malas,farol,vidros,teto` (ou `tudo`) força o desenho, pra
 // conferir como o carro fica aberto sem depender de abrir o carro de verdade.
