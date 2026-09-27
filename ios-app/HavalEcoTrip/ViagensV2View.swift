@@ -205,6 +205,50 @@ enum TrajV2 {
     }
 }
 
+/// Recorte de uma viagem que ATRAVESSA o corte de "desde a recarga/abastecimento".
+///
+/// Sem isto o filtro descartava a viagem inteira: o abastecimento de 23/09 às
+/// 14:06 caiu no meio de uma viagem de 388 km (11:47→16:39), e a estatística
+/// "desde o abastecimento" ficava sem os 200 km que vieram depois da bomba —
+/// justamente os que o tanque novo pagou.
+///
+/// O corte sai das amostras do trajeto, que já trazem distância e energia
+/// acumuladas: a fração é medida, não estimada por regra de três no tempo.
+/// `fuelL` é a exceção — não há gasolina por amostra, então ela vai rateada pela
+/// distância, que é a melhor aproximação disponível aqui.
+enum ParcialV2 {
+    static func recorta(_ t: Trip, desde corte: Date) async -> Trip? {
+        guard corte > t.date, corte < t.fim else { return nil }
+        guard let r = await TrajV2.load(t), let ultimo = r.samples.last else { return nil }
+        let tCorte = corte.timeIntervalSince(t.date)
+        // Última amostra ANTES do corte — o que já tinha rodado quando abasteceu.
+        guard let antes = r.samples.last(where: { $0.t <= tCorte }) else { return nil }
+
+        let kmTotal = ultimo.cumKm, kmAntes = antes.cumKm
+        guard kmTotal > 0.5, kmTotal - kmAntes > 0.1 else { return nil }
+        let fracKm = (kmTotal - kmAntes) / kmTotal
+
+        // Energia tem medição própria; só cai no rateio por distância quando o
+        // acumulado é pequeno demais pra dividir sem amplificar ruído (viagem só
+        // a gasolina fecha perto de zero, e às vezes negativa, de tanto regenerar).
+        // A fração pode ser negativa de propósito: descida longa depois do corte
+        // devolve energia, e zerar isso apagaria a regeneração do trecho.
+        let kwhTotal = ultimo.cumKwh, kwhAntes = antes.cumKwh
+        let fracKwh = kwhTotal > 0.1 ? (kwhTotal - kwhAntes) / kwhTotal : fracKm
+
+        var raw = t.raw
+        raw["distKm"]  = t.distKm * fracKm
+        raw["netKwh"]  = t.netKwh * fracKwh
+        raw["fuelL"]   = t.fuelL * fracKm
+        raw["timeSec"] = t.fim.timeIntervalSince(corte)
+        raw["_parcialDesde"] = corte.timeIntervalSince1970 * 1000
+        // Elevação e score descrevem a viagem inteira; recortados viram invenção.
+        raw["elevGainM"] = 0; raw["elevLossM"] = 0
+        raw["driveScore"] = nil
+        return Trip(raw)
+    }
+}
+
 // MARK: - 5a · aba Viagens
 
 struct ViagensV2View: View {
@@ -215,6 +259,8 @@ struct ViagensV2View: View {
     // histórico. Ambos os loaders leem de cache, então não custa uma tela.
     @StateObject private var charges = ChargesLoader()
     @StateObject private var refuels = RefuelsLoader()
+    @State private var parcial: Trip?
+    @State private var parcialChave = ""
     @AppStorage("via2_kind") private var kind = 2          // 0 hoje · 1 7d · 2 30d · 3 mês · 4 personalizado
     @AppStorage("via2_month") private var monthOffset = 0
     @AppStorage("via2_from") private var fromTS: Double = 0
@@ -274,6 +320,12 @@ struct ViagensV2View: View {
     private func carregaEnergia() async {
         await charges.load()
         await refuels.load()
+        // Filtro ativo sem evento correspondente deixa a tela vazia e nenhum chip
+        // aceso — nada na barra explicaria o sumiço. Só depois dos dois loads,
+        // senão o primeiro frame (tudo nil) derrubaria uma escolha legítima.
+        if kind == PeriodUtil.kindSinceCharge, ultimaRecarga == nil { kind = 2 }
+        if kind == PeriodUtil.kindSinceRefuel, ultimoAbastecimento == nil { kind = 2 }
+        await atualizaParcial()
     }
 
     /// Diz QUAL evento está cortando a lista. Sem isso "desde a recarga" é uma
@@ -316,7 +368,25 @@ struct ViagensV2View: View {
     private var filtered: [Trip] {
         let q = search.trimmingCharacters(in: .whitespaces)
         if !q.isEmpty { return loader.trips.filter { loader.displayName($0).localizedCaseInsensitiveContains(q) } }
-        return loader.trips.filter { PeriodUtil.contains(kind: kind, monthOffset: monthOffset, from: fromDate.wrappedValue, to: toDate.wrappedValue, $0.date, since: corteEnergia) }
+        let base = loader.trips.filter { PeriodUtil.contains(kind: kind, monthOffset: monthOffset, from: fromDate.wrappedValue, to: toDate.wrappedValue, $0.date, since: corteEnergia) }
+        // A viagem atravessada entra recortada, no fim: a lista vem da mais nova
+        // pra mais velha e ela começou antes de todas.
+        if corteEnergia != nil, let p = parcial { return base + [p] }
+        return base
+    }
+
+    /// Recorte da viagem que atravessa o corte. Refeito só quando o corte muda —
+    /// baixar trajeto a cada recomposição de body seria um request por segundo.
+    private func atualizaParcial() async {
+        let corte = corteEnergia
+        let chave = corte.map { "\(kind)@\($0.timeIntervalSince1970)" } ?? ""
+        guard chave != parcialChave else { return }
+        parcialChave = chave
+        guard let corte else { parcial = nil; return }
+        guard let atravessa = loader.trips.first(where: { $0.date < corte && $0.fim > corte }) else {
+            parcial = nil; return
+        }
+        parcial = await ParcialV2.recorta(atravessa, desde: corte)
     }
 
     var body: some View {
@@ -344,6 +414,7 @@ struct ViagensV2View: View {
             .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(isPresented: $showInsights) { InsightsV2View() }
             .refreshable { await loader.load(); await carregaEnergia() }
+            .onChange(of: kind) { Task { await atualizaParcial() } }
             .task {
                 await loader.load()
                 await carregaEnergia()
@@ -467,7 +538,11 @@ struct ViagensV2View: View {
         let d = featCache[t.tripId]
         let cost = t.cost(car.priceKwh, car.priceGas)
         let maxSpd = (d?.samples.isEmpty ?? true) ? nil : Fmt.adjSpeed(d!.samples.map { $0.spd }.max() ?? 0)
-        var sub = "\(dayLabel(t.date)) · \(Self.hm.string(from: t.date)) – \(Self.hm.string(from: t.date.addingTimeInterval(t.timeSec)))"
+        // Recorte: o card mostra a janela que os números descrevem, não a viagem
+        // inteira — senão "388 km" vira "196 km" sem explicação na tela.
+        let inicio = t.parcialDesde ?? t.date
+        var sub = "\(dayLabel(inicio)) · \(Self.hm.string(from: inicio)) – \(Self.hm.string(from: inicio.addingTimeInterval(t.timeSec)))"
+        if t.parcialDesde != nil { sub += " · trecho" }
         if let temp = t.outsideTemp { sub += " · \(Fmt.int(temp))° externa" }
         return VStack(alignment: .leading, spacing: expanded ? 12 : 0) {
             Button { toggle(t) } label: {
@@ -1061,6 +1136,8 @@ struct InsightsV2View: View {
     // rendeu ESTA carga, quanto rendeu ESTE tanque.
     @StateObject private var charges = ChargesLoader()
     @StateObject private var refuels = RefuelsLoader()
+    @State private var parcial: Trip?
+    @State private var parcialChave = ""
     @State private var showMilestones = false
     @State private var showReport = false
     @State private var showByMode = false
@@ -1094,7 +1171,22 @@ struct InsightsV2View: View {
     }
 
     private var periodTrips: [Trip] {
-        loader.trips.filter { PeriodUtil.contains(kind: kind, monthOffset: monthOffset, from: fromDate.wrappedValue, to: toDate.wrappedValue, $0.date, since: corteEnergia) }
+        let base = loader.trips.filter { PeriodUtil.contains(kind: kind, monthOffset: monthOffset, from: fromDate.wrappedValue, to: toDate.wrappedValue, $0.date, since: corteEnergia) }
+        // Mesmo recorte da lista: a viagem atravessada conta só do corte pra cá.
+        if corteEnergia != nil, let p = parcial { return base + [p] }
+        return base
+    }
+
+    private func atualizaParcial() async {
+        let corte = corteEnergia
+        let chave = corte.map { "\(kind)@\($0.timeIntervalSince1970)" } ?? ""
+        guard chave != parcialChave else { return }
+        parcialChave = chave
+        guard let corte else { parcial = nil; return }
+        guard let atravessa = loader.trips.first(where: { $0.date < corte && $0.fim > corte }) else {
+            parcial = nil; return
+        }
+        parcial = await ParcialV2.recorta(atravessa, desde: corte)
     }
     // Período anterior comparável — só faz sentido no modo mês (delta do eco score).
     private var prevMonthTrips: [Trip] {
@@ -1131,10 +1223,18 @@ struct InsightsV2View: View {
         .background(DS.bg.ignoresSafeArea())
         .navigationTitle("Insights")
         .navigationBarTitleDisplayMode(.inline)
+        .onChange(of: kind) { Task { await atualizaParcial() } }
         .task {
             await loader.load()
             await charges.load()
             await refuels.load()
+            // Filtro ativo sem evento correspondente deixa a tela vazia e nenhum
+            // chip aceso — nada na barra explicaria o sumiço. Só depois dos dois
+            // loads, senão o primeiro frame (tudo nil) derrubaria uma escolha
+            // legítima.
+            if kind == PeriodUtil.kindSinceCharge, ultimaRecarga == nil { kind = 2 }
+            if kind == PeriodUtil.kindSinceRefuel, ultimoAbastecimento == nil { kind = 2 }
+            await atualizaParcial()
             #if DEBUG
             let d = UserDefaults.standard
             try? await Task.sleep(for: .seconds(0.4))

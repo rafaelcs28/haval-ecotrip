@@ -61,6 +61,18 @@ struct Trip: Identifiable {
     var harshAcc: Int { Int(n("harshAcc")) }
     var harshBrake: Int { Int(n("harshBrake")) }
     var outsideTemp: Double? { raw["outsideTemp"] == nil ? nil : n("outsideTemp") }
+    /// Fim da viagem. `endMs` quando o bridge mandou; senão início + duração.
+    var fim: Date {
+        let e = n("endMs")
+        return e > 0 ? Date(timeIntervalSince1970: e / 1000)
+                     : date.addingTimeInterval(timeSec)
+    }
+    /// Quando esta Trip é o RECORTE de uma viagem maior (ver ParcialV2), guarda o
+    /// instante do corte. Os números aqui são só do trecho depois dele.
+    var parcialDesde: Date? {
+        let v = n("_parcialDesde")
+        return v > 0 ? Date(timeIntervalSince1970: v / 1000) : nil
+    }
 }
 
 @MainActor
