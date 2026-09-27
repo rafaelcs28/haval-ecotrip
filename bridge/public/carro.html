@@ -674,6 +674,10 @@
       window.onCarDataUpdate('car.basic.low_beam_light_status', '1');
       window.onCarDataUpdate('car.basic.door_lock_status', '0');
     } else if (m) window.onCarDataUpdate(m[0], m[1]);
+    // `&farol=1` liga o farol junto de qualquer outro teste: `teste` aceita um
+    // valor só, e porta aberta COM farol aceso é justamente a combinação que se
+    // quer olhar.
+    if (qs.get('farol') === '1') window.onCarDataUpdate('car.basic.low_beam_light_status', '1');
   }, 3500);
 })();
 </script>

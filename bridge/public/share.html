@@ -24,7 +24,7 @@
   /* Sem moldura: o carro flutua sobre o mapa. O viewer já desenha com fundo
      transparente, então cartão aqui só acrescentava uma caixa preta. */
   .car3d { position:absolute; right:6px; bottom:var(--car3d-bottom, 190px); z-index:510;
-           width:132px; height:96px; cursor:pointer; transition:opacity .25s;
+           width:152px; height:110px; cursor:pointer; transition:opacity .25s;
            filter:drop-shadow(0 6px 10px rgba(0,0,0,.45)); }
   /* O iframe RECEBE o toque: é ele que gira o carro com o dedo. O toque simples
      volta pelo postMessage, porque evento de dentro do iframe não sobe pra cá. */
@@ -254,11 +254,14 @@
   <!-- Cinza: 17191c é MUITO mais escuro que o cinza que se quer ver. A lataria
        recebe ambiente claro e o tone mapping levanta o resultado, então 7c828a
        (um cinza de verdade) sai branco na tela e só um quase-preto lê como prata.
+       folga=1.30 (o padrão é 1.10): com porta e tampa abertas o carro cresce e
+       encostava nas bordas do quadro. Afasta a câmera o bastante pra caber
+       aberto, ao custo de ficar um tico menor fechado.
        SEM loading="lazy": o iframe nasce dentro de um container `hidden`, e
        iframe lazy invisível nunca é carregado — o viewer não rodava, logo
        `setCarState` não existia, logo o cartão nunca saía do hidden. Laço
        fechado, e a tela ficava sem o 3D sem erro nenhum no console. -->
-  <iframe id="car3d-frame" src="/carro.html?cor=17191c" title="Carro em 3D"></iframe>
+  <iframe id="car3d-frame" src="/carro.html?cor=17191c&folga=1.30" title="Carro em 3D"></iframe>
 </div>
 <div class="panel" id="panel">
   <!-- Alça de minimizar/restaurar: um toque esconde tudo menos a chegada. -->
@@ -740,8 +743,26 @@ function ajustaCar3d(){
 }
 window.addEventListener('resize', ajustaCar3d);
 
+// `?carro3d=portas,malas,farol,vidros,teto` (ou `tudo`) força o desenho, pra
+// conferir como o carro fica aberto sem depender de abrir o carro de verdade.
+// Vale só no desenho: nada disto volta pro carro nem mente sobre o estado real
+// em outro lugar da página.
+const CAR3D_FORCA = (() => {
+  const q = new URLSearchParams(location.search).get('carro3d');
+  if (!q) return null;
+  const tem = k => q === 'tudo' || q.split(',').includes(k);
+  const o = {};
+  if (tem('portas')) Object.assign(o, { porta_fl:true, porta_fr:true, porta_rl:true, porta_rr:true });
+  if (tem('malas'))  o.porta_malas = true;
+  if (tem('vidros')) Object.assign(o, { vidro_fl:true, vidro_fr:true, vidro_rl:true, vidro_rr:true });
+  if (tem('teto'))   o.teto = true;
+  if (tem('farol'))  o.farol = true;
+  return Object.keys(o).length ? o : null;
+})();
+
 function aplicaCar3d(estado){
   if (!estado) return;
+  if (CAR3D_FORCA) estado = Object.assign({}, estado, CAR3D_FORCA);
   // Só manda o que mudou: o viewer acumula, e reenviar tudo a cada segundo
   // reanimaria porta parada.
   const delta = {};
