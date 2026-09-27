@@ -210,6 +210,11 @@ enum TrajV2 {
 struct ViagensV2View: View {
     @ObservedObject private var loader = TripsLoader.shared
     @ObservedObject private var car = CarStore.shared
+    // Recargas e abastecimentos só pelo TOPO da lista: os filtros "desde a
+    // recarga"/"desde o abastecimento" precisam de uma data cada, não do
+    // histórico. Ambos os loaders leem de cache, então não custa uma tela.
+    @StateObject private var charges = ChargesLoader()
+    @StateObject private var refuels = RefuelsLoader()
     @AppStorage("via2_kind") private var kind = 2          // 0 hoje · 1 7d · 2 30d · 3 mês · 4 personalizado
     @AppStorage("via2_month") private var monthOffset = 0
     @AppStorage("via2_from") private var fromTS: Double = 0
@@ -266,6 +271,27 @@ struct ViagensV2View: View {
         }
     }
 
+    private func carregaEnergia() async {
+        await charges.load()
+        await refuels.load()
+    }
+
+    /// Diz QUAL evento está cortando a lista. Sem isso "desde a recarga" é uma
+    /// promessa sem data — e a lista encolhe sem explicar por quê.
+    private func corteLegenda(_ c: Date) -> some View {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "pt_BR")
+        f.dateFormat = Calendar.current.isDateInToday(c) ? "'hoje às' HH:mm" : "dd/MM 'às' HH:mm"
+        let evento = kind == PeriodUtil.kindSinceCharge ? "Recarga" : "Abastecimento"
+        return HStack(spacing: 5) {
+            Image(systemName: kind == PeriodUtil.kindSinceCharge ? "bolt.fill" : "fuelpump.fill")
+                .font(.system(size: 10, weight: .bold))
+            Text("\(evento) de \(f.string(from: c))")
+                .font(.system(size: 12, weight: .semibold))
+        }
+        .foregroundStyle(DS.muted)
+    }
+
     // remove ids órfãos (viagens que sumiram) dos overrides pra não crescer sem fim.
     private func pruneOverrides() {
         let valid = Set(loader.trips.map { $0.id })
@@ -276,10 +302,21 @@ struct ViagensV2View: View {
     private var fromDate: Binding<Date> { Binding(get: { fromTS > 0 ? Date(timeIntervalSince1970: fromTS) : Date() }, set: { fromTS = $0.timeIntervalSince1970 }) }
     private var toDate: Binding<Date> { Binding(get: { toTS > 0 ? Date(timeIntervalSince1970: toTS) : Date() }, set: { toTS = $0.timeIntervalSince1970 }) }
 
+    private var ultimaRecarga: Date? { charges.charges.first?.date }
+    private var ultimoAbastecimento: Date? { refuels.refuels.first?.date }
+    /// Corte dos modos "desde…" — nil nos modos de data, que não usam.
+    private var corteEnergia: Date? {
+        switch kind {
+        case PeriodUtil.kindSinceCharge: return ultimaRecarga
+        case PeriodUtil.kindSinceRefuel: return ultimoAbastecimento
+        default: return nil
+        }
+    }
+
     private var filtered: [Trip] {
         let q = search.trimmingCharacters(in: .whitespaces)
         if !q.isEmpty { return loader.trips.filter { loader.displayName($0).localizedCaseInsensitiveContains(q) } }
-        return loader.trips.filter { PeriodUtil.contains(kind: kind, monthOffset: monthOffset, from: fromDate.wrappedValue, to: toDate.wrappedValue, $0.date) }
+        return loader.trips.filter { PeriodUtil.contains(kind: kind, monthOffset: monthOffset, from: fromDate.wrappedValue, to: toDate.wrappedValue, $0.date, since: corteEnergia) }
     }
 
     var body: some View {
@@ -288,7 +325,9 @@ struct ViagensV2View: View {
                 VStack(alignment: .leading, spacing: 14) {
                     headerRow
                     hero
-                    PeriodFilterBar(kind: $kind, monthOffset: $monthOffset, earliest: loader.trips.last?.date)
+                    PeriodFilterBar(kind: $kind, monthOffset: $monthOffset, earliest: loader.trips.last?.date,
+                                    sinceCharge: ultimaRecarga, sinceRefuel: ultimoAbastecimento)
+                    if let c = corteEnergia { corteLegenda(c) }
                     if kind == 4 && search.isEmpty { PeriodCalendarCard(from: fromDate, to: toDate) }
                     if showSearch { searchBar }
                     if filtered.isEmpty {
@@ -304,9 +343,10 @@ struct ViagensV2View: View {
             .navigationTitle("Viagens")
             .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(isPresented: $showInsights) { InsightsV2View() }
-            .refreshable { await loader.load() }
+            .refreshable { await loader.load(); await carregaEnergia() }
             .task {
                 await loader.load()
+                await carregaEnergia()
                 pruneOverrides()
                 if let t = filtered.first, search.isEmpty { ensureLoaded(t) }
                 #if DEBUG
@@ -1017,6 +1057,10 @@ struct TrajetoV2Sheet: View {
 struct InsightsV2View: View {
     @ObservedObject private var loader = TripsLoader.shared
     @ObservedObject private var car = CarStore.shared
+    // Mesmos filtros da lista: aqui a pergunta é ainda mais direta — quanto
+    // rendeu ESTA carga, quanto rendeu ESTE tanque.
+    @StateObject private var charges = ChargesLoader()
+    @StateObject private var refuels = RefuelsLoader()
     @State private var showMilestones = false
     @State private var showReport = false
     @State private var showByMode = false
@@ -1038,8 +1082,19 @@ struct InsightsV2View: View {
     private var toDate: Binding<Date> { Binding(get: { toTS > 0 ? Date(timeIntervalSince1970: toTS) : Date() }, set: { toTS = $0.timeIntervalSince1970 }) }
     private var periodLabel: String { PeriodUtil.label(kind: kind, monthOffset: monthOffset) }
 
+    private var ultimaRecarga: Date? { charges.charges.first?.date }
+    private var ultimoAbastecimento: Date? { refuels.refuels.first?.date }
+    /// Corte dos modos "desde…" — nil nos modos de data, que não usam.
+    private var corteEnergia: Date? {
+        switch kind {
+        case PeriodUtil.kindSinceCharge: return ultimaRecarga
+        case PeriodUtil.kindSinceRefuel: return ultimoAbastecimento
+        default: return nil
+        }
+    }
+
     private var periodTrips: [Trip] {
-        loader.trips.filter { PeriodUtil.contains(kind: kind, monthOffset: monthOffset, from: fromDate.wrappedValue, to: toDate.wrappedValue, $0.date) }
+        loader.trips.filter { PeriodUtil.contains(kind: kind, monthOffset: monthOffset, from: fromDate.wrappedValue, to: toDate.wrappedValue, $0.date, since: corteEnergia) }
     }
     // Período anterior comparável — só faz sentido no modo mês (delta do eco score).
     private var prevMonthTrips: [Trip] {
@@ -1060,7 +1115,8 @@ struct InsightsV2View: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 hero
-                PeriodFilterBar(kind: $kind, monthOffset: $monthOffset, earliest: loader.trips.last?.date)
+                PeriodFilterBar(kind: $kind, monthOffset: $monthOffset, earliest: loader.trips.last?.date,
+                                sinceCharge: ultimaRecarga, sinceRefuel: ultimoAbastecimento)
                 if kind == 4 { PeriodCalendarCard(from: fromDate, to: toDate) }
                 HStack(spacing: 10) {
                     Button { showEcoScore = true } label: { ecoScoreCard }.buttonStyle(.plain)
@@ -1077,6 +1133,8 @@ struct InsightsV2View: View {
         .navigationBarTitleDisplayMode(.inline)
         .task {
             await loader.load()
+            await charges.load()
+            await refuels.load()
             #if DEBUG
             let d = UserDefaults.standard
             try? await Task.sleep(for: .seconds(0.4))

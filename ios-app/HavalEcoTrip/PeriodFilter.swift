@@ -6,12 +6,22 @@
 
 import SwiftUI
 
-// kind: 0 hoje · 1 7 dias · 2 30 dias · 3 mês (monthOffset) · 4 personalizado · 5 tudo
+// kind: 0 hoje · 1 7 dias · 2 30 dias · 3 mês (monthOffset) · 4 personalizado ·
+//       5 tudo · 6 desde a última recarga · 7 desde o último abastecimento
 enum PeriodUtil {
     /// kind reservado pra "sem filtro" (mostra tudo).
     static let kindAll = 5
+    /// Janelas que não são data: o corte é o último evento de energia. É a
+    /// pergunta que o dono faz de verdade ("quanto rendeu essa carga?"), e ela
+    /// não cai em nenhum intervalo de calendário.
+    static let kindSinceCharge = 6
+    static let kindSinceRefuel = 7
 
-    static func contains(kind: Int, monthOffset: Int, from: Date, to: Date, _ date: Date, now: Date = Date()) -> Bool {
+    /// - Parameter since: data do evento de corte para os modos 6 e 7. Sem ela
+    ///   esses modos não filtram nada — e devolver `true` mostraria o histórico
+    ///   inteiro sob um rótulo que promete o contrário, então devolvem `false`.
+    static func contains(kind: Int, monthOffset: Int, from: Date, to: Date, _ date: Date,
+                         now: Date = Date(), since: Date? = nil) -> Bool {
         let cal = Calendar.current
         switch kind {
         case 0: return cal.isDateInToday(date)
@@ -21,6 +31,9 @@ enum PeriodUtil {
             let d = cal.date(byAdding: .month, value: -monthOffset, to: now) ?? now
             return cal.isDate(date, equalTo: d, toGranularity: .month)
         case kindAll: return true            // sem filtro — tudo passa
+        case kindSinceCharge, kindSinceRefuel:
+            guard let since else { return false }
+            return date >= since
         default:
             let lo = cal.startOfDay(for: from)
             let hi = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: to)) ?? to
@@ -36,6 +49,8 @@ enum PeriodUtil {
         case 2: return "30 dias"
         case 3: return monthLabel(monthOffset)
         case kindAll: return "tudo"
+        case kindSinceCharge: return "desde a recarga"
+        case kindSinceRefuel: return "desde o abastecimento"
         default: return "período"
         }
     }
@@ -62,6 +77,10 @@ struct PeriodFilterBar: View {
     @Binding var kind: Int
     @Binding var monthOffset: Int
     let earliest: Date?
+    /// Data da última recarga / do último abastecimento. Nil esconde o chip —
+    /// oferecer "desde a recarga" sem recarga nenhuma só produz lista vazia.
+    var sinceCharge: Date? = nil
+    var sinceRefuel: Date? = nil
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -79,6 +98,11 @@ struct PeriodFilterBar: View {
                     .background(kind == PeriodUtil.kindAll ? DS.green.opacity(0.10) : DS.panel2, in: Capsule())
                     .overlay(Capsule().stroke(kind == PeriodUtil.kindAll ? DS.green.opacity(0.5) : .clear, lineWidth: 1))
                 }.buttonStyle(.plain)
+                // Logo depois de "Tudo", e não no fim: dois chips largos ("Desde
+                // a recarga"/"Desde o abastecimento") ficariam fora da tela, e a
+                // barra já corta em ~"Personalizado" no iPhone. Um menu só, no
+                // mesmo molde do de mês, cabe e diz qual está ativo.
+                if sinceCharge != nil || sinceRefuel != nil { energiaMenu }
                 chip("Hoje", 0)
                 chip("7 dias", 1)
                 chip("30 dias", 2)
@@ -89,8 +113,31 @@ struct PeriodFilterBar: View {
         }
     }
 
-    private func chip(_ label: String, _ k: Int) -> some View {
-        Button { kind = k } label: { pill(label, on: kind == k) }.buttonStyle(.plain)
+    private func chip(_ label: String, _ k: Int, icon: String? = nil) -> some View {
+        Button { kind = k } label: { pill(label, on: kind == k, icon: icon) }.buttonStyle(.plain)
+    }
+
+    private var energiaAtiva: Bool {
+        kind == PeriodUtil.kindSinceCharge || kind == PeriodUtil.kindSinceRefuel
+    }
+
+    private var energiaMenu: some View {
+        Menu {
+            if sinceCharge != nil {
+                Button { kind = PeriodUtil.kindSinceCharge } label: {
+                    Label("Última recarga", systemImage: "bolt.fill")
+                }
+            }
+            if sinceRefuel != nil {
+                Button { kind = PeriodUtil.kindSinceRefuel } label: {
+                    Label("Último abastecimento", systemImage: "fuelpump.fill")
+                }
+            }
+        } label: {
+            pill(energiaAtiva ? PeriodUtil.label(kind: kind, monthOffset: 0).capitalizedFirst : "Desde…",
+                 on: energiaAtiva, chevron: true,
+                 icon: kind == PeriodUtil.kindSinceRefuel ? "fuelpump.fill" : "bolt.fill")
+        }
     }
 
     private var monthMenu: some View {
@@ -103,8 +150,9 @@ struct PeriodFilterBar: View {
         }
     }
 
-    private func pill(_ label: String, on: Bool, chevron: Bool = false) -> some View {
+    private func pill(_ label: String, on: Bool, chevron: Bool = false, icon: String? = nil) -> some View {
         HStack(spacing: 4) {
+            if let icon { Image(systemName: icon).font(.system(size: 10, weight: .bold)) }
             Text(label).font(.system(size: 12, weight: .bold))
             if chevron { Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold)) }
         }
@@ -152,4 +200,10 @@ struct PeriodCalendarCard: View {
         }
         .onChange(of: localTo) { _, v in to = v }
     }
+}
+
+private extension String {
+    /// "desde a recarga" → "Desde a recarga". Os rótulos do PeriodUtil nascem
+    /// minúsculos porque vivem no meio de frase ("32 km em 30 dias").
+    var capitalizedFirst: String { isEmpty ? self : prefix(1).uppercased() + dropFirst() }
 }
