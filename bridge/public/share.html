@@ -28,18 +28,11 @@
            filter:drop-shadow(0 6px 10px rgba(0,0,0,.45)); }
   .car3d iframe { width:100%; height:100%; border:0; display:block; background:transparent;
                   pointer-events:none; }
-  /* Rótulo some depois do primeiro toque — serve pra descobrir, não pra morar lá.
-     Sem faixa atrás: contorno no próprio texto, que é o que dá pra ler tanto
-     sobre mapa claro quanto sobre parque verde. */
-  .car3d .dica { position:absolute; left:0; right:0; bottom:-2px; text-align:center;
-                 font-size:9.5px; font-weight:800; letter-spacing:.3px; color:#fff;
-                 text-shadow:0 1px 3px rgba(0,0,0,.9), 0 0 2px rgba(0,0,0,.9); }
   /* Ampliado ganha fundo: aí sim precisa separar o carro do mapa pra enxergar. */
   .car3d.grande { right:10px; left:10px; bottom:10px; width:auto; height:62vh;
                   background:rgba(11,13,16,.92); border-radius:16px; filter:none;
                   border:1px solid rgba(255,255,255,.10); }
   .car3d.grande iframe { pointer-events:auto; }
-  .car3d.grande .dica { display:none; }
   /* Retrospectiva: o que o link vira depois que a viagem acaba. Mesma linguagem
      do painel, mas centrado e sem nada ao vivo — não é mais um monitor. */
   .retro { position:absolute; inset:0; z-index:900; display:none; align-items:flex-end;
@@ -266,7 +259,6 @@
        `setCarState` não existia, logo o cartão nunca saía do hidden. Laço
        fechado, e a tela ficava sem o 3D sem erro nenhum no console. -->
   <iframe id="car3d-frame" src="/carro.html?cor=17191c" title="Carro em 3D"></iframe>
-  <div class="dica" id="car3d-dica">toque pra ampliar</div>
 </div>
 <div class="panel" id="panel">
   <!-- Alça de minimizar/restaurar: um toque esconde tudo menos a chegada. -->
@@ -730,8 +722,6 @@ let car3dPronto = false, car3dUlt = null;
 
 car3d.addEventListener('click', () => {
   car3d.classList.toggle('grande');
-  const d = document.getElementById('car3d-dica');
-  if (d) d.remove();
   // O canvas precisa saber que mudou de tamanho; o viewer escuta resize.
   setTimeout(() => { try { car3dFrame.contentWindow.dispatchEvent(new Event('resize')); } catch(_){} }, 260);
 });
