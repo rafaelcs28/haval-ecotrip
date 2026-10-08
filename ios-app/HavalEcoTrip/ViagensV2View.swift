@@ -669,6 +669,12 @@ struct ViagensV2View: View {
 
     private static let hm: DateFormatter = { let f = DateFormatter(); f.dateFormat = "HH:mm"; return f }()
 
+    /// "47min" ou "1h16". Sem segundos: numa viagem eles não decidem nada.
+    static func duracao(_ seg: Double) -> String {
+        let m = Int((seg / 60).rounded())
+        return m >= 60 ? "\(m / 60)h\(String(format: "%02d", m % 60))" : "\(m)min"
+    }
+
     private func tripCard(_ t: Trip, expanded: Bool) -> some View {
         let d = featCache[t.tripId]
         let cost = t.cost(car.priceKwh, car.priceGas)
@@ -711,6 +717,9 @@ struct ViagensV2View: View {
                     } else {
                         featTile("KM/L EQUIV.", t.kmPerLEq > 0 ? Fmt.dec1(t.kmPerLEq) : "—", "km/L", DS.green)
                     }
+                    // O subtítulo já traz "13:27 – 13:48", mas quem olha o card quer a
+                    // duração, não a conta de cabeça.
+                    featTile("TEMPO", Self.duracao(t.timeSec), "", DS.text)
                 }
                 if t.fuelL >= 0.05 {
                     HStack(spacing: 8) {
