@@ -616,6 +616,16 @@ struct ViagensV2View: View {
         let cost = f.reduce(0.0) { $0 + $1.cost(car.priceKwh, car.priceGas) }
         let evKm = f.filter { $0.fuelL < 0.05 }.reduce(0.0) { $0 + $1.distKm }
         let evPct = km > 0 ? Int((evKm / km * 100).rounded()) : 0
+        let litros = f.reduce(0.0) { $0 + $1.fuelL }
+        // Consumo DO PERÍODO: soma primeiro, divide depois. Média das médias por
+        // viagem pesaria igual um pulo até a padaria e uma ida a Barra do Garças.
+        let kwh100 = km > 0.5 ? kwh / km * 100 : 0
+        // km/L equivalente converte a energia elétrica em gasolina pela mesma
+        // constante do card (8,9 kWh/L). km/L cru não entra: num período misto ele
+        // divide quilômetro rodado no elétrico por litro queimado no motor, e sai
+        // um número lisonjeiro que não descreve nada.
+        let litrosEq = litros + kwh / 8.9
+        let kmPorLeq = (km > 0.5 && litrosEq > 0.05) ? km / litrosEq : 0
         return HStack(alignment: .firstTextBaseline) {
             HStack(alignment: .firstTextBaseline, spacing: 4) {
                 Text(Fmt.int(km))
@@ -630,6 +640,22 @@ struct ViagensV2View: View {
                     .font(.system(size: 12.5, weight: .bold)).foregroundStyle(DS.green)
                 Text("\(Fmt.dec1(kwh)) kWh · \(Fmt.brl(cost))")
                     .font(.system(size: 11.5)).foregroundStyle(DS.text2)
+                if kwh100 > 0 || kmPorLeq > 0 {
+                    HStack(spacing: 5) {
+                        if kwh100 > 0 {
+                            Text("\(Fmt.dec1(kwh100)) kWh/100km")
+                                .font(.system(size: 11.5, weight: .semibold)).foregroundStyle(DS.teal)
+                        }
+                        if kwh100 > 0 && kmPorLeq > 0 {
+                            Text("·").font(.system(size: 11.5)).foregroundStyle(DS.muted)
+                        }
+                        if kmPorLeq > 0 {
+                            Text("\(Fmt.dec1(kmPorLeq)) km/L eq")
+                                .font(.system(size: 11.5, weight: .semibold)).foregroundStyle(DS.green)
+                        }
+                    }
+                    .lineLimit(1).minimumScaleFactor(0.75)
+                }
             }
         }
     }
