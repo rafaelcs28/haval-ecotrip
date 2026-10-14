@@ -6053,13 +6053,76 @@ async function _fetchBluettiStatusHA() {
 // Fonte efetiva: cloud primeiro (é o dado sem intermediário), HA como rede de
 // segurança. Com BLUETTI_SOURCE=cloud não cai pro HA nunca (útil pra validar que
 // a integração própria está de pé sozinha); com =ha volta ao comportamento antigo.
+// ── Reserva: Bluetti do sítio por Bluetooth, pelo HA de lá ──────────────────
+// Integração `Patrick762/hassio-bluetti-bt` (28/09/2026). Serve pro caso oposto
+// ao da queda de energia: nuvem Bluetti fora COM o sítio de pé — aí a nuvem nos
+// cegava pra bateria e o BT enxerga.
+//
+// NÃO vira primária: o caminho BT morre junto com o computador do HA do sítio,
+// e é exatamente aí que a leitura da bateria é a única testemunha do que houve.
+//
+// O que o BT NÃO entrega, e por isso fica null: autonomia, tempo até carga
+// cheia, estado da saída AC e modo de operação. `null` é a resposta honesta —
+// o alerta preditivo `sitio_vai_apagar` depende de autonomia e simplesmente não
+// dispara com dado de BT, em vez de disparar com número inventado.
+const BT_SITIO = 'sensor.elite_100_v2_sitio_';
+async function _bluettiSitioViaBT() {
+  const tok = process.env.HA_SITIO_TOKEN;
+  const url = (process.env.HA_SITIO_URL || '').replace(/\/$/, '');
+  if (!tok || !url) return null;
+  try {
+    const r = await fetch(`${url}/api/states`, {
+      headers: { Authorization: `Bearer ${tok}` },
+      signal: AbortSignal.timeout(6000),
+    });
+    if (!r.ok) return null;
+    const arr = await r.json();
+    const num = (suf) => {
+      const x = arr.find(e => e.entity_id === BT_SITIO + suf);
+      if (!x || x.state === 'unknown' || x.state === 'unavailable') return null;
+      const n = +x.state; return Number.isFinite(n) ? n : null;
+    };
+    const batt = num('carga_da_bateria_soc');
+    if (batt == null) return null;            // sem SOC não há leitura útil
+    return {
+      ..._BLUETTI.sitio,
+      battery_pct: batt,
+      ac_out_w:  num('potencia_de_saida_ca'),
+      dc_out_w:  num('potencia_de_saida_cc'),
+      grid_in_w: num('potencia_de_entrada_ca'),
+      // Entrada CC pode ser solar OU carregador — o BT não distingue. Vai como
+      // `dc_in_w`, campo próprio, em vez de mentir que é `pv_in_w`.
+      dc_in_w:   num('potencia_de_entrada_cc'),
+      pv_in_w:   null,
+      tensao_ca_v: num('tensao_de_entrada_ca'),   // só o BT tem — queda antecede apagão
+      battery_time_min: null, full_charge_min: null,
+      ac_on: null, dc_on: null, working_mode: null,
+      reachable: true, fonte: 'bt',
+    };
+  } catch (_) { return null; }
+}
+
 async function _fetchBluettiStatus() {
+  let d = null;
   if (_BLUETTI_SOURCE !== 'ha') {
-    const c = _bluettiFromCloud();
-    if (c) return c;
-    if (_BLUETTI_SOURCE === 'cloud') return null;
+    d = _bluettiFromCloud();
+    if (!d && _BLUETTI_SOURCE === 'cloud') return null;
   }
-  return _fetchBluettiStatusHA();
+  if (!d) d = await _fetchBluettiStatusHA();
+  // Carimba a origem de cada estação: com três caminhos possíveis, o número sem
+  // procedência é número que não dá pra conferir.
+  if (d) for (const k of ['casa', 'sitio'])
+    if (d[k] && !d[k].fonte) d[k].fonte = d.source || 'cloud';
+  // Só o sítio tem BT, e só entra quando o caminho principal não trouxe leitura.
+  if (!d || !d.sitio?.reachable) {
+    const bt = await _bluettiSitioViaBT();
+    if (bt) {
+      d = d || { ts: Date.now(), source: 'bt' };
+      d.sitio = bt;
+      console.log('[bluetti] sítio pela reserva Bluetooth (nuvem/HA sem leitura)');
+    }
+  }
+  return d;
 }
 // Poll servidor-side a cada 30s: 1 fetch pra alimentar UI + watchdog. Endpoint
 // e alertas ambos leem `_bluettiState` mais recente sem hammer no HA.
@@ -6171,23 +6234,6 @@ function _evalBluettiAlerts() {
   for (const key of ['casa', 'sitio']) {
     const s = _bluettiState[key]; if (!s) continue;
     _pushBluettiHist(key, s.battery_pct);
-    if (key === 'sitio') {
-      // Guarda o último estado BOM: quando o sítio emudecer, é ele que vai
-      // dizer se foi a bateria ou o link.
-      _lembraSitio();
-      // O único aviso acionável sobre a bateria do sítio sai ANTES de apagar.
-      // Depois não há o que fazer remoto — e, pior, não haverá quem avise:
-      // Starlink, HA e a própria Bluetti caem juntos e o sítio fica mudo.
-      const aut = s.battery_time_min;
-      const perto = s.offgrid === true && s.reachable && aut != null && aut > 0 && aut <= 180;
-      _alert('sitio_vai_apagar', perto,
-        '🔌 Sítio vai ficar sem energia',
-        `Bluetti do sítio em ${s.battery_pct}% e descarregando — ` +
-        `~${Math.round(aut / 60)}h${String(aut % 60).padStart(2, '0')} de autonomia. ` +
-        `Quando acabar, Starlink, HA e roteador caem juntos e o sítio fica ` +
-        `incomunicável: este é o último aviso que consegue sair.`,
-        'urgent', ['battery', 'warning'], { repeatEvery: 30 * 60_000 });
-    }
     const emoji = key === 'casa' ? '🏠 Casa' : '🌱 Sítio';
     const feeds = s.feeds || (key === 'casa' ? 'Mac Mini + Roteador' : 'Starlink');
     const unreachable = !s.reachable;
@@ -6218,6 +6264,70 @@ function _evalBluettiAlerts() {
     // Grava no estado: `/api/bluetti-status`, `/api/wall` e a página de health
     // têm que ler o MESMO veredito. Cada um recalculando é como divergem.
     s.offgrid = (_bluettiHist[key]?.length || 0) < 3 ? null : offgrid;
+    // MOVIDO pra cá em 30/09/2026: este bloco lia `s.offgrid` ANTES de ele
+    // ser calculado (72 linhas abaixo) — o campo chegava `undefined`, então
+    // `sitio_vai_apagar`, `_lembraSitio` e o aviso à família NUNCA disparavam.
+    // Ordem importa: só existe veredito depois de `s.offgrid` receber valor.
+    if (key === 'sitio') {
+      // Guarda o último estado BOM: quando o sítio emudecer, é ele que vai
+      // dizer se foi a bateria ou o link.
+      _lembraSitio();
+      // Aviso à família: dispara na TRANSIÇÃO pra offgrid confirmado, nunca a
+      // cada ciclo. `offgrid` já vem com histerese do bridge (3 leituras +
+      // bateria caindo), então um piscão de rede não vira mensagem.
+      // Duas esperas de 10 min, uma por sentido. `offgrid` já vem com histerese
+      // do bridge; isto é a segunda camada, de propósito — a mensagem vai pra
+      // seis pessoas e não tem como desfazer.
+      // Carimbos do episódio, atualizados a cada leitura — é deles que saem as
+      // horas das mensagens.
+      {
+        const agora = Date.now();
+        const temRede = (s.grid_in_w ?? 0) > 0;
+        if (temRede) {
+          if (_famEstado === 'avisado' && _famVoltouAs == null) _famVoltouAs = agora;
+          _famUltimaRedeOk = agora;
+        }
+        if (s.offgrid === true && _famFaltaDesde == null)
+          // Se o bridge reiniciou no meio da falta, o horário salvo em disco
+          // preserva a hora real da queda — senão a mensagem sairia sem ela.
+          _famFaltaDesde = _famUltimaRedeOk ?? _famFaltaDesdeSalvo;
+        // Bridge subiu COM a falta em curso (nunca vimos rede desde o boot):
+        // adota o episódio como JÁ ANUNCIADO. Anunciar uma queda que começou
+        // antes de existirmos seria avisar tarde e sem hora — e a família já
+        // soube por outro caminho. O retorno, esse sim, será anunciado.
+        if (s.offgrid === true && _famUltimaRedeOk == null && _famEstado === 'normal') {
+          _famEstado = 'avisado'; _salvaFamEstado();
+          console.log('[familia] falta já em curso no boot — adotada como avisada; anuncio só o retorno');
+        }
+      }
+      if (s.offgrid != null) {
+        const faltou = _sustained('fam_falta', true, s.offgrid === true, FAM_ESPERA);
+        const voltou = _sustained('fam_volta', true, s.offgrid === false, FAM_ESPERA_VOLTA);
+        if (faltou && _famEstado === 'normal') {
+          _famEstado = 'avisado'; _salvaFamEstado();
+          _avisaFamiliaSitio(s, false, 'falta').then(r =>
+            console.log('[familia] falta:', r.enviado ? 'enviado' : 'NÃO enviado — ' + r.motivo));
+        } else if (voltou && _famEstado === 'avisado') {
+          _famEstado = 'normal'; _salvaFamEstado();
+          _avisaFamiliaSitio(s, false, 'volta').then(r => {
+            console.log('[familia] retorno:', r.enviado ? 'enviado' : 'NÃO enviado — ' + r.motivo);
+            _famFaltaDesde = null; _famVoltouAs = null;   // episódio encerrado
+          });
+        }
+      }
+      // O único aviso acionável sobre a bateria do sítio sai ANTES de apagar.
+      // Depois não há o que fazer remoto — e, pior, não haverá quem avise:
+      // Starlink, HA e a própria Bluetti caem juntos e o sítio fica mudo.
+      const aut = s.battery_time_min;
+      const perto = s.offgrid === true && s.reachable && aut != null && aut > 0 && aut <= 180;
+      _alert('sitio_vai_apagar', perto,
+        '🔌 Sítio vai ficar sem energia',
+        `Bluetti do sítio em ${s.battery_pct}% e descarregando — ` +
+        `~${Math.round(aut / 60)}h${String(aut % 60).padStart(2, '0')} de autonomia. ` +
+        `Quando acabar, Starlink, HA e roteador caem juntos e o sítio fica ` +
+        `incomunicável: este é o último aviso que consegue sair.`,
+        'urgent', ['battery', 'warning'], { repeatEvery: 30 * 60_000 });
+    }
     // 2. AC desligado — dispositivos ligados apagaram agora. Urgentíssimo.
     _alert(`bluetti_${key}_ac_off`, acOff,
       `${emoji} — AC DESLIGADO`,
@@ -6441,6 +6551,106 @@ const _slAllAbove = (arr, lim) => arr.length === 3 && arr.every(v => v > lim);
 //   2. DEPOIS: tudo do sítio emudece JUNTO. Isso não prova "acabou a bateria"
 //      (queda de link puro dá a mesma assinatura), mas o último estado conhecido
 //      da bateria diz qual das duas é provável.
+// ── Aviso à família quando falta luz no sítio ───────────────────────────────
+// Sai pelo WhatsApp PESSOAL (instância Recados "Pessoal"), não pelo da empresa.
+//
+// Desarmado por padrão: `AVISA_FAMILIA_SITIO=1` liga. Mandar mensagem pra um
+// grupo de 6 pessoas é ação de fora pra dentro — não entra no ar sem alguém
+// dizer que pode.
+const FAM_LIGADO   = process.env.AVISA_FAMILIA_SITIO === '1';
+const FAM_GRUPO    = process.env.AVISA_FAMILIA_GRUPO || '556492410886-1561977481@g.us';
+const FAM_RECADOS  = process.env.AVISA_FAMILIA_RECADOS || 'http://127.0.0.1:3061';
+// Espera de 10 min dos DOIS lados: avisa falta que NÃO voltou em 10 minutos, e
+// avisa retorno que se manteve 10 minutos. Piscão não vira mensagem no grupo da
+// família — que é o jeito mais rápido de fazer todo mundo silenciar o grupo.
+// Esperas assimétricas de propósito: 10 min pra anunciar a falta (o piscão que
+// volta sozinho não merece mensagem), 5 pra anunciar o retorno (a boa notícia
+// pode chegar mais cedo, e o custo de errar é menor).
+const FAM_ESPERA       = +(process.env.AVISA_FAMILIA_ESPERA_MIN || 10) * 60_000;
+const FAM_ESPERA_VOLTA = +(process.env.AVISA_FAMILIA_ESPERA_VOLTA_MIN || 5) * 60_000;
+// Episódio: só manda "voltou" se tiver mandado "faltou" antes.
+//
+// PERSISTIDO em disco: um restart do bridge no meio de um apagão zerava o
+// estado, e aí o aviso de retorno não saía — aconteceu em 30/09/2026, com a luz
+// voltando dois minutos depois de um deploy meu. O episódio é mais longo que a
+// vida do processo, então não pode morar só na memória.
+const FAM_ESTADO_FILE = path.join(DATA_DIR, 'familia-episodio.json');
+let _famEstado = 'normal';   // 'normal' | 'avisado'
+try {
+  const j = JSON.parse(fs.readFileSync(FAM_ESTADO_FILE, 'utf8'));
+  if (j && (j.estado === 'normal' || j.estado === 'avisado')) {
+    _famEstado = j.estado;
+    if (j.falta_desde) _famFaltaDesdeSalvo = j.falta_desde;
+  }
+} catch (_) {}
+function _salvaFamEstado() {
+  try { atomicWriteFileSync(FAM_ESTADO_FILE,
+    JSON.stringify({ estado: _famEstado, falta_desde: _famFaltaDesde, em: Date.now() })); }
+  catch (_) {}
+}
+// A mensagem diz a hora em que a luz CAIU, não a hora em que ela é enviada —
+// há 10 minutos de espera entre as duas, e "desde às 14:25" quando caiu 14:15
+// seria mentira pequena e evitável.
+//
+// `_famUltimaRedeOk` é o último instante com rede CONFIRMADA (grid_in_w > 0).
+// É o limite superior honesto pro início da falta: entre ele e a confirmação do
+// offgrid não dá pra saber o minuto exato, e esse é o mais próximo que temos.
+let _famUltimaRedeOk = null, _famFaltaDesde = null, _famVoltouAs = null;
+let _famFaltaDesdeSalvo = null;   // recuperado do disco no boot
+
+const _hhmm = (ms) => ms == null ? null
+  : new Date(ms).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+
+const _hm = (min) => min == null ? null
+  : `${Math.floor(min / 60)}h${String(Math.round(min % 60)).padStart(2, '0')}min`;
+
+/** Textos. Separados pra dar pra ver antes de mandar. */
+function _textoAvisoFamilia(b, tipo = 'falta') {
+  const pct = b?.battery_pct, aut = _hm(b?.battery_time_min);
+  if (tipo === 'volta') {
+    const q = _hhmm(_famVoltouAs);
+    return [
+      `\u2705 A luz voltou no s\u00edtio${q ? ` \u00e0s ${q}` : ''}.`,
+      pct != null ? `\ud83d\udd0b Bateria: ${pct}% e recarregando.` : '\ud83d\udd0b Bateria: sem leitura.',
+    ].join('\n');
+  }
+  // Sem hora conhecida (bridge subiu no meio da falta), a linha sai SEM o
+  // "desde" em vez de inventar um horário.
+  const d = _hhmm(_famFaltaDesde);
+  return [
+    `\u26a1 Est\u00e1 faltando luz no s\u00edtio${d ? ` desde \u00e0s ${d}` : ''}.`, '',
+    pct != null ? `\ud83d\udd0b Bateria: ${pct}%` : '\ud83d\udd0b Bateria: sem leitura',
+    aut ? `\u23f3 Autonomia estimada: ${aut}` : null, '',
+    'A esta\u00e7\u00e3o est\u00e1 segurando a internet.',
+    'Aviso autom\u00e1tico \u2014 mando outra quando a luz voltar.',
+  ].filter(x => x !== null).join('\n');
+}
+
+
+async function _avisaFamiliaSitio(b, forcar = false, tipo = 'falta') {
+  if (!FAM_LIGADO && !forcar) return { enviado: false, motivo: 'desarmado (AVISA_FAMILIA_SITIO≠1)' };
+  const agora = Date.now();
+  const texto = _textoAvisoFamilia(b, tipo);
+  try {
+    const r = await fetch(`${FAM_RECADOS}/api/recado`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + BRIDGE_TOKEN_HASH },
+      body: JSON.stringify({ destinos: [{ numero: FAM_GRUPO, nome: 'Família Buscapé' }],
+                             texto, quando_ms: agora }),
+      signal: AbortSignal.timeout(10000),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.erro || `HTTP ${r.status}`);
+    _recordHealthEvent('familia_aviso_sitio',
+      `Aviso de ${tipo === 'volta' ? 'retorno' : 'falta'} de energia enviado ao grupo da família`);
+    return { enviado: true, id: j.id, texto };
+  } catch (e) {
+    // Falhar aqui NÃO pode derrubar a avaliação de alertas do bridge.
+    console.error('[familia] aviso não saiu:', e.message);
+    return { enviado: false, motivo: e.message, texto };
+  }
+}
+
 let _sitioUltimo = null;   // { pct, offgrid, autonomia_min, ts } — última leitura boa
 
 function _lembraSitio() {
@@ -6509,6 +6719,21 @@ function _evalStarlinkAlerts() {
                       'starlink_ping_drop', 'starlink_latency'])
       _alert(id, false, '', '', 'default', []);
     return;
+  }
+
+  // Disco do computador do sítio. Falha silenciosa clássica: o HA para de
+  // gravar histórico, depois para de vez — e como ele é o dead-man's-switch do
+  // Mac Mini, cair ali cega DUAS coisas. Ninguém olhava isso até 28/09/2026.
+  {
+    const liv = d.disco_livre_gb, tot = d.disco_total_gb;
+    const pct = (liv != null && tot) ? (liv / tot * 100) : null;
+    _alert('sitio_disco_cheio', pct != null && pct < 15,
+      '💾 Disco do computador do sítio enchendo',
+      `Restam ${liv} GB de ${tot} GB (${pct == null ? '—' : pct.toFixed(0)}% livre). ` +
+      `Esse computador roda o HA do sítio, que é quem vigia o Mac Mini de fora — ` +
+      `se ele parar, o monitoramento externo para junto.`,
+      pct != null && pct < 7 ? 'urgent' : 'high', ['floppy_disk', 'warning'],
+      { repeatEvery: 12 * 3600_000 });
   }
 
   // 2. HA responde mas as entidades estão unavailable = dish não responde ao gRPC.
@@ -7108,15 +7333,84 @@ function _detectPowerDrop(key, currentW, daytime) {
   return caiu;
 }
 const _quedaMotivo = {};
-function _isLowGenDay(key, todayKwh) {
-  if (todayKwh == null || todayKwh < 0) return false;
+const LOW_DAY_RATIO  = Number(process.env.SOLAR_LOW_DAY_RATIO  || 0.4);   // dia ruim DESTA usina
+const REGIONAL_RATIO = Number(process.env.SOLAR_REGIONAL_RATIO || 0.75);  // vizinha também abatida
+// Quão pior que as vizinhas esta usina pode estar e ainda ser "só clima".
+const REGIONAL_PROPORCAO = Number(process.env.SOLAR_REGIONAL_PROPORCAO || 0.5);
+
+// Razão entre o kWh de hoje e a MEDIANA da própria usina. É o que torna as três
+// comparáveis: Catalão, Ivonei e Palmeiras têm tamanhos diferentes, então kWh
+// absoluto não diz nada entre elas — a fração do próprio normal, sim.
+function _razaoDoDia(key, todayKwh) {
+  if (todayKwh == null || todayKwh < 0) return null;
   const arr = (_solarHistory[key] || []).slice(-14);
-  if (arr.length < 5) return false;                 // histórico insuficiente
+  if (arr.length < 5) return null;                  // histórico insuficiente
   const past = arr.map(x => x.kwh).sort((a, b) => a - b);
   const median = past[Math.floor(past.length / 2)];
-  if (median <= 0) return false;
-  return todayKwh < median * 0.4;                   // <40% da mediana = dia problema
+  if (median <= 0) return null;
+  return todayKwh / median;
 }
+
+function _isLowGenDay(key, todayKwh) {
+  const r = _razaoDoDia(key, todayKwh);
+  return r != null && r < LOW_DAY_RATIO;            // <40% da mediana = dia problema
+}
+
+const _kwhHoje = {};   // { key: {kwh, ts} } — preenchido por _evalSolarAnomalies
+
+// O discriminador NÃO é a nuvem, é a vizinhança.
+//
+// Céu encoberto sozinho não pode calar o alerta: num dia nublado uma string
+// caída gera igualmente pouco, e silenciar por nuvem faria a falha real sumir
+// justamente quando é mais difícil de notar. Já três usinas em CIDADES
+// DIFERENTES com o dia igualmente baixo não é coincidência — é frente de chuva.
+//
+// Usina sem leitura recente não vota, nem a favor nem contra: ausência de dado
+// não é evidência de clima bom nem de clima ruim.
+function _climaRegional(key) {
+  const outras = ['catalao', 'ivonei', 'palmeiras'].filter(k => k !== key);
+  const avaliadas = [], abatidas = [];
+  for (const k of outras) {
+    const reg = _kwhHoje[k];
+    if (!reg || Date.now() - reg.ts > 60 * 60_000) continue;   // leitura velha não vota
+    const r = _razaoDoDia(k, reg.kwh);
+    if (r == null) continue;
+    avaliadas.push(k);
+    // Régua da vizinha é REGIONAL_RATIO, não LOW_DAY_RATIO. São perguntas
+    // diferentes: "esta usina teve um dia ruim?" (40%) e "a vizinha também está
+    // abatida?" (75%). Usar 40% nas duas fazia Palmeiras a 62% — claramente
+    // debaixo do mesmo temporal — contar como prova CONTRA o clima, e o alerta
+    // voltava nas outras duas.
+    if (r < REGIONAL_RATIO) abatidas.push(k);
+  }
+  // Basta UMA vizinha gerando normal pra derrubar a tese de clima: se chove em
+  // todo lugar menos ali, o problema é local.
+  const todasAbatidas = avaliadas.length > 0 && abatidas.length === avaliadas.length;
+
+  // E não basta estarem todas abatidas: a queda tem que ser PROPORCIONAL.
+  // Uma usina a 2% com as vizinhas a 61% está debaixo da mesma chuva e ainda
+  // assim quebrada — o clima explica parte, não o buraco. Sem esta guarda, um
+  // inversor morto num dia nublado sumia justamente quando é mais difícil de
+  // perceber pelo gráfico.
+  const minha = _razaoDoDia(key, _kwhHoje[key]?.kwh);
+  const rv = avaliadas.map(k => _razaoDoDia(k, _kwhHoje[k].kwh)).filter(v => v != null).sort((a, b) => a - b);
+  // Mediana de verdade: com DUAS vizinhas, `rv[length/2]` devolveria a maior
+  // delas, não o meio — e a usina do meio de um dia nublado virava alerta por
+  // ser comparada só com a vizinha mais ensolarada.
+  const medVizinhas = !rv.length ? null
+    : rv.length % 2 ? rv[(rv.length - 1) / 2]
+                    : (rv[rv.length / 2 - 1] + rv[rv.length / 2]) / 2;
+  const proporcional = minha != null && medVizinhas != null
+    ? minha >= medVizinhas * REGIONAL_PROPORCAO
+    : true;   // sem base de comparação não inventa desproporção
+
+  return { avaliadas, abatidas, minha, medVizinhas, proporcional,
+           explica: todasAbatidas && proporcional };
+}
+
+// Dia baixo que o clima explica continua visível na parede — só não notifica.
+// Calar o alerta não pode apagar o dado.
+const _diaBaixoJustificado = {};   // { key: {razao, nuvemPct, vizinhas, ts} }
 // Depois das 15h da tarde já dá pra saber se o dia foi ruim (curva típica
 // gera >70% do total até essa hora).
 function _lateAfternoonAt(locKey) {
@@ -7127,6 +7421,10 @@ function _lateAfternoonAt(locKey) {
 // Wrapper que os 3 watchdogs chamam
 async function _evalSolarAnomalies(key, sunLocKey, currentW, todayKwh, daytime) {
   const label = { catalao: '☀️ SAJ Catalão', ivonei: '☀️ Ivonei (Goiânia)', palmeiras: '☀️ Palmeiras' }[key] || key;
+  // Registra o dia desta usina pra que as OUTRAS possam se comparar com ela.
+  // Só com leitura real: `todayKwh` nulo é telemetria ausente, e gravar 0 aqui
+  // faria a usina muda "votar" que o dia está ruim em toda a vizinhança.
+  if (todayKwh != null && todayKwh >= 0) _kwhHoje[key] = { kwh: todayKwh, ts: Date.now() };
   // Cobertura de nuvem DESTA usina, pro detector saber se existe explicação no
   // céu. Cache de 10min no getLocalWeather — não pesa no tick.
   const co = SUN_COORDS[sunLocKey];
@@ -7157,13 +7455,38 @@ async function _evalSolarAnomalies(key, sunLocKey, currentW, todayKwh, daytime) 
     { repeatEvery: 4 * 3600_000 });   // no máximo 1x/4h se persistir (evita spam)
   // B) Dia ruim (só depois de 15h — dá pra saber se salvou o dia)
   const afternoon = _lateAfternoonAt(sunLocKey);
-  const lowDay = daytime && afternoon && _isLowGenDay(key, todayKwh);
+  const diaBaixo = daytime && afternoon && _isLowGenDay(key, todayKwh);
   const arr = _solarHistory[key] || [];
   const past = arr.slice(-14).map(x => x.kwh).sort((a,b)=>a-b);
   const median = past.length ? past[Math.floor(past.length/2)] : 0;
+
+  // Dia baixo só vira alerta quando o clima NÃO explica. Ver _climaRegional:
+  // quem decide são as usinas vizinhas, não a porcentagem de nuvem.
+  const reg = diaBaixo ? _climaRegional(key) : { avaliadas: [], baixas: [], explica: false };
+  const lowDay = diaBaixo && !reg.explica;
+
+  if (diaBaixo && reg.explica) {
+    _diaBaixoJustificado[key] = {
+      razao: +(_razaoDoDia(key, todayKwh) || 0).toFixed(2),
+      nuvemPct: _quedaClima[key]?.cloudsPct ?? null,
+      vizinhas: reg.abatidas,
+      ts: Date.now(),
+    };
+  } else {
+    delete _diaBaixoJustificado[key];
+  }
+
+  // Nome das vizinhas na mensagem: sem isso o alerta volta a fazer a pergunta
+  // em vez de respondê-la ("será que é nuvem?").
+  const nuvem = _quedaClima[key]?.cloudsPct;
+  const porQueDia = reg.avaliadas.length
+    ? `${reg.avaliadas.length - reg.abatidas.length}/${reg.avaliadas.length} das outras usinas estão gerando normal — não é clima`
+    : 'sem leitura recente das outras usinas pra comparar';
   _alert(`solar_${key}_low_gen_day`, lowDay,
     `${label} — geração baixa hoje`,
-    `${(todayKwh||0).toFixed(1)} kWh até agora vs mediana ${median.toFixed(1)} kWh dos últimos ${past.length} dias. Nublado extremo, sombreamento novo ou problema pontual.`,
+    `${(todayKwh||0).toFixed(1)} kWh até agora vs mediana ${median.toFixed(1)} kWh dos últimos ${past.length} dias`
+    + `${nuvem != null ? ` · céu ${nuvem}% encoberto` : ''} · ${porQueDia}. `
+    + `Verificar string desligada, sombreamento novo ou inversor parcial.`,
     'high', ['cloud.sun', 'chart.line.downtrend.xyaxis'],
     { repeatEvery: 6 * 3600_000 });   // 1x pela tarde só; recovery no fim do dia
 }
@@ -7973,6 +8296,22 @@ app.get('/api/wall/detail', requireAuth, (req, res) => {
         l.url || null);
     } else if (/^Gastos/.test(nome)) {
       for (const x of _pixbot) add(x.label, x.up ? 'no ar' : 'fora', x.url || null);
+    } else if (/^NFSe/.test(nome)) {
+      add('Serviço', _nfse?.up ? 'no ar' : 'fora', _nfse?.error || null);
+      add('Empresas ativas', _nfse?.empresas ?? null);
+      for (const c of (_nfse?.certificados || []))
+        add(`Certificado · ${String(c.empresa).slice(0, 26)}`, `vence ${c.vence_em}`,
+            `${c.dias} dias` + (c.ativo ? '' : ' · empresa inativa'));
+      const sem = _nfse?.empresas_sem_certificado || [];
+      if (sem.length) add('SEM certificado', sem.join(', '), 'não emite nota');
+      add('Notas autorizadas', _nfse?.notas?.autorizada ?? 0,
+          _nfse?.autorizadas_7d ? `${_nfse.autorizadas_7d} nos últimos 7 dias` : null);
+      if (_nfse?.notas?.rejeitada) add('Rejeitadas', _nfse.notas.rejeitada,
+          _nfse.rejeitadas_7d ? `${_nfse.rejeitadas_7d} nos últimos 7 dias` : null);
+      if (_nfse?.ultima_autorizada_ms)
+        add('Última emissão', new Date(_nfse.ultima_autorizada_ms).toLocaleString('pt-BR',
+          { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }),
+          idade(_nfse.ultima_autorizada_ms));
     } else if (/^Recados/.test(nome)) {
       // Uma seção por instância: dois números, e o detalhe precisa dizer de
       // QUAL deles se está falando.
@@ -8053,6 +8392,10 @@ app.get('/api/wall', requireAuth, (_req, res) => {
   const firing = [];
   for (const [id, v] of _alertState) {
     if (!v || !v.firing) continue;
+    // Adiado some da parede, não só do push. Silenciar e continuar pintando
+    // "Precisa de você" é o pior dos dois mundos: não avisa e não deixa em paz.
+    // O chip de silêncio é quem mantém o fato visível, com prazo e motivo.
+    if (_silenciado(id)) continue;
     const ao = AGENT_OWNED.has(id);
     // Alerta que TEM ação carrega o link: aviso sem o que fazer só transfere o
     // trabalho. O reauth da Bluetti era o caso — dizia "refazer login" e o botão
@@ -8122,6 +8465,13 @@ app.get('/api/wall', requireAuth, (_req, res) => {
              partial,
              temp: temps.length ? Math.max(...temps) : null,
              temp_state: tempState(temps.length ? Math.max(...temps) : null, marca),
+             // Dia baixo que o clima explica: não é alerta, mas continua
+             // visível. Silenciar sem mostrar seria esconder, não justificar.
+             dia_baixo: _diaBaixoJustificado[chave]
+               ? { pct: Math.round((_diaBaixoJustificado[chave].razao || 0) * 100),
+                   nuvem: _diaBaixoJustificado[chave].nuvemPct,
+                   juntas: (_diaBaixoJustificado[chave].vizinhas || []).length + 1 }
+               : undefined,
              // Só o Ivonei tem ventilador. `undefined` nas outras some do JSON.
              ventilador: p.ventilador || undefined };
   };
@@ -8248,6 +8598,10 @@ app.get('/api/wall', requireAuth, (_req, res) => {
              // que eu me importo com essa bateria?" — e é o que faz a linha
              // valer o espaço num dia em que nada está acontecendo.
              alimenta: (_BLUETTI[k] || {}).feeds || null,
+             // De onde veio a leitura. A parede só mostra quando NÃO é a nuvem:
+             // o normal não precisa de etiqueta, o excepcional precisa.
+             fonte: b.fonte || null,
+             tensao_ca_v: b.tensao_ca_v ?? null,
              reachable: !!b.reachable,
              // Buraco de telemetria: potência toda zerada depois de ter medido.
              sem_potencia_ms: b.power_stale_ms ?? null,
@@ -8288,6 +8642,17 @@ app.get('/api/wall', requireAuth, (_req, res) => {
   familia('Gastos', _pixbot.filter(x => !/teste/i.test(x.label || ''))
                            .map(x => ({ ...x, __lbl: x.label })),
           x => !!x.up, () => null);
+  if (_nfse) {
+    // O detalhe diz o que decide: quem não emite, e quanto falta pro certificado.
+    const sem = (_nfse.empresas_sem_certificado || []).length;
+    const partes = [];
+    if (!_nfse.up) partes.push('fora');
+    if (sem) partes.push(`${sem} sem certificado`);
+    if (_nfse.cert_dias_min != null && _nfse.cert_dias_min <= 30)
+      partes.push(`certificado em ${_nfse.cert_dias_min}d`);
+    if (_nfse.rejeitadas_7d) partes.push(`${_nfse.rejeitadas_7d} rejeitadas 7d`);
+    push('NFSe', !!_nfse.up && !sem && !(_nfse.cert_dias_min <= 30), partes.join(' · ') || null);
+  }
   if (_recadosLista.length) {
     // O ponto é "está no ar?", mas há duas falhas que o up/down não pega:
     // serviço vivo com o WhatsApp despareado, e recado que passou da hora e não
@@ -8364,7 +8729,10 @@ app.get('/api/wall', requireAuth, (_req, res) => {
   const bat1 = (k) => batArr.find(b => b.key === k);
   const linhaBat = (b) => !b ? null : `${b.label} · ${b.pct == null ? '—' : b.pct + '%'} · ` +
     (!b.reachable ? 'sem comunicação' : b.offgrid === true ? 'na bateria'
-     : b.grid_w > 0 ? `${b.grid_w} W da rede` : 'em espera');
+     : b.grid_w > 0 ? `${b.grid_w} W da rede` : 'em espera') +
+    // Só aparece fora do normal: leitura por reserva tem menos campos (sem
+    // autonomia, sem modo), e quem lê precisa saber disso.
+    (b.fonte && b.fonte !== 'cloud' ? ` · via ${b.fonte === 'bt' ? 'Bluetooth' : b.fonte.toUpperCase()}` : '');
   const pctDe = (u, t) => (u && t) ? Math.round(u / t * 100) + '%' : '—';
   const m = _macStats || {};
   const nodes = {
@@ -8397,6 +8765,41 @@ app.get('/api/wall', requireAuth, (_req, res) => {
         // Batida do HA do sítio: é ele quem prova que o sítio inteiro está vivo.
         beat == null ? 'HA do sítio · nunca bateu'
           : `HA do sítio · batida ${beat < 1 ? 'agora' : 'há ' + beat + ' min'}`,
+        // Qualidade medida POR FORA do prato. Perda e jitter são o que
+        // distingue "caiu" de "está ruim há duas horas e ninguém viu" — e não
+        // dependem do que a Starlink diz de si mesma.
+        (() => {
+          const d = sn.data || {};
+          if (d.perda_pct == null && d.rtt_ms == null) return null;
+          const n = (v, c = 0) => v == null ? '—' : v.toFixed(c).replace('.', ',');
+          return `Link · perda ${n(d.perda_pct)}% · jitter ${n(d.jitter_ms)} ms` +
+                 ` · RTT ${n(d.rtt_ms)} ms`;
+        })(),
+        // Disco só aparece quando começa a importar. Acima de 25% livre é
+        // número parado ocupando linha — a régua da parede.
+        (() => {
+          const d = sn.data || {};
+          const liv = d.disco_livre_gb, tot = d.disco_total_gb;
+          if (liv == null || !tot) return null;
+          const pct = liv / tot * 100;
+          if (pct >= 25) return null;
+          return `Disco do sítio · ${liv.toFixed(0)} GB livres (${pct.toFixed(0)}%)`;
+        })(),
+        // Consumo do mês. Os medidores zeram dia 01, então a linha diz o ciclo:
+        // sem isso "0,03 GB" no dia 1 parece defeito, e no dia 28 parece pouco.
+        (() => {
+          const d = sn.data || {};
+          if (d.mes_dl_gb == null && d.mes_ul_gb == null) return null;
+          // Vírgula decimal, como o resto da parede. E menos casas conforme o
+          // número cresce: "132 GB" e "0,03 GB" precisam de precisões diferentes.
+          const br = (v, c) => v.toFixed(c).replace('.', ',');
+          const gb = (v) => v == null ? '—' : br(v, v >= 10 ? 0 : v >= 1 ? 1 : 2) + ' GB';
+          const kwh = d.mes_kwh == null ? null
+            : br(d.mes_kwh, d.mes_kwh >= 10 ? 0 : d.mes_kwh >= 1 ? 1 : 2) + ' kWh';
+          const dia = new Date().getDate();
+          return `Mês · ↓${gb(d.mes_dl_gb)} ↑${gb(d.mes_ul_gb)}` +
+                 (kwh ? ` · ${kwh}` : '') + ` · ${dia}º dia do ciclo`;
+        })(),
       ].filter(Boolean);
     })()),
     mac: nodeDe(/^(disk|ssd|mem_|rss|restarts|backup|icloud)/, [
@@ -8406,7 +8809,7 @@ app.get('/api/wall', requireAuth, (_req, res) => {
       `Backups · ${(_backups || []).filter(b => b.ok !== false).length}/${(_backups || []).length} em dia`,
       m.uptime_sec ? `No ar há ${Math.floor(m.uptime_sec / 86400)}d` : null,
     ].filter(Boolean)),
-    apps: nodeDe(/^(delega|lari|pixbot|credito|apns|recados)/,
+    apps: nodeDe(/^(delega|lari|pixbot|credito|apns|recados|nfse)/,
       // Ancorado: /Assist/ solto casava com 'Home Assistant'.
       svc.filter(x => /^(Delega|Assist\.|Gastos|Driver Cred|Clockin|Recados)/.test(x.nome))
          .map(x => `${x.nome} · ${x.ok ? 'no ar' : 'FORA'}${x.det ? ' · ' + x.det : ''}`)),
@@ -9542,8 +9945,17 @@ function _evalLariAlerts() {
   // 5562910006818), então o alerta é POR instância — uma caída é problema mesmo
   // com a outra de pé. Copiar a lógica do pixbot esconderia exatamente este caso.
   for (const l of _lari) {
-    const nome = l.user || new URL(l.url).port;
-    const kd = `lari_${nome}_down`;
+    // A CHAVE do alerta sai da PORTA, que é configuração e existe sempre; o nome
+    // bonito fica só no título. Antes a chave era `l.user || porta`, e `user` só
+    // vem no /health — ou seja, só quando a instância está DE PÉ. Caía: disparava
+    // `lari_3738_down`. Voltava: `user` virava "rafael" e o código passava a
+    // avaliar `lari_rafael_down`, outra chave. Ninguém mais dizia ao
+    // `lari_3738_down` pra parar e ele ficava aceso pra sempre — foi o que
+    // aconteceu em 13/10/2026, preso desde 11:04 com as duas instâncias no ar.
+    // Identidade de alerta não pode depender do estado que ele vigia.
+    const porta = new URL(l.url).port;
+    const nome = l.user || porta;
+    const kd = `lari_${porta}_down`;
     _alert(kd, _sustained(kd, true, !l.up, LARI_SUSTAIN_MS),
       `🤖 Assistente ${nome} fora do ar`,
       `Sem resposta em ${l.url} há ${_sustainedFor(kd)}min` + (l.error ? ` (${l.error})` : '') + '.',
@@ -9551,7 +9963,7 @@ function _evalLariAlerts() {
     // O que importa: processo vivo e WhatsApp caído. O app responde, o dono acha
     // que está tudo certo, e mensagem nenhuma entra ou sai. Só afirmo com o HTTP
     // no ar — se está fora, o alerta de cima já cobre e este não tem base.
-    const kw = `lari_${nome}_wa_off`;
+    const kw = `lari_${porta}_wa_off`;   // mesma razão do kd: chave estável
     _alert(kw, _sustained(kw, !!l.up, l.up && l.connected === false, LARI_SUSTAIN_MS),
       `🤖 Assistente ${nome} sem WhatsApp`,
       `O processo responde mas a sessão do WhatsApp está desconectada há `
@@ -9655,6 +10067,12 @@ const RECADOS_ALVOS = (process.env.RECADOS_HEALTH_URLS
   }).filter((a) => a.url);
 let _recados = null;
 let _recadosLista = [];
+// Emissor de NFSe (~/nfse, :3070). O que importa aqui não é "o processo está
+// vivo" — é "dá pra emitir amanhã?". Certificado vencendo e empresa ativa sem
+// certificado são as falhas que só aparecem na hora de emitir, quando já é
+// tarde pra resolver (certificado novo leva dias).
+const NFSE_URL = process.env.NFSE_HEALTH_URL || 'http://127.0.0.1:3070/api/saude';
+let _nfse = null;
 let _creditoVigia = null;   // resumo operacional, atualizado fora do caminho do poller
 
 async function _getJson(url, ms = 5000, headers = null) {
@@ -9709,6 +10127,11 @@ async function _pollMiniApps() {
     }
     _credito.vigia = _creditoVigia;
   }
+  if (NFSE_URL) {
+    const j = await _getJson(NFSE_URL, 8000, null);
+    _nfse = j._err ? { up: false, error: j._err, ts: Date.now() }
+                   : { up: true, ...j, ts: Date.now() };
+  }
   _recadosLista = [];
   for (const alvo of RECADOS_ALVOS) {
     const j = await _getJson(alvo.url, 8000,
@@ -9725,6 +10148,28 @@ function _evalMiniAppAlerts() {
   // Duas falhas diferentes: o serviço fora do ar, e o serviço no ar com o
   // WhatsApp despareado. A segunda é a traiçoeira — tudo "verde" e o recado
   // agendado simplesmente não sai na segunda de manhã.
+  if (_nfse) {
+    _alert('nfse_down', _nfse.up === false,
+      '🧾 Emissor de NFSe fora do ar',
+      `Não responde (${_nfse.error || 'sem detalhe'}). Nota não sai enquanto isso.`,
+      'high', ['receipt']);
+    // Empresa ativa sem certificado não emite NADA. Não é degradação: é zero.
+    const sem = _nfse.empresas_sem_certificado || [];
+    _alert('nfse_sem_certificado', _nfse.up === true && sem.length > 0,
+      '🧾 Empresa ativa sem certificado',
+      `${sem.join(', ')} está ativa no emissor e não tem certificado — não emite nota. ` +
+      `Subir o .pfx no painel do emissor resolve.`,
+      'high', ['receipt', 'warning'], { repeatEvery: 24 * 3600_000 });
+    // Prazo do certificado: avisa com 30 dias porque renovar leva dias, não
+    // minutos. Avisar no dia do vencimento seria avisar tarde.
+    const dias = _nfse.cert_dias_min;
+    _alert('nfse_cert_vencendo', _nfse.up === true && dias != null && dias <= 30,
+      '🧾 Certificado do emissor vencendo',
+      `Faltam ${dias} dias para vencer. Sem ele o emissor para de assinar — ` +
+      `renovação leva dias, então comece agora.`,
+      dias != null && dias <= 7 ? 'urgent' : 'high', ['receipt', 'hourglass'],
+      { repeatEvery: 24 * 3600_000 });
+  }
   for (const r of _recadosLista) {
     const suf = r.rotulo ? `_${r.rotulo.replace(/\W+/g, '')}` : '';
     const nome = r.nome || (r.rotulo ? `Recados ${r.rotulo}` : 'Recados');
@@ -11648,6 +12093,30 @@ app.delete('/api/silencios/:id', requireAuth, (req, res) => {
   _silencios = _silencios.filter(j => j.id !== req.params.id);
   if (_silencios.length !== antes) _salvaSilencios();
   res.json({ ok: true, removidos: antes - _silencios.length });
+});
+
+// Ensaio do aviso à família: mostra o texto EXATO que sairia, sem mandar.
+// `?enviar=1` manda de verdade (ignora o cooldown e o desarme) — é o botão de
+// validação, e por isso exige o token do bridge como todo o resto.
+app.get('/api/familia/ensaio', requireAuth, async (req, res) => {
+  const b = _bluettiState?.sitio || null;
+  const texto = _textoAvisoFamilia(b);
+  const tipo = req.query.tipo === 'volta' ? 'volta' : 'falta';
+  if (req.query.enviar === '1') {
+    const r = await _avisaFamiliaSitio(b, true, tipo);
+    return res.json({ modo: 'envio real', grupo: FAM_GRUPO, tipo, ...r });
+  }
+  res.json({ modo: 'ensaio (nada foi enviado)', ligado: FAM_LIGADO, grupo: FAM_GRUPO,
+             espera_falta_min: FAM_ESPERA / 60000,
+             espera_volta_min: FAM_ESPERA_VOLTA / 60000,
+             estado_episodio: _famEstado,
+             gatilho: `sem luz por ${FAM_ESPERA / 60000} min → avisa; com luz por ${FAM_ESPERA_VOLTA / 60000} min → avisa retorno`,
+             estado_agora: b ? { offgrid: b.offgrid, pct: b.battery_pct, grid_in_w: b.grid_in_w,
+                                 autonomia: _hm(b.battery_time_min) } : null,
+             faltou_desde: _hhmm(_famFaltaDesde), voltou_as: _hhmm(_famVoltouAs),
+             ultima_rede_ok: _hhmm(_famUltimaRedeOk),
+             texto_falta: _textoAvisoFamilia(b, 'falta'),
+             texto_volta: _textoAvisoFamilia(b, 'volta') });
 });
 
 app.get('/api/known-places', (_req, res) => res.json(knownPlaces));
@@ -14757,99 +15226,6 @@ app.get('/api/location', (_req, res) => {
   }
 });
 
-// ─── Diag mode ────────────────────────────────────────────────────────────
-app.get('/api/diag/status', (_req, res) => {
-  res.json({
-    enabled:        diagState.enabled,
-    interval_sec:   diagState.interval_sec,
-    keys_count:     Object.keys(diagState.values).length,
-    last_update_ms: diagState.last_update_ms,
-  });
-});
-
-app.get('/api/diag/data', (req, res) => {
-  // Snapshot atual: { values: {key: {value, ts}}, ... }
-  res.json({
-    enabled:                  diagState.enabled,
-    interval_sec:             diagState.interval_sec,
-    last_update_ms:           diagState.last_update_ms,
-    last_state_from_apk_ms:   diagState.last_state_from_apk_ms || 0,
-    last_requested:           diagState.last_requested || null,
-    values:                   diagState.values,
-  });
-});
-
-app.get('/api/diag/log', (req, res) => {
-  // Histórico completo (rotacionado a DIAG_LOG_MAX entradas)
-  const limit = Math.min(DIAG_LOG_MAX, parseInt(req.query.limit) || DIAG_LOG_MAX);
-  res.json(diagLog.slice(-limit));
-});
-
-app.post('/api/diag/enable', (req, res) => {
-  if (!adminCheckToken(req, res)) return;
-  const b = req.body || {};
-  if (typeof b.enabled !== 'boolean') return res.status(400).json({ error: 'enabled (bool) obrigatório' });
-  const interval = parseInt(b.interval_sec || diagState.interval_sec || 5);
-  if (interval < 1 || interval > 300) return res.status(400).json({ error: 'interval_sec entre 1 e 300' });
-  // NÃO atualizamos diagState.enabled aqui — fonte de verdade é o ack do APK
-  // (tópico diag/state). Só registramos o pedido e gravamos o intervalo solicitado.
-  diagState.interval_sec = interval;
-  diagState.last_requested = { enabled: b.enabled, interval_sec: interval, ts: Date.now() };
-  _saveDiagState();
-  // Publica comando pro APK começar/parar a coleta
-  if (!mqttClient?.connected) {
-    _pushDiagEvent({ type: 'cmd_error', error: 'MQTT offline', requested: { enabled: b.enabled, interval_sec: interval } });
-    return res.status(503).json({ error: 'MQTT offline' });
-  }
-  const cmd = JSON.stringify({ enabled: b.enabled, interval_sec: interval });
-  _pushDiagEvent({ type: 'cmd_sent', topic: `${MQTT_PREFIX}/cmd/diag`, payload: { enabled: b.enabled, interval_sec: interval } });
-  mqttClient.publish(`${MQTT_PREFIX}/cmd/diag`, cmd, { qos: 1, retain: true }, err => {
-    if (err) {
-      _pushDiagEvent({ type: 'cmd_error', error: err.message });
-      return res.status(500).json({ error: 'Falha ao publicar no MQTT: ' + err.message });
-    }
-    console.log(`[diag] cmd publicado: enabled=${b.enabled} interval=${interval}s — aguardando ack do APK`);
-    res.json({ ok: true, pending: true, requested: { enabled: b.enabled, interval_sec: interval } });
-  });
-});
-
-// GET /api/diag/events — últimos eventos de comandos (envio/ack/erro)
-app.get('/api/diag/events', (req, res) => {
-  if (!adminCheckToken(req, res)) return;
-  res.json({ events: diagEvents });
-});
-
-app.post('/api/diag/clear', (req, res) => {
-  if (!adminCheckToken(req, res)) return;
-  diagLog = [];
-  diagState.values = {};
-  _saveDiagState();
-  res.json({ ok: true });
-});
-
-// POST /api/diag/set { key, value } — pede pro APK tentar gravar a constante
-// no carro via Shizuku. Nem todas são writable — APK responde em diag_ack/<key>
-// com { ok, error }. Bridge propaga via WS pra UI mostrar resultado.
-app.post('/api/diag/set', (req, res) => {
-  if (!adminCheckToken(req, res)) return;
-  const { key, value } = req.body || {};
-  if (!key || typeof key !== 'string') return res.status(400).json({ error: 'key obrigatório' });
-  // Key vai crua no tópico MQTT — sem isto um '#'/'+'/'/' permitiria injetar tópico.
-  if (!/^[A-Za-z0-9_.]+$/.test(key)) return res.status(400).json({ error: 'key inválida' });
-  if (value === undefined) return res.status(400).json({ error: 'value obrigatório' });
-  if (!mqttClient?.connected) return res.status(503).json({ error: 'MQTT offline' });
-  const payload = typeof value === 'object' ? JSON.stringify(value) : String(value);
-  _pushDiagEvent({ type: 'set_cmd_sent', topic: `${MQTT_PREFIX}/cmd/diag_set/${key}`, key, payload });
-  mqttClient.publish(`${MQTT_PREFIX}/cmd/diag_set/${key}`, payload, { qos: 1, retain: false }, err => {
-    if (err) {
-      _pushDiagEvent({ type: 'cmd_error', error: err.message, key });
-      return res.status(500).json({ error: 'Falha ao publicar: ' + err.message });
-    }
-    console.log(`[diag] set ${key} = ${payload}`);
-    res.json({ ok: true, key, value: payload, sent_at: Date.now() });
-  });
-});
-
 // Commit + data do HEAD, lido uma vez no boot (não muda em runtime)
 let _BRIDGE_GIT_INFO = null;
 function _readGitInfo() {
@@ -15440,7 +15816,7 @@ app.post('/api/uplink/cmd', requireAuth, (req, res) => {
   // devolve netId e a rede não aparece nas salvas).
   const OK = ['setMobileControl', 'setMobileBlock', 'setBlockOnWifi', 'setBlockOnProjection',
               'setAutoblock', 'setDataLimit', 'setCycleDay',
-              'scanWifi', 'connectWifi', 'listSavedWifi', 'setWifiPriority',
+              'scanWifi', 'connectWifi', 'listSavedWifi',
               // setWifiEnabled(false) pode cortar o próprio canal remoto se o carro
               // só tem internet por WiFi. Vai atrás de confirmação dupla no app; aqui
               // o guard é logar alto, porque depois dele talvez não haja mais log.
@@ -15455,7 +15831,7 @@ app.post('/api/uplink/cmd', requireAuth, (req, res) => {
   if (metodo === 'connectWifi' && !msg.ssid) return res.status(400).json({ error: 'connectWifi exige ssid' });
 
   const PRECISA_BOOL = ['setMobileControl', 'setMobileBlock', 'setBlockOnWifi',
-                        'setBlockOnProjection', 'setAutoblock', 'setWifiPriority',
+                        'setBlockOnProjection', 'setAutoblock',
                         'setWifiEnabled'];
   if (PRECISA_BOOL.includes(metodo) && msg.valor === undefined) {
     return res.status(400).json({ error: metodo + ' exige valor (bool)' });
@@ -15512,9 +15888,14 @@ app.post('/api/la/end-trip', async (req, res) => {
 
 app.post('/api/la/relaunch', async (req, res) => {
   if (!apnsLive.enabled) return res.status(503).json({ error: 'apns desativado' });
+  // scope='grasi' → só LA do Song Pro (chamada vinda do app BydRecarga).
+  // scope='haval' → só LAs do Haval. Sem scope: tudo (compat com HavalEcoTrip antigo).
+  const scope = String(req.body?.scope || '').toLowerCase();
+  const doHaval = !scope || scope === 'haval';
+  const doGrasi = !scope || scope === 'grasi';
   const done = [];
   try {
-    if (state.charging_state === 'Carregando' && notifPrefs.la_charge !== false) {
+    if (doHaval && state.charging_state === 'Carregando' && notifPrefs.la_charge !== false) {
       // iOS ignora pushStart se já existe LA do mesmo tipo "viva" (mesmo que
       // o user tenha dispensado por swipe). Encerra a existente PRIMEIRO
       // (isFinal + dismissalDate imediata) e DEPOIS cria nova. Garante que
@@ -15529,31 +15910,31 @@ app.post('/api/la/relaunch', async (req, res) => {
         { staleDate: Date.now() + 3600_000, alert: { title: '⚡ Recarga', body: 'Card reativado — acompanhe na tela bloqueada.' } });
       done.push('recarga');
     }
-    if (_tripActive && notifPrefs.la_trip !== false) {
+    if (doHaval && _tripActive && notifPrefs.la_trip !== false) {
       await apnsLive.pushStart(TRIP_LA_TYPE, '', { carName: 'Haval H6 PHEV' }, _tripContentState(_lastTripSnapshot || {}, true),
         { staleDate: Date.now() + 6 * 3600_000, alert: { title: '🚗 Viagem', body: 'Card reativado.' } });
       done.push('viagem');
     }
-    if (_motorActive && notifPrefs.la_motor !== false) {
+    if (doHaval && _motorActive && notifPrefs.la_motor !== false) {
       await apnsLive.pushStart(MOTOR_LA_TYPE, '', { carName: 'Haval H6 PHEV' }, _motorContentState(true),
         { staleDate: Date.now() + 3 * 3600_000, alert: { title: '🔑 Motor ligado', body: 'Card reativado.' } });
       done.push('motor');
     }
-    if (['starting', 'engine_on', 'cooling'].includes(preclimatStatus.phase) && _activeSched && notifPrefs.la_preclimat !== false) {
+    if (doHaval && ['starting', 'engine_on', 'cooling'].includes(preclimatStatus.phase) && _activeSched && notifPrefs.la_preclimat !== false) {
       const pdev = _activeSched.device_id || '';
       await apnsLive.pushStart(PRECLIMAT_LA_TYPE, pdev, _preclimatAttributes(), _preclimatContentState(),
         { staleDate: preclimatStatus.endsAtMs || (Date.now() + 1800_000), alert: { title: '❄️ Pré-climatização', body: 'Card reativado.' },
           allow: pdev ? undefined : (d) => getPrefsForDevice(d).la_preclimat !== false });
       done.push('pre-clima');
     }
-    if (_securityActive && notifPrefs.la_security !== false) {
+    if (doHaval && _securityActive && notifPrefs.la_security !== false) {
       _securityActive = false; _evalSecurityAlert();   // re-cria se ainda há problema
       done.push('seguranca');
     }
     // "Voltar ao carro": se o card estava vivo (talvez dispensado por swipe),
     // recria com os números reais já conhecidos. Se NÃO estava vivo, deixa o
     // eval decidir — só abre com fix fresco do dono e >100m. Nunca fabrica 0m.
-    if (_parkedLoc && notifPrefs.la_parking !== false) {
+    if (doHaval && _parkedLoc && notifPrefs.la_parking !== false) {
       if (_parkingActive && _parkingLast.dist >= 0) {
         try {
           await apnsLive.pushUpdate(PARKING_LA_TYPE, {}, _parkingContentState(_parkingLast.dist, _parkingLast.brg),
@@ -15571,8 +15952,16 @@ app.post('/api/la/relaunch', async (req, res) => {
       }
     }
     // BYD Song Pro (Grasi) — só relança se sessão ativa e algum device opt-in.
-    if (_songProSession && _songProSession.active && _songProEnabled()) {
+    // Encerra a LA anterior antes de recriar: user pode ter swipado uma cópia
+    // dispensada, mas outra cópia ativa pode ainda existir; pushStart puro
+    // empilha se a anterior estiver viva-mas-dispensada. Padrão igual ao Haval Charge.
+    if (doGrasi && _songProSession && _songProSession.active && _songProEnabled()) {
       const cs = _songProContentState(true);
+      try {
+        await apnsLive.pushUpdate(SONGPRO_LA_TYPE, {}, cs,
+          { isFinal: true, dismissalDate: Date.now() });
+      } catch (_) {}
+      await new Promise(r => setTimeout(r, 250));
       await apnsLive.pushStart(SONGPRO_LA_TYPE, '', { carName: 'BYD Song Pro' }, cs,
         { staleDate: Date.now() + 6 * 3600_000, alert: { title: '🔵 BYD da Grasi carregando', body: 'Card reativado.' },
           allow: (deviceId) => getPrefsForDevice(deviceId).la_songpro === true });
@@ -17927,61 +18316,6 @@ function publishClusterExtra() {
 setInterval(publishClusterExtra, 3000);
 mqttClient.on('disconnect', ()    => console.log('MQTT desconectado'));
 
-// ─── Modo Diagnóstico (debug) ─────────────────────────────────────────────
-// APK publica TODAS as constantes do CarConstants.kt em haval/ecotrip/diag/<key>
-// quando habilitado via cmd/diag. Bridge mantém snapshot em memória + log em
-// disco (rotacionado), broadcast pelo WS (msg type=diag_update) e expõe
-// endpoints REST.
-const DIAG_FILE      = path.join(DATA_DIR, 'diag_state.json');
-const DIAG_LOG_FILE  = path.join(DATA_DIR, 'diag_log.json');
-const DIAG_LOG_MAX   = 5000;  // rotação por linhas
-let diagState        = { enabled: false, interval_sec: 5, values: {}, last_update_ms: 0 };
-let diagLog          = [];
-let diagEvents       = [];  // últimos N eventos de comando (envio/ack/erro)
-const DIAG_EVENTS_MAX = 100;
-
-function _pushDiagEvent(ev) {
-  ev.ts = ev.ts || Date.now();
-  diagEvents.push(ev);
-  if (diagEvents.length > DIAG_EVENTS_MAX) diagEvents = diagEvents.slice(-DIAG_EVENTS_MAX);
-  const wsMsg = JSON.stringify({ type: 'diag_event', data: ev });
-  for (const c of clients) {
-    try { c.readyState === 1 && c.send(wsMsg); } catch (_) {}
-  }
-  console.log(`[diag-event] ${ev.type} ${JSON.stringify(ev)}`);
-}
-try {
-  if (fs.existsSync(DIAG_FILE)) diagState = { ...diagState, ...JSON.parse(fs.readFileSync(DIAG_FILE, 'utf8')) };
-  if (fs.existsSync(DIAG_LOG_FILE)) diagLog = JSON.parse(fs.readFileSync(DIAG_LOG_FILE, 'utf8')) || [];
-} catch (_) {}
-let _diagSaveTimer = null;
-function _saveDiagState() {
-  if (_diagSaveTimer) return;
-  _diagSaveTimer = setTimeout(() => {
-    _diagSaveTimer = null;
-    try { fs.writeFileSync(DIAG_FILE, JSON.stringify(diagState, null, 2)); } catch (_) {}
-    try { fs.writeFileSync(DIAG_LOG_FILE, JSON.stringify(diagLog.slice(-DIAG_LOG_MAX))); } catch (_) {}
-  }, 2000);
-}
-function handleDiagMessage(key, raw) {
-  let value = raw;
-  // tenta parse JSON pra valores compostos; senão mantém string
-  if (raw && (raw.startsWith('{') || raw.startsWith('['))) {
-    try { value = JSON.parse(raw); } catch (_) {}
-  }
-  const ts = Date.now();
-  diagState.values[key] = { value, ts };
-  diagState.last_update_ms = ts;
-  diagLog.push({ ts, key, value });
-  if (diagLog.length > DIAG_LOG_MAX) diagLog = diagLog.slice(-DIAG_LOG_MAX);
-  _saveDiagState();
-  // Broadcast pelo WS em tempo real
-  const msg = JSON.stringify({ type: 'diag_update', data: { key, value, ts } });
-  for (const c of clients) {
-    try { c.readyState === 1 && c.send(msg); } catch (_) {}
-  }
-}
-
 mqttClient.on('message', (topic, payload, packet) => {
   // Áudio ao vivo (carro→fone): frame binário PCM. Intercepta ANTES do toString
   // (é binário, não texto) e reenvia direto pros clientes WS de áudio. Caminho
@@ -18348,7 +18682,6 @@ mqttClient.on('message', (topic, payload, packet) => {
         controle4g: !!o.mobileControlEnabled,
         quatroGOn: !!o.mobile4gOn,
         motivoCorte: o.mobileBlockReason ?? null,
-        wifiPrioridade: o.wifiPriorityEnabled === 1,
         wifiDaTela: o.headUnitWifiSsid ?? null,
         // Regras de corte e consumo do ciclo: a partir do vc7267 vêm na própria
         // query, e aí o app lê o estado sem precisar disparar call() a cada 4s só
@@ -18627,50 +18960,6 @@ mqttClient.on('message', (topic, payload, packet) => {
     } catch (e) {
       console.warn('[obd] payload inválido:', e.message);
     }
-  } else if (topic === MQTT_PREFIX + '/diag/state') {
-    // APK confirma estado real do modo diagnóstico — single source of truth
-    try {
-      const o = JSON.parse(value);
-      const prevEnabled = diagState.enabled;
-      diagState.enabled = !!o.enabled;
-      if (o.interval_sec) diagState.interval_sec = +o.interval_sec;
-      diagState.last_state_from_apk_ms = Date.now();
-      // Quando o APK confirma desativação, limpa snapshot do servidor
-      // (mas o PWA mantém sua cópia local — vide localStorage no view-config)
-      if (prevEnabled && !diagState.enabled) diagState.values = {};
-      _saveDiagState();
-      _pushDiagEvent({
-        type: 'state_ack',
-        enabled: !!o.enabled,
-        interval_sec: o.interval_sec || diagState.interval_sec,
-        source: o.source || null,
-        applied_at: o.applied_at || null,
-      });
-      const wsMsg = JSON.stringify({
-        type: 'diag_state',
-        data: { enabled: !!o.enabled, interval_sec: o.interval_sec || diagState.interval_sec, source: o.source || null }
-      });
-      for (const c of clients) {
-        try { c.readyState === 1 && c.send(wsMsg); } catch (_) {}
-      }
-    } catch (e) {
-      console.warn(`[diag] payload de state inválido: ${value} (${e.message})`);
-    }
-  } else if (topic.startsWith(MQTT_PREFIX + '/diag/')) {
-    // Modo diagnóstico: APK publica em diag/<constant_name>
-    const key = topic.slice((MQTT_PREFIX + '/diag/').length);
-    handleDiagMessage(key, value);
-  } else if (topic.startsWith(MQTT_PREFIX + '/diag_ack/')) {
-    // Resposta do APK ao set: { ok, error?, applied? }
-    const key = topic.slice((MQTT_PREFIX + '/diag_ack/').length);
-    let ack = { raw: value };
-    try { ack = JSON.parse(value); } catch (_) {}
-    const msg = JSON.stringify({ type: 'diag_ack', data: { key, ...ack, ts: Date.now() } });
-    for (const c of clients) {
-      try { c.readyState === 1 && c.send(msg); } catch (_) {}
-    }
-    _pushDiagEvent({ type: 'set_ack', key, ok: !!ack.ok, applied: ack.applied, error: ack.error, requested: ack.requested });
-    console.log(`[diag] ack ${key}: ${value}`);
   } else {
     const key = topic.startsWith(MQTT_PREFIX + '/')
       ? topic.slice(MQTT_PREFIX.length + 1)
@@ -20640,13 +20929,16 @@ try {
   // Migração: descarta pontos no formato antigo [lat,lng] (sem telemetria).
   if (Array.isArray(d.trail)) _songProTrail = d.trail.filter(p => p && typeof p === 'object' && !Array.isArray(p));
   if (d.lastTrail) _songProLastTrail = d.lastTrail;
+  // Restaura sessão em curso (se bridge caiu no meio de uma recarga, não cria
+  // LA duplicada quando próxima msg com power>0 chegar).
+  if (d.session && d.session.active) _songProSession = d.session;
 } catch (_) {}
 let _songProSaveTs = 0;
 function _saveSongPro(force) {
   const now = Date.now();
   if (!force && now - _songProSaveTs < 30_000) return;   // throttle: no máx a cada 30s
   _songProSaveTs = now;
-  try { fs.writeFileSync(SONGPRO_FILE, JSON.stringify({ latest: _songProLatest, lastEnd: _songProLastEnd, tele: _songProTele, evstate: _spEv, trail: _songProTrail, lastTrail: _songProLastTrail })); } catch (_) {}
+  try { fs.writeFileSync(SONGPRO_FILE, JSON.stringify({ latest: _songProLatest, lastEnd: _songProLastEnd, tele: _songProTele, evstate: _spEv, trail: _songProTrail, lastTrail: _songProLastTrail, session: _songProSession })); } catch (_) {}
 }
 
 // Limiares das notificações (configuráveis depois; manutenção a cada 12.000 km).
@@ -21609,10 +21901,20 @@ function handleSongProMessage(jsonStr) {
       console.log(`[songpro] sessão iniciada (SOC ${soc}% · ${power} kW)`);
       _spNotify('byd_charge_start', '🔌 Recarga iniciada', `BYD começou a carregar · SOC ${soc.toFixed(0)}% · ${power.toFixed(1)} kW`);
       if (_songProEnabled() && apnsLive.enabled) {
-        apnsLive.pushStart(SONGPRO_LA_TYPE, '', { carName: 'BYD Song Pro' }, _songProContentState(true),
-          { staleDate: now + 6 * 3600_000, alert: { title: '🔵 BYD da Grasi carregando', body: `SOC ${soc.toFixed(0)}% · ${power.toFixed(1)} kW` },
-            allow: (deviceId) => getPrefsForDevice(deviceId).la_songpro === true })
-          .catch(e => console.warn('[songpro] pushStart falhou:', e.message));
+        // Encerra LA remanescente (se restart do bridge zerou session mas o device
+        // ainda tem card ativo/dispensado). Sem esse end, pushStart empilha nova.
+        (async () => {
+          try {
+            await apnsLive.pushUpdate(SONGPRO_LA_TYPE, {}, _songProContentState(false),
+              { isFinal: true, dismissalDate: Date.now() });
+          } catch (_) {}
+          await new Promise(r => setTimeout(r, 250));
+          try {
+            await apnsLive.pushStart(SONGPRO_LA_TYPE, '', { carName: 'BYD Song Pro' }, _songProContentState(true),
+              { staleDate: now + 6 * 3600_000, alert: { title: '🔵 BYD da Grasi carregando', body: `SOC ${soc.toFixed(0)}% · ${power.toFixed(1)} kW` },
+                allow: (deviceId) => getPrefsForDevice(deviceId).la_songpro === true });
+          } catch (e) { console.warn('[songpro] pushStart falhou:', e.message); }
+        })();
       }
     } else {
       // Update: integra energia (power kW × dt h).

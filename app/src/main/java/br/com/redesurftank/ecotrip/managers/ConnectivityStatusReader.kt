@@ -88,8 +88,7 @@ object ConnectivityStatusReader {
                     o.put("mobileControlEnabled", int0("mobileControlEnabled"))
                     o.put("mobile4gOn", int0("mobile4gOn"))
                     o.put("mobileBlockReason", str("mobileBlockReason") ?: JSONObject.NULL)
-                    // vc7260: prioridade automática de WiFi e a rede em que a TELA está.
-                    o.put("wifiPriorityEnabled", int0("wifiPriorityEnabled"))
+                    // vc7260: a rede em que a TELA está.
                     o.put("headUnitWifiSsid", str("headUnitWifiSsid") ?: JSONObject.NULL)
                     // TODAS as colunas restantes, pelo tipo que o cursor declara. O
                     // Impulse vai acrescentar as 5 regras de corte + mobileUsedMb na
@@ -166,7 +165,7 @@ object ConnectivityStatusReader {
                 else {
                     // Copia o Bundle INTEIRO pelo tipo de cada chave, em vez de listar
                     // campo por campo: a resposta traz um snapshot completo do estado
-                    // (mobileBlocked, mobileLimitMb, wifiPriorityEnabled, …) e o
+                    // (mobileBlocked, mobileLimitMb, mobileBlockReason, …) e o
                     // Impulse pode acrescentar campos. Listar à mão significaria um
                     // patch aqui a cada mudança do outro lado.
                     for (k in out.keySet()) {

@@ -1,7 +1,7 @@
 //
 //  ConectividadeView.swift
-//  Conectividade do carro: por onde o hotspot roteia, estado do 4G, prioridade de
-//  WiFi e troca de rede — leitura e COMANDO.
+//  Conectividade do carro: por onde o hotspot roteia, estado do 4G e troca de
+//  rede — leitura e COMANDO.
 //
 //  O celular não fala com o Impulse. Quem tem acesso ao ContentProvider dele é o
 //  EcoTrip dentro do carro, então tudo aqui é: POST /api/uplink/cmd → MQTT →
@@ -146,7 +146,7 @@ struct ConectividadeView: View {
     private static let noStatus = [
         "mobileManualBlock": "manualBlock", "mobileBlockOnWifi": "blockOnWifi",
         "mobileBlockOnProjection": "blockProjecao", "mobileAutoblock": "autoblock",
-        "wifiPriorityEnabled": "wifiPrioridade", "mobileControlEnabled": "controle4g",
+        "mobileControlEnabled": "controle4g",
     ]
     private func flag(_ chaveSnap: String, _ fallback: Bool) -> Bool {
         if let k = Self.noStatus[chaveSnap], let v = store.uplinkRaw?[k] as? Bool { return v }
@@ -202,13 +202,6 @@ struct ConectividadeView: View {
                     await mandar("setAutoblock", valor: novo)
                 }
                 limiteRow
-                Divider().background(DS.border)
-                comandoRow("Prioridade automática de WiFi",
-                           sub: "Troca sozinho pela rede preferida",
-                           ligado: flag("wifiPriorityEnabled", (u["wifiPrioridade"] as? Bool) == true),
-                           chave: "setWifiPriority") { novo in
-                    await mandar("setWifiPriority", valor: novo)
-                }
             }
         }
     }

@@ -348,6 +348,11 @@ input { font-family: inherit; }
   margin: 20px auto;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* Base clara do Esri invertida pra virar mapa escuro — o Carto dark_all
+   passou a exigir chave. Filtro no tile (não no pane) pra não clarear o
+   fundo escuro que algumas telas pintam atrás dos tiles. */
+.leaflet-tile { filter: invert(1) hue-rotate(180deg) brightness(.92) contrast(.9) saturate(.55); }
 </style>
 
 <!-- CSS específico das views será injetado abaixo (ainda na construção) -->
@@ -1024,10 +1029,6 @@ function connect() {
       } else if (msg.type === 'new_charge' || msg.type === 'charge_end') {
         showToast('⚡ Nova recarga registrada', 'ok');
         if (window._reloadPostoData) window._reloadPostoData();
-      } else if (msg.type === 'diag_update') {
-        if (window._onDiagUpdate) window._onDiagUpdate(msg.data);
-      } else if (msg.type === 'diag_ack') {
-        if (window._onDiagAck) window._onDiagAck(msg.data);
       } else if (msg.type === 'reprocess_progress') {
         if (window._onReprocessProgress) window._onReprocessProgress(msg.data);
       } else if (msg.type === 'reprocess_done') {
@@ -1055,10 +1056,6 @@ function connect() {
         if (window._onSteerModeResult) window._onSteerModeResult(msg.data);
       } else if (msg.type === 'hvac_result') {
         if (window._onHvacResult) window._onHvacResult(msg.data);
-      } else if (msg.type === 'diag_state') {
-        if (window._onDiagState) window._onDiagState(msg.data);
-      } else if (msg.type === 'diag_event') {
-        if (window._onDiagEvent) window._onDiagEvent(msg.data);
       }
     } catch (e) { console.error('WS parse error', e); }
   };
@@ -1711,9 +1708,7 @@ async function prefetchMapArea(lat, lng, kmRadius = 50, zooms = [11, 13]) {
   let urls = [];
   for (const z of zooms) {
     for (const t of _tilesAroundPoint(lat, lng, kmRadius, z)) {
-      // Carto suporta subdomínios a/b/c/d pra paralelismo de fetch
-      const s = 'abcd'[(t.x + t.y) % 4];
-      urls.push(`https://${s}.basemaps.cartocdn.com/dark_all/${t.z}/${t.x}/${t.y}@2x.png`);
+      urls.push(`https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/${t.z}/${t.y}/${t.x}`);
     }
   }
 
@@ -1774,8 +1769,7 @@ async function prefetchKnownPlacesTiles(kmRadius = 10, zooms = [12, 14]) {
     // Gera URLs
     let urls = [...tilesSet].map(key => {
       const [z, x, y] = key.split('/');
-      const s = 'abcd'[(+x + +y) % 4];
-      return `https://${s}.basemaps.cartocdn.com/dark_all/${z}/${x}/${y}@2x.png`;
+      return `https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/${z}/${y}/${x}`;
     });
     const total = urls.length;
     const progress = window.showProgress && window.showProgress(`Baixando mapa de ${places.length} locais (${total} tiles únicos)`);
