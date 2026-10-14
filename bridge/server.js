@@ -3147,9 +3147,15 @@ const LIVE_TRIP_FLUSH_MS = 0;        // flush a cada amostra (tempo real)
 const LIVE_TRIP_MIN_GAP_MS = 1_000;   // máx 1 amostra/seg
 
 function _liveTripStart(tripId) {
-  let id = String(tripId).replace(/\D/g, '');
+  const origem = String(tripId).replace(/\D/g, '');
+  let id = origem;
   if (!id) return;
-  if (_liveTrip && _liveTrip.tripId === id) return;
+  // Compara com o id que CHEGOU, e não só com o que estamos usando. Quando o
+  // desvio abaixo troca o id, os dois deixam de bater e toda mensagem seguinte
+  // de `current_trip` reabria o ciclo: novo id, novo arquivo, um sample cada.
+  // Em 14/10 isso partiu a volta do trabalho em 2.849 arquivos entre 18:25 e
+  // 18:58, e o log tem 46 mil linhas de desvio acumuladas.
+  if (_liveTrip && (_liveTrip.tripId === id || _liveTrip.origemId === id)) return;
   let existing = [], existingStart = null;
   try {
     const fp = path.join(AUTOTRIPS_DIR, `${id}.json`);
@@ -3182,7 +3188,8 @@ function _liveTripStart(tripId) {
   if (!actualStart && lat && lng && gpsAgeMs < 120_000) {
     actualStart = { lat, lng, ts: Date.now() };
   }
-  _liveTrip = { tripId: id, startMs: +id, samples: existing, lastFlushMs: 0, lastGpsMs: 0, actualStart };
+  _liveTrip = { tripId: id, origemId: origem, startMs: +id, samples: existing,
+                lastFlushMs: 0, lastGpsMs: 0, actualStart };
 }
 
 function _liveTripAppend() {
