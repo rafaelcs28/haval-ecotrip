@@ -3168,11 +3168,16 @@ function _liveTripStart(tripId) {
       // do agora, evitando colisão com o histórico e permitindo persistir
       // + reaper (`_finalizeAbandonedTrip`) rodar em cima do novo arquivo.
       if (Array.isArray(d.samples) && d.samples.length && !d._liveSamples) {
-        const newId = String(Date.now());
-        console.log(`[liveTrip] tripId ${id} já é autoritativo — reencaminhando ciclo pra novo tripId=${newId}`);
-        id = newId;
-        existing = [];
-        existingStart = null;
+        // O APK já postou os samples definitivos deste id. Antes isto cunhava um
+        // id novo pra não perder o buffer ao vivo — e cada colisão deixava um
+        // arquivo de viagem órfão no histórico (4 numa ida ao almoço; 2.845 em
+        // 14/10, quando a guarda de entrada também estava furada).
+        //
+        // Não há o que salvar: quem é dono do trajeto deste id é o APK, e ele
+        // reposta a viagem inteira no fim. Para de bufferizar e sai.
+        _liveTrip = null;
+        console.log(`[liveTrip] tripId ${id} já é autoritativo (APK é dono) — sem buffer ao vivo`);
+        return;
       } else {
         if (Array.isArray(d.samples)) existing = d.samples;
         if (d.actualStart) existingStart = d.actualStart;
@@ -10079,6 +10084,10 @@ let _recadosLista = [];
 // certificado são as falhas que só aparecem na hora de emitir, quando já é
 // tarde pra resolver (certificado novo leva dias).
 const NFSE_URL = process.env.NFSE_HEALTH_URL || 'http://127.0.0.1:3070/api/saude';
+// Quais empresas do emissor esta parede acompanha. As outras são ignoradas
+// por completo: não entram em alerta, nem no detalhe, nem na linha de
+// serviços. Trocar aqui muda tudo de uma vez.
+const NFSE_CERT_EMPRESAS = new RegExp(process.env.NFSE_CERT_EMPRESAS || 'CLEAN MASTER', 'i');
 let _nfse = null;
 let _creditoVigia = null;   // resumo operacional, atualizado fora do caminho do poller
 
@@ -10138,6 +10147,21 @@ async function _pollMiniApps() {
     const j = await _getJson(NFSE_URL, 8000, null);
     _nfse = j._err ? { up: false, error: j._err, ts: Date.now() }
                    : { up: true, ...j, ts: Date.now() };
+    // O emissor atende três empresas, mas só a Clean Master é acompanhada aqui
+    // (pedido de 15/10/2026 — as outras são ruído nesta parede). Filtro na
+    // ORIGEM, não em cada alerta: `certificados`, `cert_dias_min` e a linha de
+    // serviços leem este mesmo objeto em seis pontos, e filtrar em cada um
+    // deixaria a parede dizendo uma coisa e o alerta outra na primeira vez que
+    // alguém mexesse em só metade deles.
+    if (_nfse.up) {
+      const so = (c) => NFSE_CERT_EMPRESAS.test(String(c?.empresa ?? c ?? ''));
+      _nfse.certificados = (_nfse.certificados || []).filter(so);
+      _nfse.empresas_sem_certificado = (_nfse.empresas_sem_certificado || []).filter(so);
+      const prazos = _nfse.certificados.map(c => c.dias).filter(d => d != null);
+      // Sem certificado da empresa vigiada não existe "menor prazo": null, e
+      // não 0 — 0 seria lido como "vence hoje" e pintaria a parede de vermelho.
+      _nfse.cert_dias_min = prazos.length ? Math.min(...prazos) : null;
+    }
   }
   _recadosLista = [];
   for (const alvo of RECADOS_ALVOS) {
@@ -10170,11 +10194,22 @@ function _evalMiniAppAlerts() {
     // Prazo do certificado: avisa com 30 dias porque renovar leva dias, não
     // minutos. Avisar no dia do vencimento seria avisar tarde.
     const dias = _nfse.cert_dias_min;
+    // Qual empresa, não só "um certificado": são três no emissor, e saber que
+    // falta pouco sem saber de quem não deixa ninguém agir.
+    const venc = (_nfse.certificados || [])
+      .filter(c => c && c.dias != null)
+      .sort((a, b) => a.dias - b.dias)[0];
+    const deQuem = venc ? `${venc.empresa} (vence ${venc.vence_em})` : 'Certificado do emissor';
     _alert('nfse_cert_vencendo', _nfse.up === true && dias != null && dias <= 30,
       '🧾 Certificado do emissor vencendo',
-      `Faltam ${dias} dias para vencer. Sem ele o emissor para de assinar — ` +
+      `${deQuem}: faltam ${dias} dias. Sem ele o emissor para de assinar — ` +
       `renovação leva dias, então comece agora.`,
-      dias != null && dias <= 7 ? 'urgent' : 'high', ['receipt', 'hourglass'],
+      // VERMELHO só abaixo de 3 dias. A parede pinta `urgent` e `high` do mesmo
+      // jeito (crit), então `high` aos 30 dias deixava a tela em "Precisa de
+      // você" por um mês inteiro — e vermelho que fica um mês aceso treina a
+      // ignorar vermelho. Acima de 3 dias o alerta continua aceso, em âmbar:
+      // avisa sem gritar. `default` é o que a parede mapeia para `warn`.
+      dias != null && dias < 3 ? 'urgent' : 'default', ['receipt', 'hourglass'],
       { repeatEvery: 24 * 3600_000 });
   }
   for (const r of _recadosLista) {

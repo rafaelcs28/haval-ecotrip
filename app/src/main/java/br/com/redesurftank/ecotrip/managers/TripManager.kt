@@ -705,6 +705,9 @@ class TripManager private constructor() {
     /** Janela máxima (ms) entre fim de uma viagem e o engate da próxima pra permitir
      *  continuação. 60min cobre almoços e recargas curtas. */
     private val RESUME_WINDOW_MS = 60L * 60_000L
+    /** Pausa máxima pra tratar a viagem aberta no boot como "o app só reiniciou".
+     *  Reinício de multimídia leva ~1 min; parada de almoço, não. */
+    private val MAX_PAUSA_RETOMADA_MS = 10L * 60_000L
 
     /**
      * Retorna a última viagem se ela for elegível pra continuação:
@@ -1418,19 +1421,39 @@ class TripManager private constructor() {
             prefs.edit().remove(SharedPreferencesKeys.LAST_DEATH_REASON).apply()
             reportApkDeath(deathTripId, deathReason, deathEndedCleanly)
 
-            if (lastDrivingReadyState == 1) {
+            val inProgressFile = java.io.File(samplesDir, "${autoTripStartMs}_inprogress.json")
+            val preloaded: List<TelemetrySample> = if (inProgressFile.exists()) {
+                try {
+                    val type = object : TypeToken<List<TelemetrySample>>() {}.type
+                    gson.fromJson<List<TelemetrySample>>(inProgressFile.readText(), type) ?: emptyList()
+                } catch (_: Exception) { emptyList() }
+            } else emptyList()
+            // Há quanto tempo essa viagem não dá sinal de vida. A última amostra é o
+            // melhor relógio que existe; sem amostras, a hora do arquivo serve.
+            val ultimaAtividadeMs = preloaded.lastOrNull()?.let { autoTripStartMs + it.t * 1000L }
+                ?: inProgressFile.takeIf { it.exists() }?.lastModified()
+            val pausaMs = ultimaAtividadeMs?.let { System.currentTimeMillis() - it } ?: 0L
+
+            if (lastDrivingReadyState == 1 && pausaMs <= MAX_PAUSA_RETOMADA_MS) {
                 // Carro ainda ligado (state persistido=1) → o app só reiniciou no meio.
                 // Retoma a gravação. Sempre passa flushFile válido — mesmo se o arquivo
                 // _inprogress sumiu, o recorder persiste do zero pra não perder samples.
-                val inProgressFile = java.io.File(samplesDir, "${autoTripStartMs}_inprogress.json")
-                val preloaded: List<TelemetrySample> = if (inProgressFile.exists()) {
-                    try {
-                        val type = object : TypeToken<List<TelemetrySample>>() {}.type
-                        gson.fromJson<List<TelemetrySample>>(inProgressFile.readText(), type) ?: emptyList()
-                    } catch (_: Exception) { emptyList() }
-                } else emptyList()
                 telemetryRecorder?.startRecording(autoTripStartMs, preloaded, inProgressFile)
-                AppLogger.i(TAG, "AutoTrip retomado após reinício: ${preloaded.size} amostras carregadas do disco (inProgressExistia=${inProgressFile.exists()})")
+                AppLogger.i(TAG, "AutoTrip retomado após reinício: ${preloaded.size} amostras carregadas do disco (inProgressExistia=${inProgressFile.exists()}, parada=${pausaMs / 60_000}min)")
+            } else if (lastDrivingReadyState == 1) {
+                // Carro "ligado" segundo o estado persistido, mas a viagem está parada
+                // há tempo demais pra isso ser o app reiniciando no meio do caminho.
+                //
+                // Acontece quando o dono desliga o carro e a transição 1→0 não chega a
+                // ser processada (app morre antes, ou a multimídia reinicia junto). O
+                // flag fica preso em 1 e, na volta, o app colava a viagem nova na
+                // antiga: em 15/10 o almoço inteiro — 53 min com o carro desligado —
+                // virou uma viagem só de casa ao trabalho passando por casa.
+                //
+                // O estado persistido diz SE o carro estava ligado; ele não diz HÁ
+                // QUANTO TEMPO. Sem o relógio, 1 minuto e 1 hora são a mesma coisa.
+                AppLogger.w(TAG, "AutoTrip aberto sem atividade há ${pausaMs / 60_000}min (drivingReady=1) — finalizando em vez de retomar")
+                synchronized(lock) { onAutoTripEnd() }
             } else {
                 // Viagem órfã: o carro já desligou (state≠1) enquanto o app estava morto,
                 // então a transição 1→0 que finalizaria a viagem nunca chegou. Finaliza
