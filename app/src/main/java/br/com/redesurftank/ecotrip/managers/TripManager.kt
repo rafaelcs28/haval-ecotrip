@@ -1407,6 +1407,7 @@ class TripManager private constructor() {
         }
         // Inicializa recorder de telemetria (GPS ativado depois via startGps())
         telemetryRecorder = TelemetryRecorder(ctx)
+        telemetryRecorder?.onFix = { lat, lng -> avaliaCortePorPonto(lat, lng) }
 
         // Se havia um auto-trip em andamento antes do reinício, retoma a gravação.
         // Carrega as amostras já gravadas em disco (flush a cada 60 s) para preservar a rota.
@@ -1775,6 +1776,68 @@ class TripManager private constructor() {
         // Guarda-estacionamento: arma ao desligar (1→0), desarma ao ligar (0→1).
         // Fora do lock — arm()/disarm() têm sincronização própria.
         if (transitioned) ParkGuard.onIgnition(nowReady)
+    }
+
+    // ── Corte de viagem no último ponto com sinal ────────────────────────────
+    //
+    // O prédio do trabalho não pega celular onde o carro fica. A viagem fechava
+    // certo lá dentro, mas ficava presa no aparelho: só subia quando o carro
+    // voltava a ter rede, e até lá não aparecia no celular do dono. Fechar aqui,
+    // no último ponto com sinal, faz o POST sair na hora.
+    //
+    // Mora no APK, e não nas automações do bridge, porque é justamente onde não
+    // há rede que ela precisa funcionar.
+    private val CORTE_LAT = -16.6970021271502
+    private val CORTE_LNG = -49.255941319957195
+    // 40 m e não 10: a 20 km/h o carro atravessa um círculo de 10 m em ~3,6 s, e
+    // uma fixação ruim passa batido. 40 m é o raio em que ainda dá pra dizer que
+    // o carro passou por ali.
+    private val CORTE_RAIO_M = 40.0
+    // Guarda de distância, sem guarda de tempo. Saindo, o dono passa por este
+    // mesmo ponto com a viagem recém-aberta: 500 m separa chegar de sair, porque
+    // dentro do prédio não se anda tanto. Tempo não serve — a saída pode demorar
+    // mais que qualquer limite razoável (rampa, portão) e cortaria a viagem nova.
+    private val CORTE_MIN_KM = 0.5f
+    /// Borda: só dispara ao ENTRAR no círculo, não a cada fixação lá dentro.
+    private var corteDentro = false
+    /// Fechar viagem grava arquivo e dispara publicação; o listener de GPS roda no
+    /// looper principal, e travar ele é como o app já morreu antes.
+    private val corteExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
+
+    /** Chamado a cada fixação de GPS aceita (via TelemetryRecorder.onFix). */
+    private fun avaliaCortePorPonto(lat: Double, lng: Double) {
+        val d = distanciaM(lat, lng, CORTE_LAT, CORTE_LNG)
+        val dentro = d <= CORTE_RAIO_M
+        if (!dentro) { corteDentro = false; return }
+        if (corteDentro) return          // já tratou esta entrada
+        corteDentro = true
+        corteExecutor.submit { cortaViagemNoPonto(d) }
+    }
+
+    private fun cortaViagemNoPonto(d: Double) {
+        synchronized(lock) {
+            if (autoTripStartMs == 0L) return@synchronized
+            val km = lifeDistKm - autoTripStartDist
+            if (km < CORTE_MIN_KM) {
+                AppLogger.i(TAG, "[corte] no ponto com ${"%.2f".format(km)}km — abaixo de $CORTE_MIN_KM, é saída: mantém a viagem")
+                return@synchronized
+            }
+            AppLogger.i(TAG, "[corte] chegada no último ponto com sinal (${"%.0f".format(d)}m, viagem com ${"%.1f".format(km)}km) — fecha e abre outra")
+            onAutoTripEnd()
+            saveGearTransitionCheckpoint()
+            onAutoTripStart()
+        }
+    }
+
+    /** Haversine em metros. */
+    private fun distanciaM(aLat: Double, aLng: Double, bLat: Double, bLng: Double): Double {
+        val r = 6_371_000.0
+        val dLat = Math.toRadians(bLat - aLat)
+        val dLng = Math.toRadians(bLng - aLng)
+        val h = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                Math.cos(Math.toRadians(aLat)) * Math.cos(Math.toRadians(bLat)) *
+                Math.sin(dLng / 2) * Math.sin(dLng / 2)
+        return 2 * r * Math.asin(Math.sqrt(h))
     }
 
     /** Salva checkpoint dos valores lifetime atuais. Chamado de dentro de synchronized(lock). */

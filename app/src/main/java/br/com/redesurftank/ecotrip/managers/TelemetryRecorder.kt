@@ -80,6 +80,9 @@ class TelemetryRecorder(private val context: Context) {
     private var refAlt      = Double.NaN
     private val ELEV_DEADBAND_M = 3.0
 
+    /** Avisado a cada fixação aceita (lat, lng). TripManager usa pro corte por ponto. */
+    var onFix: ((Double, Double) -> Unit)? = null
+
     private val locationListener = LocationListener { loc: Location ->
         val isGps = loc.provider == LocationManager.GPS_PROVIDER
         val acc   = if (loc.hasAccuracy()) loc.accuracy else Float.MAX_VALUE
@@ -99,6 +102,9 @@ class TelemetryRecorder(private val context: Context) {
         latestLat = loc.latitude
         latestLng = loc.longitude
         latestGpsMs = now
+        // Quem decide o que fazer com a posição é o TripManager (corte automático
+        // de viagem). Aqui só repassa a fixação já aprovada pelo gate de qualidade.
+        try { onFix?.invoke(loc.latitude, loc.longitude) } catch (_: Exception) {}
         latestGpsProvider = if (isGps) "gps" else "network"
         // Só GPS tem altitude útil (NETWORK não). Acumula subida/descida com deadband.
         if (loc.hasAltitude() && loc.provider == LocationManager.GPS_PROVIDER) {
