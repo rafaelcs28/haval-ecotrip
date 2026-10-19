@@ -27,7 +27,7 @@ Projects without Git are never submitted implicitly. First migrate the intended 
 
 Each job has separate `incoming`, `work`, `out`, `logs`, and `state` locations. Existing project copies are never destinations. The runner processes one job at a time, survives the submitting SSH session, verifies the input hash, and rejects absolute paths, parent traversal, archive links, credential filenames, archives above 5 GiB, or a build host with less than 15 GiB free.
 
-Android and Xcode commands have a 45-minute timeout. Failed work directories and logs remain available for diagnosis; cleanup is explicit so failure evidence is not silently destroyed.
+When `package-lock.json` is present, the isolated job runs `npm ci --ignore-scripts --no-audit --no-fund` before Gradle. Android and Xcode commands have a 45-minute timeout, and dependency installation has a 15-minute timeout. Failed work directories and logs remain available for diagnosis; cleanup is explicit so failure evidence is not silently destroyed.
 
 Filename and content scanning reduce risk but cannot prove arbitrary source text contains no secret. Review each new commit and its build scripts before adding its exact SHA and build-control digest to the private allowlist.
 
@@ -41,4 +41,4 @@ For Xcode simulator validation, the queue accepts an audited Git commit plus an 
 
 ## Validation status
 
-The queue's `probe`, `status`, and `fetch` commands passed end-to-end tests with synthetic archives and verified output hashes. The first reviewed Android candidate was blocked before transfer because signing material was tracked by Git. No real APK was produced from that unsafe commit.
+The queue's `probe`, `status`, and `fetch` commands passed end-to-end tests with synthetic archives and verified output hashes. The first unsafe commit was blocked before transfer because signing material was tracked by Git. After signing separation in an isolated, reviewed commit, a real Debug APK completed successfully. The validated Debug package uses an `.dev` application ID so it can coexist with the production app; Release remained disabled and no signing material was published.
