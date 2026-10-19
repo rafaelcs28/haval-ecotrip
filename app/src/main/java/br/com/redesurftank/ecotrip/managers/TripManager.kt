@@ -1789,10 +1789,10 @@ class TripManager private constructor() {
     // há rede que ela precisa funcionar.
     private val CORTE_LAT = -16.6970021271502
     private val CORTE_LNG = -49.255941319957195
-    // 40 m e não 10: a 20 km/h o carro atravessa um círculo de 10 m em ~3,6 s, e
-    // uma fixação ruim passa batido. 40 m é o raio em que ainda dá pra dizer que
-    // o carro passou por ali.
-    private val CORTE_RAIO_M = 40.0
+    private val CORTE_RAIO_M = 30.0
+    // Ao parar já dentro do prédio o GPS pode sumir antes da próxima fixação. Nesse
+    // caso, aceita a última posição por alguns segundos quando a velocidade chega a 0.
+    private val CORTE_GPS_MAX_AGE_MS = 30_000L
     // Guarda de distância, sem guarda de tempo. Saindo, o dono passa por este
     // mesmo ponto com a viagem recém-aberta: 500 m separa chegar de sair, porque
     // dentro do prédio não se anda tanto. Tempo não serve — a saída pode demorar
@@ -1809,6 +1809,7 @@ class TripManager private constructor() {
         val d = distanciaM(lat, lng, CORTE_LAT, CORTE_LNG)
         val dentro = d <= CORTE_RAIO_M
         if (!dentro) { corteDentro = false; return }
+        if (latestSpeedKmh != 0f) return
         if (corteDentro) return          // já tratou esta entrada
         corteDentro = true
         corteExecutor.submit { cortaViagemNoPonto(d) }
@@ -2123,6 +2124,15 @@ class TripManager private constructor() {
                     lastSpeedSampleMs = nowSpd
                     latestSpeedKmh = value
                     telemetryRecorder?.latestSpeedKmh = value
+                    if (value == 0f) {
+                        telemetryRecorder?.let { recorder ->
+                            val gpsAgeMs = nowSpd - recorder.latestGpsMs
+                            if (recorder.latestGpsMs > 0L && gpsAgeMs <= CORTE_GPS_MAX_AGE_MS &&
+                                !(recorder.latestLat == 0.0 && recorder.latestLng == 0.0)) {
+                                avaliaCortePorPonto(recorder.latestLat, recorder.latestLng)
+                            }
+                        }
+                    }
                     if (autoTripStartMs > 0L && value > autoTripMaxSpeed) {
                         autoTripMaxSpeed = value
                         // Persiste pra sobreviver a kill do app mid-trip. Só grava em
