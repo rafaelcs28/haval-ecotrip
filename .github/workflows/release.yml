@@ -2,8 +2,6 @@ name: Build & Release APK
 
 on:
   push:
-    branches:
-      - main
     tags:
       - 'v*'          # trigger on any tag like v1.1, v1.2, v2.0
   workflow_dispatch:  # allow manual trigger from GitHub UI
@@ -13,9 +11,6 @@ permissions:
 
 jobs:
   build:
-    if: github.event_name != 'push' || startsWith(github.ref, 'refs/tags/') || contains(github.event.head_commit.message, '[release v6.236]')
-    env:
-      RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'v6.236' }}
     runs-on: ubuntu-latest
 
     steps:
@@ -51,7 +46,7 @@ jobs:
           # Deriva a versão da tag (vX.Y): versionName=X.Y, versionCode=X*1000+Y.
           # Garante que cada release reporte sua própria versão (senão o OTA do
           # carro não reconhece a atualização — ficava sempre "5.92").
-          VNAME="${RELEASE_TAG#v}"
+          VNAME="${GITHUB_REF_NAME#v}"
           MAJOR="${VNAME%%.*}"; MINOR="${VNAME#*.}"; MINOR="${MINOR%%.*}"
           # 10# força base-10: sem isso, MINOR "08"/"09" vira octal inválido (build sem
           # versionCode → cai no default → carro recusa como downgrade) e "10" virava 8.
@@ -61,7 +56,7 @@ jobs:
 
       - name: Rename APK
         run: |
-          VERSION="$RELEASE_TAG"
+          VERSION="${GITHUB_REF_NAME:-manual}"
           APK_SRC=$(find app/build/outputs/apk/release -name "*.apk" | head -1)
           cp "$APK_SRC" "ecotrip-impulse-${VERSION}.apk"
           echo "APK_PATH=ecotrip-impulse-${VERSION}.apk" >> $GITHUB_ENV
@@ -69,10 +64,10 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ env.RELEASE_TAG }}
-          name: "Ecotrip Impulse ${{ env.RELEASE_TAG }}"
+          tag_name: ${{ github.ref_name }}
+          name: "Ecotrip Impulse ${{ github.ref_name }}"
           body: |
-            ## Ecotrip Impulse ${{ env.RELEASE_TAG }}
+            ## Ecotrip Impulse ${{ github.ref_name }}
 
             Instale o APK abaixo no sistema multimídia do Haval.
           files: ${{ env.APK_PATH }}
