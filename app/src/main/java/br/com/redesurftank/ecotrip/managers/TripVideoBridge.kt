@@ -245,6 +245,7 @@ class TripVideoBridge(
         @Volatile private var runtime: TripVideoBridge? = null
         @Volatile private var running = false
         @Volatile private var remoteLive = false
+        @Volatile private var remoteLiveExpiresAtMs = 0L
         @Volatile private var unavailableLogged = false
         private var lastObservedActive: Long? = null
         private var catalogPolls = 0
@@ -273,6 +274,7 @@ class TripVideoBridge(
             handler.removeCallbacks(poll)
             runtime = null
             remoteLive = false
+            remoteLiveExpiresAtMs = 0L
             lastObservedActive = null
             catalogPolls = 0
             CameraSettingsReader.stop()
@@ -280,7 +282,8 @@ class TripVideoBridge(
 
         fun isRecordingOrLiveActive(): Boolean =
             (runtime?.state?.lastTripId != null && CameraSettingsReader.automaticRecordingEnabled()) ||
-                (remoteLive && CameraSettingsReader.remoteLiveEnabled())
+                (remoteLive && System.currentTimeMillis() < remoteLiveExpiresAtMs &&
+                    CameraSettingsReader.remoteLiveEnabled())
 
         fun handleRemoteCommand(command: String, payload: String): JSONObject {
             if (command == "video_catalog") {
@@ -331,8 +334,14 @@ class TripVideoBridge(
                 }
                 val ok = bridge.sendRemote(cameraCommand)
                 if (ok) {
-                    if (command == "video_live_start") remoteLive = true
-                    if (command == "video_live_stop") remoteLive = false
+                    if (command == "video_live_start") {
+                        remoteLive = true
+                        remoteLiveExpiresAtMs = cameraCommand.expiresAtMs ?: 0L
+                    }
+                    if (command == "video_live_stop") {
+                        remoteLive = false
+                        remoteLiveExpiresAtMs = 0L
+                    }
                     JSONObject().put("ok", true).put("requestId", requestId)
                 } else error("Haval Camera indisponível")
             }.getOrElse { error(it.message ?: it.javaClass.simpleName) }
