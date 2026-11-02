@@ -62,10 +62,10 @@ final class CameraVideoDecoder: CameraVideoRendering {
                 )
             }
         }
-        guard status == noErr, let typed = description as? CMVideoFormatDescription else {
+        guard status == noErr, let description else {
             throw DecoderError.invalidConfiguration
         }
-        return typed
+        return description
     }
 
     private static func makeSample(avcc: Data, pts: UInt64, format: CMVideoFormatDescription) throws -> CMSampleBuffer {
