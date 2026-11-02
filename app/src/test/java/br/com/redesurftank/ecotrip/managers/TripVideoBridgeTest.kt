@@ -153,10 +153,9 @@ class TripVideoBridgeTest {
         val store = CameraCatalogRevisionStore(backend)
 
         assertFalse(runCatching { store.revisionFor("new") }.isSuccess)
-        assertEquals("old", backend.body)
-        assertEquals(7L, backend.revision)
         backend.fail = false
         assertEquals(8L, store.revisionFor("new"))
+        assertEquals(2, backend.saveAttempts)
     }
 
     private class FakeCatalogRevisionBackend(
@@ -164,11 +163,13 @@ class TripVideoBridgeTest {
         override var revision: Long,
         var fail: Boolean,
     ) : CameraCatalogRevisionStore.Backend {
+        var saveAttempts = 0
         override fun save(body: String, revision: Long): Boolean {
-            if (fail) return false
+            saveAttempts++
+            // Mirrors SharedPreferences: process memory may change even when disk commit fails.
             this.body = body
             this.revision = revision
-            return true
+            return !fail
         }
     }
 }
