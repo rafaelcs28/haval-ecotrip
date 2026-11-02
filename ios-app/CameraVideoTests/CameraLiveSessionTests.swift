@@ -124,7 +124,8 @@ final class CameraLiveSessionTests: XCTestCase {
         await session.start()
 
         await fulfillment(of: [scheduled], timeout: 1)
-        XCTAssertEqual(renewalDelay, 1_740, accuracy: 0.001)
+        XCTAssertNotNil(renewalDelay)
+        XCTAssertEqual(renewalDelay!, 1_740, accuracy: 0.001)
         await session.stop()
     }
 
