@@ -238,7 +238,7 @@ class TripVideoBridge(
     companion object {
         private const val TAG = "TripVideoBridge"
         private const val POLL_MS = 2_000L
-        private val handler = Handler(Looper.getMainLooper())
+        private val handler by lazy { Handler(Looper.getMainLooper()) }
         private val catalogExecutor = Executors.newSingleThreadExecutor { runnable ->
             Thread(runnable, "camera-catalog").apply { isDaemon = true }
         }

@@ -14,6 +14,7 @@ class CameraTelemetryPublisher(
     private val active: () -> Boolean,
     private val monotonicMs: () -> Long = SystemClock::elapsedRealtime,
     private val wallClockMs: () -> Long = System::currentTimeMillis,
+    private val failureReporter: (String?) -> Unit = {},
 ) {
     data class Sample(
         val monotonicMs: Long,
@@ -62,7 +63,7 @@ class CameraTelemetryPublisher(
         } catch (failure: Exception) {
             if (!failureLogged) {
                 failureLogged = true
-                TripVideoBridge.noteUnavailable("telemetria: ${failure.message}")
+                failureReporter("telemetria: ${failure.message}")
             }
             false
         }
@@ -104,7 +105,10 @@ class CameraTelemetryPublisher(
         fun start(context: Context) {
             if (runtime != null) return
             val app = context.applicationContext
-            val publisher = CameraTelemetryPublisher(AndroidSink(app), TripVideoBridge::isRecordingOrLiveActive)
+            val publisher = CameraTelemetryPublisher(
+                AndroidSink(app), TripVideoBridge::isRecordingOrLiveActive,
+                failureReporter = TripVideoBridge::noteUnavailable,
+            )
             val listener: DataListener = { key, value ->
                 if (key == CarConstants.CAR_BASIC_VEHICLE_SPEED.value ||
                     key == CarConstants.CAR_EV_INFO_MOTOR_POWER.value) {
