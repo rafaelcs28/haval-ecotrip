@@ -1,5 +1,4 @@
 import XCTest
-@testable import HavalEcoTrip
 
 @MainActor
 final class CameraLiveSessionTests: XCTestCase {

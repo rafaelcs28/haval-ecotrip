@@ -115,8 +115,8 @@ final class CameraLiveSession: ObservableObject {
     init(
         transport: CameraLiveTransport = .live,
         renderer: CameraVideoRendering? = nil,
-        bridgeURL: @escaping () -> String = { BridgeRouter.shared.currentURL },
-        bridgeToken: @escaping () -> String = { Settings.bridgeToken },
+        bridgeURL: @escaping () -> String,
+        bridgeToken: @escaping () -> String,
         now: @escaping () -> Date = Date.init,
         delays: CameraLiveDelays = .live
     ) {

@@ -163,8 +163,9 @@ targets:
     platform: iOS
     sources:
       - CameraVideoTests
-    dependencies:
-      - target: HavalEcoTrip
+      - path: HavalEcoTrip/CameraVideoProtocol.swift
+      - path: HavalEcoTrip/CameraVideoDecoder.swift
+      - path: HavalEcoTrip/CameraLiveSession.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: br.com.consorciolimpagyn.havalecotrip.CameraVideoTests

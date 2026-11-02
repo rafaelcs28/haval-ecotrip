@@ -3,8 +3,15 @@ import SwiftUI
 import UIKit
 
 struct CameraVideoView: View {
-    @StateObject private var session = CameraLiveSession()
+    @StateObject private var session: CameraLiveSession
     @Environment(\.dismiss) private var dismiss
+
+    init() {
+        _session = StateObject(wrappedValue: CameraLiveSession(
+            bridgeURL: { BridgeRouter.shared.currentURL },
+            bridgeToken: { Settings.bridgeToken }
+        ))
+    }
 
     var body: some View {
         NavigationStack {

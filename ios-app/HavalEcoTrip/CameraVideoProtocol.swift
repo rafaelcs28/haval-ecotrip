@@ -120,7 +120,9 @@ struct CameraVideoStreamState {
             configuration = (sps, pps)
             waitingForKeyframe = true
             resetPending = resetPending || changed
-            return .configuration(resetDecoder: resetPending)
+            let reset = resetPending
+            resetPending = false
+            return .configuration(resetDecoder: reset)
 
         case .accessUnit(_, let keyframe):
             guard configuration != nil else { throw StreamError.missingConfiguration }
