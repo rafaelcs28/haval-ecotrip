@@ -4,6 +4,18 @@ Plataforma de **telemetria, painel e controle em tempo real** pro **Haval H6 (PH
 
 > 👉 **Quer só instalar (servidor próprio)?** Vá direto pro guia passo a passo: **[`docs/INSTALACAO-AMIGO.md`](docs/INSTALACAO-AMIGO.md)**.
 
+### Desenvolvimento neste repositório
+
+- [Escopo e critérios do produto](PRODUCT.md)
+- [Preparação do ambiente](docs/onboarding.md)
+- [Arquitetura e contratos](docs/architecture.md)
+- [Design e acessibilidade](docs/design.md)
+- [Qualidade e verificações](docs/quality.md)
+- [Instruções para agentes](AGENTS.md)
+- [Setup do toolkit e evidências](docs/setup.md)
+
+Builds Android/Gradle/Kotlin e Xcode não rodam no coordenador. O fluxo autorizado usa commits Git auditados e a fila do Mac Mini; consulte [o guia de build](docs/BUILD_ANDROID_ON_MAC_MINI.md).
+
 ---
 
 ## O que dá pra fazer
@@ -81,12 +93,11 @@ Abra `http://IP-DO-SERVIDOR:3000`, entre com a senha (`BRIDGE_TOKEN`), e siga o 
 - Requer **Shizuku** rodando na multimídia (acesso ao CAN do carro).
 - **Configuração = pareamento** (não se digita broker no carro): no PWA gere o código e no carro use **Ajustes → Parear**.
 
-Compilar localmente:
+Build de desenvolvimento:
 ```bash
-export JAVA_HOME=".../openjdk@17/..."
-./gradlew :app:assembleRelease     # APK em app/build/outputs/apk/release/
+scripts/build-on-mac-mini.sh COMMIT
 ```
-Assinatura: crie `local.properties` na raiz com `SIGNING_STORE_FILE`, `SIGNING_STORE_PASSWORD`, `SIGNING_KEY_ALIAS`, `SIGNING_KEY_PASSWORD`.
+O job retorna APK Debug, log e checksums. Release e assinatura exigem revisão separada; material de assinatura nunca entra no repositório ou no arquivo enviado à fila.
 
 ---
 
@@ -97,7 +108,7 @@ APK Android que roda o **mesmo cluster do iPad** numa WebView, consumindo o brid
 - **Fit‑scaling** adaptativo (qualquer tela — tablet, dobrável), **auto‑update** (⚙ → Atualizar app).
 - Config: **⚙ → Base URL + senha** (a do `BRIDGE_TOKEN`).
 
-Baixe a tag `cluster-vX.Y` em Releases. Compilar: `./gradlew :cluster:assembleRelease`.
+Baixe a tag `cluster-vX.Y` em Releases. Builds do módulo também seguem a fila autorizada; não execute Gradle no coordenador.
 
 ---
 
