@@ -192,6 +192,7 @@ class TripVideoBridge(
             Thread(runnable, "camera-reconcile").apply { isDaemon = true }
         }
         private val reconcileInFlight = AtomicBoolean(false)
+        @Volatile private var catalogRevisionStore: CameraCatalogRevisionStore? = null
         @Volatile private var runtime: TripVideoBridge? = null
         @Volatile private var running = false
         @Volatile private var remoteLive = false
@@ -379,15 +380,18 @@ class TripVideoBridge(
 
         @Synchronized
         private fun catalogRevision(context: Context, body: String): Long {
-            val preferences = context.getSharedPreferences("camera-video-bridge", Context.MODE_PRIVATE)
-            return CameraCatalogRevisionStore(object : CameraCatalogRevisionStore.Backend {
-                override val body: String? get() = preferences.getString("catalogBody", null)
-                override val revision: Long get() = preferences.getLong("catalogRevision", 0L)
-                override fun save(body: String, revision: Long): Boolean = preferences.edit()
-                    .putString("catalogBody", body)
-                    .putLong("catalogRevision", revision)
-                    .commit()
-            }).revisionFor(body)
+            val store = catalogRevisionStore ?: run {
+                val preferences = context.getSharedPreferences("camera-video-bridge", Context.MODE_PRIVATE)
+                CameraCatalogRevisionStore(object : CameraCatalogRevisionStore.Backend {
+                    override val body: String? get() = preferences.getString("catalogBody", null)
+                    override val revision: Long get() = preferences.getLong("catalogRevision", 0L)
+                    override fun save(body: String, revision: Long): Boolean = preferences.edit()
+                        .putString("catalogBody", body)
+                        .putLong("catalogRevision", revision)
+                        .commit()
+                }).also { catalogRevisionStore = it }
+            }
+            return store.revisionFor(body)
         }
 
         internal fun noteUnavailable(detail: String?) {

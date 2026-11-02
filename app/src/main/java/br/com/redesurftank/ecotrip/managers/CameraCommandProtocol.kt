@@ -175,10 +175,15 @@ internal class CameraCatalogRevisionStore(private val backend: Backend) {
         fun save(body: String, revision: Long): Boolean
     }
 
+    private var confirmedBody: String? = backend.body
+    private var confirmedRevision: Long = backend.revision
+
     @Synchronized fun revisionFor(body: String): Long {
-        if (backend.body == body) return backend.revision
-        val next = Math.addExact(backend.revision, 1)
+        if (confirmedBody == body) return confirmedRevision
+        val next = Math.addExact(confirmedRevision, 1)
         check(backend.save(body, next)) { "falha ao persistir revisão do catálogo" }
+        confirmedBody = body
+        confirmedRevision = next
         return next
     }
 }
