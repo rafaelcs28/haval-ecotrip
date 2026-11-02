@@ -5,7 +5,8 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node --watch server.js"
+    "dev": "node --watch server.js",
+    "test:video": "node --test test/video-relay.test.js"
   },
   "dependencies": {
     "@simplewebauthn/server": "^13.3.0",

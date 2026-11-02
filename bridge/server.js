@@ -24,6 +24,7 @@ const bluettiCloud = require('./bluetti-cloud');
 const starlink     = require('./starlink-sitio');
 const sajCloud     = require('./saj-cloud');   // nuvem SAJ direta (Catalão), sem o HA no caminho
 const ocpp         = require('./ocpp-server'); // central system do carregador (OCPP 1.6J)
+const { VideoRelay } = require('./video-relay');
 
 // Sem isto, uma rejection/exception fora de rota (timer, callback MQTT, fetch em
 // background) derrubava o processo inteiro. Loga e segue — pm2 só reinicia em crash real.
@@ -17801,6 +17802,27 @@ function _handleAudioWs(ws, req) {
 const wssAudio = new WebSocketServer({ noServer: true });
 wssAudio.on('connection', _handleAudioWs);
 
+// Vídeo ao vivo: credenciais de sessão são curtas, escopadas e nunca logadas.
+// O bridge só encaminha HVC1 em memória; não transcodifica nem persiste frames.
+const videoRelay = new VideoRelay({
+  logger: (event, fields) => console.log(`[video] ${event}`, fields),
+  sendCarCommand: (command, payload) => new Promise((resolve, reject) => {
+    if (!mqttClient?.connected) {
+      const error = new Error('MQTT offline');
+      error.code = 'mqtt_offline';
+      return reject(error);
+    }
+    mqttClient.publish(`${MQTT_PREFIX}/cmd/${command}`, JSON.stringify(payload),
+      { qos: 1, retain: false }, error => error ? reject(error) : resolve());
+  }),
+});
+videoRelay.installRoutes(app, {
+  requireAuth,
+  publicUrl: () => (process.env.BRIDGE_PUBLIC_URL ||
+    process.env.TAILSCALE_FUNNEL_URL ||
+    'https://bridge.malha.dev').replace(/\/+$/, ''),
+});
+
 // Roteador único de upgrade (http + https). Clockin já tem seu próprio listener
 // (proxy) — aqui ignoramos esses paths e deixamos ele tratar.
 function _routeUpgrade(req, socket, head) {
@@ -17810,6 +17832,8 @@ function _routeUpgrade(req, socket, head) {
     wss.handleUpgrade(req, socket, head, ws => wss.emit('connection', ws, req));
   } else if (pathname === '/ws/audio') {
     wssAudio.handleUpgrade(req, socket, head, ws => wssAudio.emit('connection', ws, req));
+  } else if (videoRelay.handleUpgrade(req, socket, head)) {
+    /* relay HVC1 autenticado por credencial curta da sessão */
   } else if (ocpp.lidaUpgrade(req, socket, head)) {
     /* carregador OCPP — o módulo já respondeu (aceitou ou devolveu 401) */
   } else {
