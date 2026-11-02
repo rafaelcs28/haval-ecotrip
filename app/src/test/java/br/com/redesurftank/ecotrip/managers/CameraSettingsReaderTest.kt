@@ -32,12 +32,18 @@ class CameraSettingsReaderTest {
         }.isSuccess)
     }
 
-    @Test fun confirmedResponseKeepsTypedSnapshotAndConflict() {
-        val snapshot = linkedMapOf<String, Any>("automaticRecording" to true, "reserveGb" to 5)
-        val confirmed = CameraSettingsReader.ConfirmedSettings(4, false, snapshot)
+    @Test fun staleProviderUpdateReturnsRequeriedSnapshotAsConflict() {
+        val current = CameraSettingsReader.ConfirmedSettings(
+            5, true, linkedMapOf("automaticRecording" to false, "reserveGb" to 10),
+        )
 
-        assertFalse(confirmed.applied)
-        assertTrue(confirmed.snapshot["automaticRecording"] is Boolean)
-        assertTrue(confirmed.snapshot["reserveGb"] is Int)
+        val confirmed = CameraSettingsReader.confirmProviderUpdate(updateApplied = false, queried = current)
+        val fields = CameraSettingsReader.responseFields(confirmed)
+
+        assertEquals(5L, fields["revision"])
+        assertEquals(false, fields["applied"])
+        assertEquals(true, fields["conflict"])
+        assertEquals(current.snapshot, fields["settings"])
+        assertTrue((fields["settings"] as Map<*, *>)["reserveGb"] is Int)
     }
 }

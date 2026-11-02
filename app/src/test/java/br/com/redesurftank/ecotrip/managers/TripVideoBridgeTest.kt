@@ -2,6 +2,7 @@ package br.com.redesurftank.ecotrip.managers
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertFalse
 import org.junit.Test
 
 class TripVideoBridgeTest {
@@ -108,5 +109,66 @@ class TripVideoBridgeTest {
 
         assertEquals(listOf(10_000L, 20_001L), sink.commands.map { it.revision })
         assertEquals(20_001L, state.revision)
+    }
+
+    @Test fun rejectionAndErrorNeverPersistCommandedState() {
+        for (failure in listOf(
+            TripVideoBridge.CommandResult.rejected(),
+            TripVideoBridge.CommandResult.error(),
+        )) {
+            val state = MemoryState()
+            val sink = FakeSink().apply { result = failure }
+            assertFalse(bridge(state, sink).reconcile(1_000L, emptyMap()))
+            assertNull(state.lastTripId)
+            assertEquals(0L, state.revision)
+        }
+    }
+
+    @Test fun confirmedNoOpPersistsCommandedState() {
+        val state = MemoryState()
+        val sink = FakeSink().apply { result = TripVideoBridge.CommandResult.noOp() }
+
+        bridge(state, sink).reconcile(1_000L, emptyMap())
+
+        assertEquals(1_000L, state.lastTripId)
+        assertEquals(10_000L, state.revision)
+    }
+
+    @Test fun stopThenResumeUsesOriginalTripIdentityAndStart() {
+        val state = MemoryState(lastTripId = 1_000L, revision = 4)
+        val sink = FakeSink()
+        val bridge = bridge(state, sink)
+
+        bridge.reconcile(null, mapOf(1_000L to 9_000L))
+        bridge.reconcile(1_000L, mapOf(1_000L to 9_000L))
+
+        assertEquals(listOf(TripVideoBridge.Action.STOP_TRIP, TripVideoBridge.Action.START_TRIP),
+            sink.commands.map { it.action })
+        assertEquals(1_000L, sink.commands.last().tripId)
+        assertEquals(1_000L, sink.commands.last().startMs)
+    }
+
+    @Test fun failedCatalogRevisionCommitCannotReuseRevision() {
+        val backend = FakeCatalogRevisionBackend("old", 7, fail = true)
+        val store = CameraCatalogRevisionStore(backend)
+
+        assertFalse(runCatching { store.revisionFor("new") }.isSuccess)
+        assertEquals("old", backend.body)
+        assertEquals(7L, backend.revision)
+        backend.fail = false
+        assertEquals(8L, store.revisionFor("new"))
+    }
+
+    private class FakeCatalogRevisionBackend(
+        override var body: String?,
+        override var revision: Long,
+        var fail: Boolean,
+    ) : CameraCatalogRevisionStore.Backend {
+        override fun save(body: String, revision: Long): Boolean {
+            if (fail) return false
+            this.body = body
+            this.revision = revision
+            return true
+        }
     }
 }
