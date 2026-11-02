@@ -132,7 +132,7 @@ final class CameraVideoDecoder: CameraVideoRendering {
             sample,
             key: kCMSampleAttachmentKey_DisplayImmediately,
             value: kCFBooleanTrue,
-            attachmentMode: .shouldPropagate
+            attachmentMode: kCMAttachmentMode_ShouldPropagate
         )
         return sample
     }
