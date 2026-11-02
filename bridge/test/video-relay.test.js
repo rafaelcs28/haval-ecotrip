@@ -7,7 +7,12 @@ const test = require('node:test');
 const express = require('express');
 const { WebSocket } = require('ws');
 
-const { VideoRelay } = require('../video-relay');
+const {
+  VideoRelay,
+  VideoCommandBroker,
+  parseHvc1,
+  MAX_BUFFERED_BYTES,
+} = require('../video-relay');
 
 class FakeSocket extends EventEmitter {
   constructor() {
@@ -47,7 +52,7 @@ function hvc1({ type = 2, keyframe = false, payload = Buffer.from([0, 0, 0, 1, 0
   return frame;
 }
 
-function fixture() {
+function fixture(options = {}) {
   let now = 1_700_000_000_000;
   let randomByte = 1;
   const commands = [];
@@ -57,6 +62,7 @@ function fixture() {
     randomBytes: size => Buffer.alloc(size, randomByte++),
     logger: (event, fields) => logs.push({ event, fields }),
     sendCarCommand: async (command, payload) => commands.push({ command, payload }),
+    ...options,
   });
   return {
     relay,
@@ -155,6 +161,60 @@ test('plain HTTP WebSocket upgrade is rejected because video credentials are TLS
   assert.equal(status, 426);
 });
 
+test('public session URL must be HTTPS and is always emitted as WSS', async () => {
+  const { relay, commands } = fixture();
+  await assert.rejects(
+    relay.createSession({ publicUrl: 'http://bridge.example' }),
+    error => error.code === 'invalid_video_public_url',
+  );
+  assert.equal(commands.length, 0);
+  assert.equal(relay.sessions.size, 0);
+});
+
+test('forwarded HTTPS is trusted only from an allowlisted proxy address', async () => {
+  const { relay } = fixture({ trustedProxyAddresses: ['10.0.0.2'] });
+  const session = await create(relay);
+  let upgrades = 0;
+  relay.producerWss.handleUpgrade = () => { upgrades += 1; };
+  const raw = () => ({ output: '', destroyed: false, write(value) { this.output += value; }, destroy() { this.destroyed = true; } });
+  const request = remoteAddress => ({
+    url: `/ws/video/live/car?session=${session.sessionId}`,
+    headers: { authorization: `Bearer ${session.producerToken}`, 'x-forwarded-proto': 'https' },
+    socket: { remoteAddress },
+  });
+
+  const forged = raw();
+  relay.handleUpgrade(request('203.0.113.7'), forged, Buffer.alloc(0));
+  assert.match(forged.output, /^HTTP\/1\.1 426 /);
+  assert.equal(upgrades, 0);
+
+  relay.handleUpgrade(request('10.0.0.2'), raw(), Buffer.alloc(0));
+  assert.equal(upgrades, 1);
+});
+
+test('invalid upgrades are rejected before ws handleUpgrade and rate-limited per IP', async () => {
+  const { relay, logs } = fixture({ invalidUpgradeLimit: 2, invalidUpgradeWindowMs: 60_000 });
+  const session = await create(relay);
+  let upgrades = 0;
+  relay.producerWss.handleUpgrade = () => { upgrades += 1; };
+  const outputs = [];
+  for (let i = 0; i < 3; i++) {
+    const raw = { output: '', write(value) { this.output += value; }, destroy() {} };
+    relay.handleUpgrade({
+      url: `/ws/video/live/car?session=${session.sessionId}`,
+      headers: { authorization: 'Bearer invalid-secret' },
+      socket: { encrypted: true, remoteAddress: '198.51.100.9' },
+    }, raw, Buffer.alloc(0));
+    outputs.push(raw.output);
+  }
+
+  assert.equal(upgrades, 0);
+  assert.match(outputs[0], /^HTTP\/1\.1 401 /);
+  assert.match(outputs[2], /^HTTP\/1\.1 429 /);
+  assert.equal(relay.invalidAttempts.size <= 1, true);
+  assert.equal(JSON.stringify(logs).includes('invalid-secret'), false);
+});
+
 test('viewer join requests a keyframe and HVC1 bytes relay without payload logging', async () => {
   const { relay, logs } = fixture();
   const session = await create(relay);
@@ -163,7 +223,10 @@ test('viewer join requests a keyframe and HVC1 bytes relay without payload loggi
   assert.deepEqual(JSON.parse(producer.sent[0].data), { type: 'request_keyframe' });
 
   const marker = Buffer.from('secret-video-payload');
-  const frame = hvc1({ keyframe: true, payload: marker });
+  const payload = Buffer.alloc(4 + marker.length);
+  payload.writeUInt32BE(marker.length, 0);
+  marker.copy(payload, 4);
+  const frame = hvc1({ keyframe: true, payload });
   producer.emit('message', frame, true);
   assert.equal(viewer.sent.length, 1);
   assert.equal(viewer.sent[0].data, frame);
@@ -190,12 +253,39 @@ test('malformed HVC1 closes producer with protocol error', async () => {
   assert.equal(producer.closed[0].code, 4004);
 });
 
+test('HVC1 CONFIG payload requires complete non-empty SPS and PPS', () => {
+  const invalid = [
+    Buffer.from([0, 0, 0, 1, 0x68]),
+    Buffer.from([0, 2, 0x67]),
+    Buffer.from([0, 1, 0x67, 0, 0]),
+    Buffer.from([0, 1, 0x67, 0, 1, 0x68, 0]),
+  ];
+  for (const payload of invalid) {
+    assert.throws(() => parseHvc1(hvc1({ type: 1, payload })), /HVC1/);
+  }
+  assert.equal(parseHvc1(hvc1({ type: 1, payload: Buffer.from([0, 1, 0x67, 0, 1, 0x68]) })).type, 1);
+});
+
+test('HVC1 ACCESS_UNIT payload requires complete non-empty length-prefixed NAL units', () => {
+  const invalid = [
+    Buffer.from([0, 0, 0, 0]),
+    Buffer.from([0, 0, 0, 2, 0x65]),
+    Buffer.from([0, 0, 0, 1, 0x65, 0]),
+  ];
+  for (const payload of invalid) {
+    assert.throws(() => parseHvc1(hvc1({ payload })), /HVC1/);
+  }
+  const twoNals = Buffer.from([0, 0, 0, 1, 0x65, 0, 0, 0, 1, 0x61]);
+  assert.equal(parseHvc1(hvc1({ keyframe: true, payload: twoNals })).keyframe, true);
+});
+
 test('backpressure drops frames, requests recovery, and never queues video bytes', async () => {
-  const { relay } = fixture();
+  const { relay, advance } = fixture();
   const session = await create(relay);
   const producer = attach(relay, 'producer', session.sessionId, session.producerToken);
   const viewer = attach(relay, 'viewer', session.sessionId, session.viewerToken);
   producer.sent.length = 0;
+  advance(1_001);
   viewer.bufferedAmount = 1_048_577;
 
   producer.emit('message', hvc1(), true);
@@ -205,6 +295,178 @@ test('backpressure drops frames, requests recovery, and never queues video bytes
   assert.equal(producer.readyState, WebSocket.OPEN);
   assert.deepEqual(JSON.parse(producer.sent.at(-1).data), { type: 'request_keyframe' });
   assert.deepEqual(relay.stats(session.sessionId), { queuedFrames: 0, droppedFrames: 2 });
+});
+
+test('buffer cap includes the incoming frame length', async () => {
+  const { relay } = fixture();
+  const session = await create(relay);
+  const producer = attach(relay, 'producer', session.sessionId, session.producerToken);
+  const viewer = attach(relay, 'viewer', session.sessionId, session.viewerToken);
+  const frame = hvc1();
+  viewer.bufferedAmount = MAX_BUFFERED_BYTES - frame.length + 1;
+
+  producer.emit('message', frame, true);
+
+  assert.equal(viewer.sent.length, 0);
+  assert.equal(relay.stats(session.sessionId).droppedFrames, 1);
+});
+
+test('recovery forwards only CONFIG and next keyframe while keyframe requests are rate-limited', async () => {
+  const { relay, advance } = fixture();
+  const session = await create(relay);
+  const producer = attach(relay, 'producer', session.sessionId, session.producerToken);
+  const viewer = attach(relay, 'viewer', session.sessionId, session.viewerToken);
+  producer.sent.length = 0;
+  advance(1_001);
+  viewer.bufferedAmount = MAX_BUFFERED_BYTES;
+  producer.emit('message', hvc1(), true);
+  producer.emit('message', hvc1(), true);
+  assert.equal(producer.sent.length, 1);
+  advance(1_001);
+  producer.emit('message', hvc1(), true);
+  assert.equal(producer.sent.length, 2);
+
+  viewer.bufferedAmount = 0;
+  const config = hvc1({ type: 1, payload: Buffer.from([0, 1, 0x67, 0, 1, 0x68]) });
+  const delta = hvc1();
+  const keyframe = hvc1({ keyframe: true, payload: Buffer.from([0, 0, 0, 1, 0x65]) });
+  producer.emit('message', delta, true);
+  producer.emit('message', config, true);
+  producer.emit('message', delta, true);
+  producer.emit('message', keyframe, true);
+  producer.emit('message', delta, true);
+
+  assert.deepEqual(viewer.sent.map(entry => entry.data), [config, keyframe, delta]);
+});
+
+test('MQTT publish callback does not confirm command before correlated Camera result', async () => {
+  let published;
+  const broker = new VideoCommandBroker({
+    timeoutMs: 100,
+    publish: (command, payload, callback) => { published = { command, payload }; callback(null); },
+  });
+  let settled = false;
+  const pending = broker.send('video_live_start', { requestId: 'req-1' }).finally(() => { settled = true; });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(settled, false);
+  assert.equal(published.command, 'video_live_start');
+
+  broker.acceptResult('video_live_start', Buffer.from('{"ok":true,"requestId":"req-1"}'));
+  await pending;
+  assert.equal(settled, true);
+});
+
+test('Camera rejection and command timeout reject the pending MQTT command', async () => {
+  const rejected = new VideoCommandBroker({
+    timeoutMs: 100,
+    publish: (_command, _payload, callback) => callback(null),
+  });
+  const rejectedPromise = rejected.send('video_live_stop', { requestId: 'req-2' });
+  rejected.acceptResult('video_live_stop', Buffer.from('{"ok":false,"requestId":"req-2","error":"camera unavailable"}'));
+  await assert.rejects(rejectedPromise, error => error.code === 'camera_rejected');
+
+  const timedOut = new VideoCommandBroker({
+    timeoutMs: 10,
+    publish: (_command, _payload, callback) => callback(null),
+  });
+  await assert.rejects(
+    timedOut.send('video_live_start', { requestId: 'req-3' }),
+    error => error.code === 'camera_command_timeout',
+  );
+});
+
+test('session creation times out and late command completion cannot return expired credentials', async () => {
+  let startResolve;
+  let startPayload;
+  const relay = new VideoRelay({
+    commandTimeoutMs: 15,
+    sendCarCommand: (command, payload) => {
+      startPayload = payload;
+      if (command === 'video_live_stop') return Promise.resolve();
+      return new Promise(resolve => { startResolve = resolve; });
+    },
+  });
+  await assert.rejects(
+    relay.createSession({ publicUrl: 'https://bridge.example' }),
+    error => error.code === 'camera_command_timeout',
+  );
+  assert.equal(relay.hasSession(startPayload.requestId), false);
+  startResolve();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(relay.hasSession(startPayload.requestId), false);
+});
+
+test('late accepted start cannot return credentials after the session was closed', async () => {
+  let resolveStart;
+  let sessionId;
+  const relay = new VideoRelay({
+    commandTimeoutMs: 1_000,
+    sendCarCommand: (command, payload) => {
+      if (command === 'video_live_stop') return Promise.resolve();
+      sessionId = payload.requestId;
+      return new Promise(resolve => { resolveStart = resolve; });
+    },
+  });
+  const pending = relay.createSession({ publicUrl: 'https://bridge.example' });
+  await new Promise(resolve => setImmediate(resolve));
+  await relay.closeSession(sessionId, 'test');
+  resolveStart();
+  await assert.rejects(pending, error => error.code === 'video_session_expired');
+});
+
+test('POST does not return 201 before Camera confirms start', async t => {
+  let confirmStart;
+  let markDispatched;
+  const dispatched = new Promise(resolve => { markDispatched = resolve; });
+  const relay = new VideoRelay({
+    sendCarCommand: command => command === 'video_live_start'
+      ? new Promise(resolve => { confirmStart = resolve; markDispatched(); })
+      : Promise.resolve(),
+  });
+  const app = express();
+  app.use(express.json());
+  relay.installRoutes(app, {
+    requireAuth: (_req, _res, next) => next(),
+    publicUrl: () => 'https://bridge.example',
+  });
+  const server = http.createServer(app);
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => server.close());
+  const base = `http://127.0.0.1:${server.address().port}`;
+  let settled = false;
+  const response = fetch(`${base}/api/video/live/session`, { method: 'POST', body: '{}' })
+    .finally(() => { settled = true; });
+  await dispatched;
+  assert.equal(settled, false);
+
+  confirmStart();
+  assert.equal((await response).status, 201);
+});
+
+test('DELETE reports failure when Camera does not confirm stop', async t => {
+  const relay = new VideoRelay({
+    sendCarCommand: async command => {
+      if (command === 'video_live_stop') {
+        const error = new Error('rejected');
+        error.code = 'camera_rejected';
+        throw error;
+      }
+    },
+  });
+  const app = express();
+  app.use(express.json());
+  const auth = (_req, _res, next) => next();
+  relay.installRoutes(app, { requireAuth: auth, publicUrl: () => 'https://bridge.example' });
+  const server = http.createServer(app);
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => server.close());
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const created = await fetch(`${base}/api/video/live/session`, { method: 'POST', body: '{}' }).then(r => r.json());
+
+  const stopped = await fetch(`${base}/api/video/live/session/${created.sessionId}`, { method: 'DELETE' });
+
+  assert.equal(stopped.status, 503);
+  assert.deepEqual(await stopped.json(), { error: 'camera_rejected' });
 });
 
 test('viewer disconnect cleans both sockets and sends stop without credentials', async () => {

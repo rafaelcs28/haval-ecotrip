@@ -24,7 +24,7 @@ const bluettiCloud = require('./bluetti-cloud');
 const starlink     = require('./starlink-sitio');
 const sajCloud     = require('./saj-cloud');   // nuvem SAJ direta (Catalão), sem o HA no caminho
 const ocpp         = require('./ocpp-server'); // central system do carregador (OCPP 1.6J)
-const { VideoRelay } = require('./video-relay');
+const { VideoRelay, VideoCommandBroker } = require('./video-relay');
 
 // Sem isto, uma rejection/exception fora de rota (timer, callback MQTT, fetch em
 // background) derrubava o processo inteiro. Loga e segue — pm2 só reinicia em crash real.
@@ -17804,17 +17804,22 @@ wssAudio.on('connection', _handleAudioWs);
 
 // Vídeo ao vivo: credenciais de sessão são curtas, escopadas e nunca logadas.
 // O bridge só encaminha HVC1 em memória; não transcodifica nem persiste frames.
-const videoRelay = new VideoRelay({
-  logger: (event, fields) => console.log(`[video] ${event}`, fields),
-  sendCarCommand: (command, payload) => new Promise((resolve, reject) => {
+const videoCommandBroker = new VideoCommandBroker({
+  publish: (command, payload, callback) => {
     if (!mqttClient?.connected) {
       const error = new Error('MQTT offline');
       error.code = 'mqtt_offline';
-      return reject(error);
+      return callback(error);
     }
     mqttClient.publish(`${MQTT_PREFIX}/cmd/${command}`, JSON.stringify(payload),
-      { qos: 1, retain: false }, error => error ? reject(error) : resolve());
-  }),
+      { qos: 1, retain: false }, callback);
+  },
+});
+const videoRelay = new VideoRelay({
+  logger: (event, fields) => console.log(`[video] ${event}`, fields),
+  sendCarCommand: (command, payload) => videoCommandBroker.send(command, payload),
+  trustedProxyAddresses: String(process.env.VIDEO_TRUSTED_PROXY_IPS || '')
+    .split(',').map(value => value.trim()).filter(Boolean),
 });
 videoRelay.installRoutes(app, {
   requireAuth,
@@ -18391,6 +18396,17 @@ mqttClient.on('message', (topic, payload, packet) => {
       if (ws.readyState === WebSocket.OPEN) ws.send(payload, { binary: true });
     }
     return;
+  }
+
+  // Resultado do comando de vídeo: resolve apenas a requisição correlacionada.
+  // Consome antes de converter/logar payload para nunca expor credenciais.
+  {
+    const startResult = `${MQTT_PREFIX}/cmd/video_live_start/result`;
+    const stopResult = `${MQTT_PREFIX}/cmd/video_live_stop/result`;
+    if (topic === startResult || topic === stopResult) {
+      videoCommandBroker.acceptResult(topic === startResult ? 'video_live_start' : 'video_live_stop', payload);
+      return;
+    }
   }
 
   // Ciclo da chamada (carro→fone): {callId, state}. Relay como texto pros clientes

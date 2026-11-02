@@ -28,8 +28,17 @@ não entram na URL.
 - Payloads, tokens e URLs com tokens não entram em logs.
 
 `BRIDGE_PUBLIC_URL` define a origem `wss://` entregue ao carro e ao visualizador.
-O fallback preserva a origem pública já usada pelo pareamento do bridge.
-Upgrade sem TLS direto, ou sem `X-Forwarded-Proto: https` do gateway, recebe `426`.
+Ela deve usar `https://`; qualquer outro esquema falha fechado. O fallback preserva
+a origem HTTPS pública já usada pelo pareamento do bridge.
+
+TLS nativo é aceito diretamente. `X-Forwarded-Proto: https` só é aceito quando o
+IP imediato consta em `VIDEO_TRUSTED_PROXY_IPS`, lista explícita separada por
+vírgulas. Upgrade sem TLS confiável recebe `426`; tentativas inválidas recebem
+limite por IP antes do handshake WebSocket.
+
+Criar ou encerrar uma sessão só retorna sucesso depois do resultado MQTT
+correlacionado por `requestId`, emitido pelo EcoTrip após `APPLIED` ou `NO_OP` da
+Camera. Callback de publicação MQTT não confirma execução.
 
 ## Encerramento e códigos WebSocket
 
