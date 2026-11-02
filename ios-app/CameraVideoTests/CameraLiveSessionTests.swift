@@ -149,13 +149,18 @@ final class CameraLiveSessionTests: XCTestCase {
 @MainActor
 private final class FakeRenderer: CameraVideoRendering {
     private(set) var clearCount = 0
-    private let onClear: () -> Void
+    private var onClear: (() -> Void)?
     init(onClear: @escaping () -> Void = {}) { self.onClear = onClear }
     func consume(_ packet: CameraVideoPacket) throws -> Bool {
         if case .accessUnit = packet.payload { return true }
         return false
     }
-    func clear() { clearCount += 1; onClear() }
+    func clear() {
+        clearCount += 1
+        let callback = onClear
+        onClear = nil
+        callback?()
+    }
 }
 
 private final class FakeCameraLiveSocket: CameraLiveSocket {
