@@ -28,7 +28,7 @@ docs/        instalação, operação, arquitetura, qualidade e evidências
 3. MQTT e o bridge sincronizam estado, históricos e comandos. O bridge serve REST, WebSocket e a PWA.
 4. No iOS, `CarStore`, `BridgeRouter`, stores especializados e views SwiftUI consomem o bridge e gerenciam estado local, notificações e Live Activities.
 5. O iPad/OBD pode receber dados do bridge ou BLE/ELM327 e enviar telemetria por MQTT/HTTP; a descoberta LAN reduz latência e possui fallback remoto.
-6. `TripVideoBridge` reconcilia a viagem automática com o APK Haval Camera por IPC explícito protegido por assinatura. O EcoTrip apenas encaminha catálogo, configurações confirmadas e telemetria CAN limitada; falhas da câmera não interrompem viagem nem telemetria do veículo.
+6. `TripVideoBridge` reconcilia a viagem automática com o APK Haval Camera por IPC explícito protegido por assinatura. Cada comando persistente só altera o estado confirmado do EcoTrip depois de um acknowledgement correlacionado por request/revision; a espera limitada ocorre no executor de câmera, nunca na main looper. O mesmo ID/start original permite reabrir no Camera uma viagem concluída que o EcoTrip retomou dentro da janela. O EcoTrip apenas encaminha catálogo com revisão persistida atomicamente, configurações confirmadas e telemetria CAN limitada; falhas da câmera não interrompem viagem nem telemetria do veículo.
 
 ## Dados e runtime
 

@@ -1,6 +1,5 @@
 package br.com.redesurftank.ecotrip.managers
 
-import java.util.concurrent.Executors
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -15,7 +14,7 @@ class CameraAcknowledgementBrokerTest {
         val broker = CameraAcknowledgementBroker(40)
         val stale = execute(broker, "stale", 3, "STALE", 8)
         assertEquals(TripVideoBridge.CommandResult.Status.STALE, stale.status)
-        assertEquals(8, stale.cameraRevision)
+        assertEquals(8L, stale.cameraRevision)
         assertEquals(TripVideoBridge.CommandResult.Status.REJECTED,
             execute(broker, "rejected", 4, "REJECTED", 8).status)
         assertEquals(TripVideoBridge.CommandResult.Status.ERROR,
@@ -26,17 +25,10 @@ class CameraAcknowledgementBrokerTest {
 
     @Test fun mismatchedRevisionCannotCompleteAnotherRequest() {
         val broker = CameraAcknowledgementBroker(40)
-        val executor = Executors.newSingleThreadExecutor()
-        try {
-            val future = executor.submit<TripVideoBridge.CommandResult> {
-                broker.dispatchAndAwait("same", 7) { }
-            }
-            Thread.sleep(5)
+        val result = broker.dispatchAndAwait("same", 7) {
             broker.complete(CameraCommandAcknowledgement("same", 8, 8, "APPLIED"))
-            assertEquals(TripVideoBridge.CommandResult.Status.UNAVAILABLE, future.get().status)
-        } finally {
-            executor.shutdownNow()
         }
+        assertEquals(TripVideoBridge.CommandResult.Status.UNAVAILABLE, result.status)
     }
 
     private fun execute(

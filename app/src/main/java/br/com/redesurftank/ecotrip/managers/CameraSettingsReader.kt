@@ -76,7 +76,9 @@ object CameraSettingsReader {
                         "updateSettings", null, extras,
                     ) ?: throw IllegalStateException("provider não respondeu")
                     // O provider é a autoridade. Sempre releia; nunca trate o pedido como estado confirmado.
-                    val confirmed = query(context).copy(applied = update.getBoolean("applied", false))
+                    val confirmed = confirmProviderUpdate(
+                        update.getBoolean("applied", false), query(context),
+                    )
                     confirmedJson(confirmed).put("requestId", requestId)
                 }
                 else -> error("comando de configuração desconhecido")
@@ -148,12 +150,20 @@ object CameraSettingsReader {
         return ConfirmedSettings(revision, result.getBoolean("applied", true), typed)
     }
 
-    private fun confirmedJson(value: ConfirmedSettings): JSONObject = JSONObject()
-        .put("ok", true)
-        .put("revision", value.revision)
-        .put("applied", value.applied)
-        .put("conflict", !value.applied)
-        .put("settings", JSONObject(value.snapshot))
+    internal fun confirmProviderUpdate(
+        updateApplied: Boolean,
+        queried: ConfirmedSettings,
+    ): ConfirmedSettings = queried.copy(applied = updateApplied)
+
+    internal fun responseFields(value: ConfirmedSettings): Map<String, Any> = linkedMapOf(
+        "ok" to true,
+        "revision" to value.revision,
+        "applied" to value.applied,
+        "conflict" to !value.applied,
+        "settings" to value.snapshot,
+    )
+
+    private fun confirmedJson(value: ConfirmedSettings): JSONObject = JSONObject(responseFields(value))
 
     private fun Bundle.toTypedMap(): Map<String, Any> {
         val result = linkedMapOf<String, Any>()

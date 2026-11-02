@@ -26,6 +26,37 @@ class CameraVideoContractTest {
         assertEquals("wss://video.example/session", envelope.extras[CameraVideoContract.EXTRA_SESSION_URL])
         assertEquals("t".repeat(32), envelope.extras[CameraVideoContract.EXTRA_PRODUCER_TOKEN])
         assertEquals(20_000L, envelope.extras[CameraVideoContract.EXTRA_EXPIRES_AT_MS])
+
+        val actions = linkedMapOf(
+            TripVideoBridge.Action.START_TRIP to CameraVideoContract.ACTION_START_TRIP,
+            TripVideoBridge.Action.STOP_TRIP to CameraVideoContract.ACTION_STOP_TRIP,
+            TripVideoBridge.Action.DISCARD_TRIP to CameraVideoContract.ACTION_DISCARD_TRIP,
+            TripVideoBridge.Action.RECONCILE to CameraVideoContract.ACTION_RECONCILE,
+            TripVideoBridge.Action.START_LIVE to CameraVideoContract.ACTION_START_LIVE,
+            TripVideoBridge.Action.STOP_LIVE to CameraVideoContract.ACTION_STOP_LIVE,
+            TripVideoBridge.Action.TRANSFER to CameraVideoContract.ACTION_TRANSFER,
+            TripVideoBridge.Action.CANCEL_TRANSFER to CameraVideoContract.ACTION_CANCEL_TRANSFER,
+        )
+        for ((action, expected) in actions) assertEquals(
+            expected, CameraCommandCodec.encode(
+                TripVideoBridge.CameraCommand(action, 1, "request-${action.name}"),
+            ).action,
+        )
+
+        val transfer = CameraCommandCodec.encode(TripVideoBridge.CameraCommand(
+            TripVideoBridge.Action.TRANSFER, 10, "transfer-10", tripId = 123,
+            segmentIds = listOf("1", "2"), viewerSession = "viewer-1",
+        )).extras
+        assertEquals("123", transfer[CameraVideoContract.EXTRA_TRIP_ID])
+        assertEquals(listOf("1", "2"), transfer[CameraVideoContract.EXTRA_SEGMENT_IDS])
+        assertEquals("viewer-1", transfer[CameraVideoContract.EXTRA_VIEWER_SESSION])
+
+        val lifecycle = CameraCommandCodec.encode(TripVideoBridge.CameraCommand(
+            TripVideoBridge.Action.STOP_TRIP, 11, "stop-11", tripId = 123,
+            startMs = 1_000, endMs = 2_000,
+        )).extras
+        assertEquals(1_000L, lifecycle[CameraVideoContract.EXTRA_START_MS])
+        assertEquals(2_000L, lifecycle[CameraVideoContract.EXTRA_END_MS])
     }
 
     @Test fun remoteValidationRejectsUnsafeCredentialsAndSessions() {

@@ -119,6 +119,15 @@
             </intent-filter>
         </receiver>
 
+        <receiver
+            android:name=".managers.CameraCommandResultReceiver"
+            android:exported="true"
+            android:permission="br.com.redesurftank.havalcamera.permission.CONTROL">
+            <intent-filter>
+                <action android:name="br.com.redesurftank.havalcamera.action.COMMAND_RESULT" />
+            </intent-filter>
+        </receiver>
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

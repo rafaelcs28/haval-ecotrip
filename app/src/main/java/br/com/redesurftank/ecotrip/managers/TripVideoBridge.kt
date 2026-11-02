@@ -12,51 +12,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.max
-
-internal object CameraVideoContract {
-    const val PACKAGE = "br.com.redesurftank.havalcamera"
-    const val SERVICE = "$PACKAGE.TripVideoService"
-    const val AUTHORITY = "$PACKAGE.video"
-    const val CONTROL_PERMISSION = "$PACKAGE.permission.CONTROL"
-    const val READ_PERMISSION = "$PACKAGE.permission.READ_VIDEO"
-    const val CATALOG_CHANGED = "$PACKAGE.action.CATALOG_CHANGED"
-    const val PROTOCOL_VERSION = 1
-
-    private const val ACTION_PREFIX = "$PACKAGE.action."
-    private const val EXTRA_PREFIX = "$PACKAGE.extra."
-    const val ACTION_START_TRIP = "${ACTION_PREFIX}START_TRIP"
-    const val ACTION_STOP_TRIP = "${ACTION_PREFIX}STOP_TRIP"
-    const val ACTION_DISCARD_TRIP = "${ACTION_PREFIX}DISCARD_TRIP"
-    const val ACTION_RECONCILE = "${ACTION_PREFIX}RECONCILE"
-    const val ACTION_START_LIVE = "${ACTION_PREFIX}START_LIVE"
-    const val ACTION_STOP_LIVE = "${ACTION_PREFIX}STOP_LIVE"
-    const val ACTION_TRANSFER = "${ACTION_PREFIX}TRANSFER"
-    const val ACTION_CANCEL_TRANSFER = "${ACTION_PREFIX}CANCEL_TRANSFER"
-    const val ACTION_TELEMETRY_SAMPLE = "${ACTION_PREFIX}TELEMETRY_SAMPLE"
-
-    const val EXTRA_PROTOCOL_VERSION = "${EXTRA_PREFIX}PROTOCOL_VERSION"
-    const val EXTRA_REQUEST_ID = "${EXTRA_PREFIX}REQUEST_ID"
-    const val EXTRA_STATE_REVISION = "${EXTRA_PREFIX}STATE_REVISION"
-    const val EXTRA_TRIP_ID = "${EXTRA_PREFIX}TRIP_ID"
-    const val EXTRA_START_MS = "${EXTRA_PREFIX}START_MS"
-    const val EXTRA_END_MS = "${EXTRA_PREFIX}END_MS"
-    const val EXTRA_SESSION_URL = "${EXTRA_PREFIX}SESSION_URL"
-    const val EXTRA_SESSION_ID = "${EXTRA_PREFIX}SESSION_ID"
-    const val EXTRA_PRODUCER_TOKEN = "${EXTRA_PREFIX}PRODUCER_TOKEN"
-    const val EXTRA_EXPIRES_AT_MS = "${EXTRA_PREFIX}EXPIRES_AT_MS"
-    const val EXTRA_SEGMENT_IDS = "${EXTRA_PREFIX}SEGMENT_IDS"
-    const val EXTRA_VIEWER_SESSION = "${EXTRA_PREFIX}VIEWER_SESSION"
-    const val EXTRA_MONOTONIC_MS = "${EXTRA_PREFIX}MONOTONIC_MS"
-    const val EXTRA_WALL_CLOCK_MS = "${EXTRA_PREFIX}WALL_CLOCK_MS"
-    const val EXTRA_SPEED_KMH = "${EXTRA_PREFIX}SPEED_KMH"
-    const val EXTRA_MOTOR_POWER_KW = "${EXTRA_PREFIX}MOTOR_POWER_KW"
-    const val EXTRA_VALIDITY_FLAGS = "${EXTRA_PREFIX}VALIDITY_FLAGS"
-    const val EXTRA_EXPECTED_SETTINGS_REVISION = "${EXTRA_PREFIX}EXPECTED_SETTINGS_REVISION"
-    const val EXTRA_SETTINGS_REVISION = "${EXTRA_PREFIX}SETTINGS_REVISION"
-    const val EXTRA_SETTINGS_PATCH = "${EXTRA_PREFIX}SETTINGS_PATCH"
-    const val EXTRA_SETTINGS_SNAPSHOT = "${EXTRA_PREFIX}SETTINGS_SNAPSHOT"
-}
 
 class TripVideoBridge(
     private val state: StateStore,
@@ -84,10 +41,13 @@ class TripVideoBridge(
     )
 
     data class CommandResult(val status: Status, val cameraRevision: Long = -1) {
-        enum class Status { APPLIED, STALE, UNAVAILABLE }
+        enum class Status { APPLIED, NO_OP, STALE, REJECTED, ERROR, UNAVAILABLE }
         companion object {
             fun applied() = CommandResult(Status.APPLIED)
+            fun noOp() = CommandResult(Status.NO_OP)
             fun stale(cameraRevision: Long) = CommandResult(Status.STALE, cameraRevision)
+            fun rejected() = CommandResult(Status.REJECTED)
+            fun error() = CommandResult(Status.ERROR)
             fun unavailable() = CommandResult(Status.UNAVAILABLE)
         }
     }
@@ -173,8 +133,10 @@ class TripVideoBridge(
             )
             val result = runCatching { sink.send(command) }.getOrElse { CommandResult.unavailable() }
             when (result.status) {
-                CommandResult.Status.APPLIED -> return state.save(newLastTripId, revision)
-                CommandResult.Status.UNAVAILABLE -> return false
+                CommandResult.Status.APPLIED, CommandResult.Status.NO_OP ->
+                    return state.save(newLastTripId, revision)
+                CommandResult.Status.UNAVAILABLE, CommandResult.Status.REJECTED,
+                CommandResult.Status.ERROR -> return false
                 CommandResult.Status.STALE -> {
                     if (result.cameraRevision < 0) return false
                     val observed = max(revision, result.cameraRevision)
@@ -201,37 +163,21 @@ class TripVideoBridge(
     private class AndroidSink(private val context: Context) : CameraCommandSink {
         override fun send(command: CameraCommand): CommandResult {
             context.packageManager.getPackageInfo(CameraVideoContract.PACKAGE, 0)
-            val intent = Intent(actionName(command.action)).apply {
+            val envelope = CameraCommandCodec.encode(command)
+            val intent = Intent(envelope.action).apply {
                 component = ComponentName(CameraVideoContract.PACKAGE, CameraVideoContract.SERVICE)
-                putExtra(CameraVideoContract.EXTRA_PROTOCOL_VERSION, CameraVideoContract.PROTOCOL_VERSION)
-                putExtra(CameraVideoContract.EXTRA_REQUEST_ID, command.requestId)
-                putExtra(CameraVideoContract.EXTRA_STATE_REVISION, command.revision)
-                command.tripId?.let { putExtra(CameraVideoContract.EXTRA_TRIP_ID, it.toString()) }
-                command.startMs?.let { putExtra(CameraVideoContract.EXTRA_START_MS, it) }
-                command.endMs?.let { putExtra(CameraVideoContract.EXTRA_END_MS, it) }
-                command.sessionUrl?.let { putExtra(CameraVideoContract.EXTRA_SESSION_URL, it) }
-                command.sessionId?.let { putExtra(CameraVideoContract.EXTRA_SESSION_ID, it) }
-                command.producerToken?.let { putExtra(CameraVideoContract.EXTRA_PRODUCER_TOKEN, it) }
-                command.expiresAtMs?.let { putExtra(CameraVideoContract.EXTRA_EXPIRES_AT_MS, it) }
-                if (command.segmentIds.isNotEmpty()) {
-                    putStringArrayListExtra(CameraVideoContract.EXTRA_SEGMENT_IDS, ArrayList(command.segmentIds))
+                for ((key, value) in envelope.extras) when (value) {
+                    is Int -> putExtra(key, value)
+                    is Long -> putExtra(key, value)
+                    is String -> putExtra(key, value)
+                    is List<*> -> putStringArrayListExtra(key, ArrayList(value.filterIsInstance<String>()))
+                    else -> throw IllegalArgumentException("extra não suportado: $key")
                 }
-                command.viewerSession?.let { putExtra(CameraVideoContract.EXTRA_VIEWER_SESSION, it) }
             }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent)
-            else context.startService(intent)
-            return CommandResult.applied()
-        }
-
-        private fun actionName(action: Action): String = when (action) {
-            Action.START_TRIP -> CameraVideoContract.ACTION_START_TRIP
-            Action.STOP_TRIP -> CameraVideoContract.ACTION_STOP_TRIP
-            Action.DISCARD_TRIP -> CameraVideoContract.ACTION_DISCARD_TRIP
-            Action.RECONCILE -> CameraVideoContract.ACTION_RECONCILE
-            Action.START_LIVE -> CameraVideoContract.ACTION_START_LIVE
-            Action.STOP_LIVE -> CameraVideoContract.ACTION_STOP_LIVE
-            Action.TRANSFER -> CameraVideoContract.ACTION_TRANSFER
-            Action.CANCEL_TRANSFER -> CameraVideoContract.ACTION_CANCEL_TRANSFER
+            return CameraAcknowledgements.broker.dispatchAndAwait(command.requestId, command.revision) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent)
+                else context.startService(intent)
+            }
         }
     }
 
@@ -242,6 +188,10 @@ class TripVideoBridge(
         private val catalogExecutor = Executors.newSingleThreadExecutor { runnable ->
             Thread(runnable, "camera-catalog").apply { isDaemon = true }
         }
+        private val reconcileExecutor = Executors.newSingleThreadExecutor { runnable ->
+            Thread(runnable, "camera-reconcile").apply { isDaemon = true }
+        }
+        private val reconcileInFlight = AtomicBoolean(false)
         @Volatile private var runtime: TripVideoBridge? = null
         @Volatile private var running = false
         @Volatile private var remoteLive = false
@@ -253,7 +203,7 @@ class TripVideoBridge(
         private val poll = object : Runnable {
             override fun run() {
                 if (!running) return
-                reconcileRuntime(startup = false)
+                scheduleReconcile(startup = false)
                 handler.postDelayed(this, POLL_MS)
             }
         }
@@ -263,7 +213,7 @@ class TripVideoBridge(
             val app = context.applicationContext
             runtime = TripVideoBridge(PreferencesState(app), AndroidSink(app))
             running = true
-            reconcileRuntime(startup = true)
+            scheduleReconcile(startup = true)
             handler.postDelayed(poll, POLL_MS)
             CameraSettingsReader.start(app)
             requestCatalogPublish(app)
@@ -298,15 +248,12 @@ class TripVideoBridge(
             return runCatching {
                 val json = JSONObject(payload.ifBlank { "{}" })
                 val now = System.currentTimeMillis()
-                val requestId = requiredId(json.optString("requestId"), "requestId")
+                val requestId = CameraRemoteValidation.id(json.optString("requestId"), "requestId")
                 val cameraCommand = when (command) {
                     "video_live_start" -> {
-                        val url = requiredSecureUrl(json.getString("sessionUrl"))
-                        val token = json.getString("producerToken").also {
-                            require(it.length in 32..512) { "producerToken inválido" }
-                        }
-                        val expires = json.getLong("expiresAt")
-                        require(expires > now && expires - now <= 30 * 60_000L) { "expiração inválida" }
+                        val url = CameraRemoteValidation.secureUrl(json.getString("sessionUrl"))
+                        val token = CameraRemoteValidation.token(json.getString("producerToken"))
+                        val expires = CameraRemoteValidation.expiry(json.getLong("expiresAt"), now)
                         CameraCommand(
                             Action.START_LIVE, 0, requestId,
                             sessionUrl = url, producerToken = token, expiresAtMs = expires,
@@ -314,7 +261,7 @@ class TripVideoBridge(
                     }
                     "video_live_stop" -> CameraCommand(
                         Action.STOP_LIVE, 0, requestId,
-                        sessionId = requiredId(json.getString("sessionId"), "sessionId"),
+                        sessionId = CameraRemoteValidation.id(json.getString("sessionId"), "sessionId"),
                     )
                     "video_transfer" -> {
                         val tripId = json.getString("tripId").toLongOrNull()
@@ -322,11 +269,11 @@ class TripVideoBridge(
                         require(tripId > 0) { "tripId inválido" }
                         val segments = json.getJSONArray("segmentIds").toStringList()
                         require(segments.isNotEmpty() && segments.size <= 256) { "segmentIds inválidos" }
-                        segments.forEach { requiredId(it, "segmentId") }
+                        segments.forEach { CameraRemoteValidation.id(it, "segmentId") }
                         CameraCommand(
                             Action.TRANSFER, 0, requestId, tripId = tripId,
                             segmentIds = segments,
-                            viewerSession = requiredId(json.getString("viewerSession"), "viewerSession"),
+                            viewerSession = CameraRemoteValidation.id(json.getString("viewerSession"), "viewerSession"),
                         )
                     }
                     "video_transfer_cancel" -> CameraCommand(Action.CANCEL_TRANSFER, 0, requestId)
@@ -391,6 +338,17 @@ class TripVideoBridge(
             catalogExecutor.execute { publishCatalog(app) }
         }
 
+        private fun scheduleReconcile(startup: Boolean) {
+            if (!running || !reconcileInFlight.compareAndSet(false, true)) return
+            reconcileExecutor.execute {
+                try {
+                    if (running) reconcileRuntime(startup)
+                } finally {
+                    reconcileInFlight.set(false)
+                }
+            }
+        }
+
         private fun reconcileRuntime(startup: Boolean) {
             val bridge = runtime ?: return
             try {
@@ -422,13 +380,14 @@ class TripVideoBridge(
         @Synchronized
         private fun catalogRevision(context: Context, body: String): Long {
             val preferences = context.getSharedPreferences("camera-video-bridge", Context.MODE_PRIVATE)
-            val old = preferences.getString("catalogBody", null)
-            val revision = preferences.getLong("catalogRevision", 0L) + if (old == body) 0 else 1
-            if (old != body) preferences.edit()
-                .putString("catalogBody", body)
-                .putLong("catalogRevision", revision)
-                .commit()
-            return revision
+            return CameraCatalogRevisionStore(object : CameraCatalogRevisionStore.Backend {
+                override val body: String? get() = preferences.getString("catalogBody", null)
+                override val revision: Long get() = preferences.getLong("catalogRevision", 0L)
+                override fun save(body: String, revision: Long): Boolean = preferences.edit()
+                    .putString("catalogBody", body)
+                    .putLong("catalogRevision", revision)
+                    .commit()
+            }).revisionFor(body)
         }
 
         internal fun noteUnavailable(detail: String?) {
@@ -439,18 +398,6 @@ class TripVideoBridge(
 
         internal fun noteAvailable() {
             unavailableLogged = false
-        }
-
-        private fun requiredId(value: String, name: String): String {
-            require(value.matches(Regex("[A-Za-z0-9._:-]{1,128}"))) { "$name inválido" }
-            return value
-        }
-
-        private fun requiredSecureUrl(value: String): String {
-            val uri = Uri.parse(value)
-            require(uri.scheme in setOf("https", "wss") && !uri.host.isNullOrBlank()) { "URL segura inválida" }
-            require(uri.userInfo == null && uri.fragment == null) { "URL segura inválida" }
-            return value
         }
 
         private fun JSONArray.toStringList(): List<String> =
@@ -465,5 +412,21 @@ class CameraCatalogChangedReceiver : BroadcastReceiver() {
         if (intent.action == CameraVideoContract.CATALOG_CHANGED) {
             TripVideoBridge.requestCatalogPublish(context.applicationContext)
         }
+    }
+}
+
+class CameraCommandResultReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        if (intent.action != CameraVideoContract.ACTION_COMMAND_RESULT ||
+            intent.getIntExtra(CameraVideoContract.EXTRA_PROTOCOL_VERSION, -1) !=
+            CameraVideoContract.PROTOCOL_VERSION) return
+        val requestId = intent.getStringExtra(CameraVideoContract.EXTRA_REQUEST_ID) ?: return
+        val requestRevision = intent.getLongExtra(CameraVideoContract.EXTRA_STATE_REVISION, -1)
+        val cameraRevision = intent.getLongExtra(CameraVideoContract.EXTRA_CAMERA_REVISION, -1)
+        val status = intent.getStringExtra(CameraVideoContract.EXTRA_COMMAND_STATUS) ?: return
+        if (requestRevision < 0) return
+        CameraAcknowledgements.broker.complete(
+            CameraCommandAcknowledgement(requestId, requestRevision, cameraRevision, status),
+        )
     }
 }
