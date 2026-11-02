@@ -416,9 +416,11 @@ Back up exact current `/opt/bridge/server.js`, `video-relay.js`, `package.json`,
 
 Prepare release `v0.3.0` notes and verify the exact signed `haval-camera.apk` plus generated `update-manifest.json` locally. Do not create the GitHub release before hardware gates.
 
-- [ ] **Step 5: Install both APKs together**
+- [ ] **Step 5: Install Camera and update EcoTrip through its OTA**
 
-While parked and explicitly online, push exact verified APKs to unique `/data/local/tmp` paths. Re-check SHA-256 on the car, install Camera then EcoTrip with `pm install -r`, verify `Success`, package versions, signer continuity, process startup, and no new package `FATAL EXCEPTION`. Delete only the two temporary APKs.
+While parked and explicitly online, push only the exact verified Camera APK to a unique `/data/local/tmp` path. Re-check SHA-256 on the car, install Camera with `pm install -r`, verify `Success`, signer continuity, startup, and no new package `FATAL EXCEPTION`, then delete only that temporary APK.
+
+For EcoTrip, publish verified tag/release `v6.237`, launch the already-installed EcoTrip app, and use its existing `UpdateManager` OTA path exactly as a normal startup update. Do not sideload the EcoTrip APK. Observe download/install completion, then verify package `versionCode=6237`, versionName `6.237`, signer continuity, process startup, and no new package `FATAL EXCEPTION`.
 
 - [ ] **Step 6: Apply and verify 1 GiB reserve**
 
