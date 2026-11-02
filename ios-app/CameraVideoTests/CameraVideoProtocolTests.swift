@@ -53,8 +53,12 @@ final class CameraVideoProtocolTests: XCTestCase {
         XCTAssertEqual(try stream.accept(CameraVideoProtocol.parse(Self.access(sequence: 2, keyframe: false))), .waitingForKeyframe)
     }
 
-    static func config(sequence: UInt32 = 1, pts: UInt64 = 0, sps: Data = Data([0x67, 0x42, 0x00, 0x1f])) -> Data {
-        let pps = Data([0x68, 0xce, 0x06, 0xe2])
+    static func config(
+        sequence: UInt32 = 1,
+        pts: UInt64 = 0,
+        sps: Data = Data([0x67, 0x42, 0x00, 0x1f]),
+        pps: Data = Data([0x68, 0xce, 0x06, 0xe2])
+    ) -> Data {
         var payload = Data(); payload.appendBE(UInt16(sps.count)); payload.append(sps)
         payload.appendBE(UInt16(pps.count)); payload.append(pps)
         return packet(type: 1, flags: 0, sequence: sequence, pts: pts, payload: payload)
