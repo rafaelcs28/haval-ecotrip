@@ -251,21 +251,25 @@ class VideoRelay {
       : pathname === '/ws/video/live/viewer' ? 'viewer' : null;
     if (!role) return false;
     const remoteAddress = normalizeAddress(request.socket?.remoteAddress);
-    if (this.isUpgradeRateLimited(remoteAddress)) {
-      this.rejectUpgrade(socket, 429, 'Too Many Requests');
-      return true;
-    }
     const forwardedProto = String(request.headers?.['x-forwarded-proto'] || '')
       .split(',')[0].trim().toLowerCase();
     const secure = request.socket?.encrypted === true
       || (this.trustedProxyAddresses.has(remoteAddress) && forwardedProto === 'https');
     if (!secure) {
+      if (this.isUpgradeRateLimited(remoteAddress)) {
+        this.rejectUpgrade(socket, 429, 'Too Many Requests');
+        return true;
+      }
       this.recordInvalidUpgrade(remoteAddress);
       this.rejectUpgrade(socket, 426, 'Upgrade Required');
       return true;
     }
     const authorization = this.authorize(role, request);
     if (!authorization.ok) {
+      if (this.isUpgradeRateLimited(remoteAddress)) {
+        this.rejectUpgrade(socket, 429, 'Too Many Requests');
+        return true;
+      }
       this.recordInvalidUpgrade(remoteAddress);
       this.rejectUpgrade(socket, authorization.httpStatus, authorization.httpReason);
       return true;

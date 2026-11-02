@@ -215,6 +215,34 @@ test('invalid upgrades are rejected before ws handleUpgrade and rate-limited per
   assert.equal(JSON.stringify(logs).includes('invalid-secret'), false);
 });
 
+test('valid proxy upgrade bypasses an invalid-attempt bucket poisoned by other clients', async () => {
+  const proxyIp = '10.0.0.2';
+  const { relay, logs } = fixture({
+    trustedProxyAddresses: [proxyIp],
+    invalidUpgradeLimit: 2,
+    invalidUpgradeWindowMs: 60_000,
+  });
+  const session = await create(relay);
+  let upgrades = 0;
+  relay.producerWss.handleUpgrade = () => { upgrades += 1; };
+  const request = token => ({
+    url: `/ws/video/live/car?session=${session.sessionId}`,
+    headers: { authorization: `Bearer ${token}`, 'x-forwarded-proto': 'https' },
+    socket: { remoteAddress: proxyIp },
+  });
+  const raw = () => ({ output: '', write(value) { this.output += value; }, destroy() {} });
+  relay.handleUpgrade(request('invalid-one'), raw(), Buffer.alloc(0));
+  relay.handleUpgrade(request('invalid-two'), raw(), Buffer.alloc(0));
+  const poisoned = raw();
+  relay.handleUpgrade(request('invalid-three'), poisoned, Buffer.alloc(0));
+  assert.match(poisoned.output, /^HTTP\/1\.1 429 /);
+
+  relay.handleUpgrade(request(session.producerToken), raw(), Buffer.alloc(0));
+
+  assert.equal(upgrades, 1);
+  assert.equal(JSON.stringify(logs).includes(session.producerToken), false);
+});
+
 test('viewer join requests a keyframe and HVC1 bytes relay without payload logging', async () => {
   const { relay, logs } = fixture();
   const session = await create(relay);
