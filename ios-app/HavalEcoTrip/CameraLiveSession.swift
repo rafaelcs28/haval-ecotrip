@@ -187,9 +187,11 @@ final class CameraLiveSession: ObservableObject {
                 }
             }
         } catch CameraLiveError.offline {
+            wantsLive = false
             renderer.clear()
             state = .offline
         } catch {
+            wantsLive = false
             renderer.clear()
             state = .error(Self.message(for: error))
         }
