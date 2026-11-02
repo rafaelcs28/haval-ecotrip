@@ -19,6 +19,7 @@ struct EscutaSheetV2: View {
     @State private var callMessage = "Preciso falar com você."
     @State private var sessionStart = Date()
     @State private var showRecordings = false
+    @State private var showCamera = false
     @State private var showDiag = false
     @State private var diagSec = 3
 
@@ -60,6 +61,7 @@ struct EscutaSheetV2: View {
         }
         .scrollIndicators(.hidden)
         .sheet(isPresented: $showRecordings) { GravacoesV2View() }
+        .sheet(isPresented: $showCamera) { CameraVideoView() }
         .onAppear {
             #if DEBUG
             let d = UserDefaults.standard
@@ -94,10 +96,32 @@ struct EscutaSheetV2: View {
     private var idleBody: some View {
         VStack(spacing: 12) {
             ouvirTile
+            cameraLine
             ligarCard
             gravacoesLine
             diagLine
         }
+    }
+
+    private var cameraLine: some View {
+        Button { showCamera = true } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "video.fill")
+                    .font(.system(size: 12, weight: .semibold)).foregroundStyle(DS.teal)
+                    .frame(width: 26, height: 26)
+                    .background(DS.teal.opacity(0.14), in: RoundedRectangle(cornerRadius: 8))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Câmeras ao vivo").font(.system(size: 12.5, weight: .semibold)).foregroundStyle(DS.text)
+                    Text("imagem em tempo real do carro")
+                        .font(.system(size: 9.5)).foregroundStyle(DS.text2)
+                }
+                Spacer(minLength: 6)
+                Image(systemName: "chevron.right").font(.system(size: 10, weight: .bold)).foregroundStyle(DS.muted)
+            }
+            .padding(12)
+            .background(DS.panel2, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+        }
+        .buttonStyle(.plain)
     }
 
     // Tile primário: teal parado, amarelo conectando, red falhou (toque = retry).
