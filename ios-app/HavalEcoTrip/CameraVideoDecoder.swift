@@ -5,6 +5,7 @@ import Foundation
 protocol CameraVideoRendering: AnyObject {
     func consume(_ packet: CameraVideoPacket) throws -> Bool
     func clear()
+    func setFailureHandler(_ handler: @escaping () -> Void)
 }
 
 @MainActor
@@ -14,10 +15,17 @@ final class CameraVideoDecoder: CameraVideoRendering {
     let displayLayer = AVSampleBufferDisplayLayer()
     private var stream = CameraVideoStreamState()
     private var formatDescription: CMVideoFormatDescription?
+    private var failureHandler: (() -> Void)?
+    private var statusObservation: NSKeyValueObservation?
+    private var failureReported = false
 
     init() {
         displayLayer.videoGravity = .resizeAspect
         displayLayer.backgroundColor = CGColor(gray: 0, alpha: 1)
+        statusObservation = displayLayer.observe(\.status, options: [.new]) { [weak self] layer, _ in
+            guard layer.status == .failed else { return }
+            Task { @MainActor [weak self] in self?.handleDisplayFailure() }
+        }
     }
 
     func consume(_ packet: CameraVideoPacket) throws -> Bool {
@@ -26,12 +34,14 @@ final class CameraVideoDecoder: CameraVideoRendering {
         case .configuration(let sps, let pps):
             if case .configuration(let reset) = decision, reset { displayLayer.flushAndRemoveImage() }
             formatDescription = try Self.makeFormatDescription(sps: sps, pps: pps)
+            failureReported = false
             return false
 
         case .accessUnit(let avcc, _):
             guard case .accessUnit(let reset) = decision else { return false }
             guard let formatDescription else { throw DecoderError.invalidConfiguration }
             if reset { displayLayer.flushAndRemoveImage() }
+            failureReported = false
             displayLayer.enqueue(try Self.makeSample(avcc: avcc, pts: packet.presentationTimeUs, format: formatDescription))
             return true
         }
@@ -42,7 +52,18 @@ final class CameraVideoDecoder: CameraVideoRendering {
         displayLayer.flushAndRemoveImage()
     }
 
-    private static func makeFormatDescription(sps: Data, pps: Data) throws -> CMVideoFormatDescription {
+    func setFailureHandler(_ handler: @escaping () -> Void) {
+        failureHandler = handler
+    }
+
+    func handleDisplayFailure() {
+        guard !failureReported else { return }
+        failureReported = true
+        clear()
+        failureHandler?()
+    }
+
+    static func makeFormatDescription(sps: Data, pps: Data) throws -> CMVideoFormatDescription {
         var description: CMFormatDescription?
         let status: OSStatus = sps.withUnsafeBytes { spsBytes in
             pps.withUnsafeBytes { ppsBytes in
@@ -68,7 +89,7 @@ final class CameraVideoDecoder: CameraVideoRendering {
         return description
     }
 
-    private static func makeSample(avcc: Data, pts: UInt64, format: CMVideoFormatDescription) throws -> CMSampleBuffer {
+    static func makeSample(avcc: Data, pts: UInt64, format: CMVideoFormatDescription) throws -> CMSampleBuffer {
         var block: CMBlockBuffer?
         var status = CMBlockBufferCreateWithMemoryBlock(
             allocator: kCFAllocatorDefault,
@@ -107,6 +128,12 @@ final class CameraVideoDecoder: CameraVideoRendering {
             sampleBufferOut: &sample
         )
         guard status == noErr, let sample else { throw DecoderError.sampleBuffer(status) }
+        CMSetAttachment(
+            sample,
+            key: kCMSampleAttachmentKey_DisplayImmediately,
+            value: kCFBooleanTrue,
+            attachmentMode: .shouldPropagate
+        )
         return sample
     }
 }

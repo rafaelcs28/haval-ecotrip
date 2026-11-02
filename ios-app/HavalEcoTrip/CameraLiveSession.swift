@@ -30,7 +30,7 @@ enum CameraLiveError: Error, Equatable {
 }
 
 protocol CameraLiveSocket: AnyObject {
-    func messages() -> AsyncThrowingStream<Data, Error>
+    func receive() async throws -> Data
     func resume()
     func cancel()
 }
@@ -128,13 +128,17 @@ final class CameraLiveSession: ObservableObject {
         self.bridgeToken = bridgeToken
         self.now = now
         self.delays = delays
+        selectedRenderer.setFailureHandler { [weak self] in
+            self?.handleRendererFailure()
+        }
     }
 
     func start() async {
         guard !wantsLive else { return }
         wantsLive = true
         state = .connecting
-        await connect()
+        generation &+= 1
+        await connect(attemptGeneration: generation)
     }
 
     func stop() async {
@@ -149,18 +153,17 @@ final class CameraLiveSession: ObservableObject {
         if let oldCredentials { try? await stopRemote(oldCredentials) }
     }
 
-    private func connect() async {
-        guard wantsLive else { return }
+    private func connect(attemptGeneration: Int) async {
+        guard wantsLive, generation == attemptGeneration else { return }
         do {
             let request = try ownerRequest(path: "/api/video/live/session", method: "POST")
             let newCredentials = try await transport.createSession(request)
             try validate(newCredentials)
-            guard wantsLive else {
+            guard wantsLive, generation == attemptGeneration else {
                 try? await stopRemote(newCredentials)
                 return
             }
-            generation &+= 1
-            let currentGeneration = generation
+            let currentGeneration = attemptGeneration
             credentials = newCredentials
             var requestForSocket = URLRequest(url: newCredentials.viewerURL, timeoutInterval: 15)
             requestForSocket.addValue("Bearer " + newCredentials.viewerToken, forHTTPHeaderField: "Authorization")
@@ -172,14 +175,15 @@ final class CameraLiveSession: ObservableObject {
             scheduleRenewal(newCredentials, generation: currentGeneration)
             receiveTask = Task { [weak self] in
                 do {
-                    for try await data in newSocket.messages() {
-                        guard let self, self.wantsLive, self.generation == currentGeneration else { return }
+                    while let self, self.wantsLive, self.generation == currentGeneration {
+                        let data = try await newSocket.receive()
+                        guard self.wantsLive, self.generation == currentGeneration else { return }
                         let packet = try await Task.detached(priority: .userInitiated) {
                             try CameraVideoProtocol.parse(data)
                         }.value
                         try self.handle(packet, generation: currentGeneration)
                     }
-                    throw CameraLiveError.disconnected
+                    return
                 } catch is CancellationError {
                     return
                 } catch {
@@ -187,10 +191,12 @@ final class CameraLiveSession: ObservableObject {
                 }
             }
         } catch CameraLiveError.offline {
+            guard wantsLive, generation == attemptGeneration else { return }
             wantsLive = false
             renderer.clear()
             state = .offline
         } catch {
+            guard wantsLive, generation == attemptGeneration else { return }
             wantsLive = false
             renderer.clear()
             state = .error(Self.message(for: error))
@@ -230,7 +236,8 @@ final class CameraLiveSession: ObservableObject {
         reconnectTask = Task { [weak self] in
             do { try await self?.delays.reconnect(1) } catch { return }
             guard let self, self.wantsLive, self.generation == generation else { return }
-            await self.connect()
+            self.generation &+= 1
+            await self.connect(attemptGeneration: self.generation)
         }
     }
 
@@ -245,8 +252,16 @@ final class CameraLiveSession: ObservableObject {
             self.socket?.cancel()
             self.socket = nil
             try? await self.stopRemote(current)
-            await self.connect()
+            await self.connect(attemptGeneration: self.generation)
         }
+    }
+
+    private func handleRendererFailure() {
+        guard wantsLive else { return }
+        staleTask?.cancel()
+        renderer.clear()
+        latencyMs = nil
+        state = .degraded
     }
 
     private func validate(_ value: CameraLiveCredentials) throws {
@@ -303,23 +318,11 @@ private final class URLSessionCameraLiveSocket: CameraLiveSocket {
         task = URLSession.shared.webSocketTask(with: request)
     }
 
-    func messages() -> AsyncThrowingStream<Data, Error> {
-        AsyncThrowingStream { continuation in
-            let receiveTask = Task {
-                do {
-                    while !Task.isCancelled {
-                        switch try await task.receive() {
-                        case .data(let data): continuation.yield(data)
-                        case .string: throw CameraLiveError.invalidResponse
-                        @unknown default: throw CameraLiveError.invalidResponse
-                        }
-                    }
-                    continuation.finish()
-                } catch {
-                    continuation.finish(throwing: error)
-                }
-            }
-            continuation.onTermination = { _ in receiveTask.cancel() }
+    func receive() async throws -> Data {
+        switch try await task.receive() {
+        case .data(let data): return data
+        case .string: throw CameraLiveError.invalidResponse
+        @unknown default: throw CameraLiveError.invalidResponse
         }
     }
 
