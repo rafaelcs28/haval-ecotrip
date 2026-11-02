@@ -361,6 +361,22 @@ class MqttManager private constructor() {
         }
     }
 
+    /** Catálogo canônico de viagens concluídas do Haval Camera. */
+    fun publicarVideoCatalogo(json: String) {
+        executor.submit {
+            try { client?.publish("$prefix/video/catalog", json.toByteArray(), 1, true) }
+            catch (e: Exception) { AppLogger.w(TAG, "video/catalog falhou: ${e.message}") }
+        }
+    }
+
+    /** Snapshot confirmado pelo provider do Haval Camera; nunca calculado aqui. */
+    fun publicarCameraSettings(json: String) {
+        executor.submit {
+            try { client?.publish("$prefix/video/settings", json.toByteArray(), 1, true) }
+            catch (e: Exception) { AppLogger.w(TAG, "video/settings falhou: ${e.message}") }
+        }
+    }
+
     /// Amostra de CPU/RAM do medidor. QoS 0 e sem retain: é fluxo de medição, perder
     /// uma amostra não importa e retained deixaria a última pendurada pra sempre.
     fun publicarPerf(json: String) {
@@ -3140,12 +3156,19 @@ class MqttManager private constructor() {
         // resto no pool de 3 threads.
         val exec = when {
             cmd.startsWith("hvac/") -> hvacExecutor
-            cmd == "rec_start" || cmd == "call_start" || cmd == "audio_listen" -> heavyExecutor
+            cmd == "rec_start" || cmd == "call_start" || cmd == "audio_listen" ||
+                cmd.startsWith("video_") -> heavyExecutor
             else -> cmdExecutor
         }
         exec.submit {
             val car = CarDataManager.getInstance()
             when (cmd) {
+                "video_live_start", "video_live_stop", "video_transfer",
+                "video_transfer_cancel", "video_catalog", "video_settings_get",
+                "video_settings_update" -> {
+                    val result = TripVideoBridge.handleRemoteCommand(cmd, payload)
+                    publishResult(cmd, result.toString())
+                }
                 "nav_dest" -> {
                     // Destino do celular (compartilhar ou "enviar pro carro"). Retido no
                     // broker: carro desligado recebe ao ligar. Usa o ts do payload (dedupe

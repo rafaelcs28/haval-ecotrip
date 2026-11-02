@@ -14,10 +14,12 @@ import androidx.core.app.NotificationCompat
 import br.com.redesurftank.ecotrip.MainActivity
 import br.com.redesurftank.ecotrip.R
 import br.com.redesurftank.ecotrip.managers.CarDataManager
+import br.com.redesurftank.ecotrip.managers.CameraTelemetryPublisher
 import br.com.redesurftank.ecotrip.managers.LocalApiServer
 import br.com.redesurftank.ecotrip.managers.LocalServiceAdvertiser
 import br.com.redesurftank.ecotrip.managers.MqttManager
 import br.com.redesurftank.ecotrip.managers.TripManager
+import br.com.redesurftank.ecotrip.managers.TripVideoBridge
 import br.com.redesurftank.ecotrip.models.SharedPreferencesKeys
 
 /**
@@ -130,6 +132,14 @@ class CarTelemetryService : Service() {
             AppLogger.w(TAG, "sem permissão de localização — GPS começa quando o app for aberto")
         }
         try { CarDataManager.getInstance() } catch (_: Exception) {}
+        // Haval Camera é opcional. A ponte reconcilia por polling e toda falha fica
+        // isolada: viagem e telemetria do veículo continuam sem o outro APK.
+        try { TripVideoBridge.start(this) } catch (e: Exception) {
+            AppLogger.w(TAG, "ponte da câmera indisponível: ${e.message}")
+        }
+        try { CameraTelemetryPublisher.start(this) } catch (e: Exception) {
+            AppLogger.w(TAG, "telemetria da câmera indisponível: ${e.message}")
+        }
         // Motor de automações local (geofence/horário/estado → vidro/teto/cortina…).
         try { br.com.redesurftank.ecotrip.managers.AutomationManager.init(this) } catch (_: Exception) {}
 
@@ -282,6 +292,8 @@ class CarTelemetryService : Service() {
 
     override fun onDestroy() {
         AppLogger.i(TAG, "CarTelemetryService.onDestroy")
+        CameraTelemetryPublisher.stop()
+        TripVideoBridge.stop()
         applyLanEnabled(false)
         try {
             v8Listener?.let { CarDataManager.getInstance().removeListener(it) }

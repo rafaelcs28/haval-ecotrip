@@ -355,6 +355,11 @@ class TripManager private constructor() {
     private var autoTripStartDist    = 0f
     private var autoTripStartFuelL   = 0f
     private var autoTripStartTime    = 0L
+
+    /** Identidade autoritativa da viagem automática ativa para integrações locais. */
+    fun getActiveAutoTripStartMs(): Long? = synchronized(lock) {
+        autoTripStartMs.takeIf { it > 0L }
+    }
     // v5.20 — tempo parado
     private var autoTripStartPausedMs: Long = 0L  // snapshot de lifeTotalPausedMs no início
     private var autoTripStartElevGain: Double = 0.0  // baseline de altimetria (recorder) no início

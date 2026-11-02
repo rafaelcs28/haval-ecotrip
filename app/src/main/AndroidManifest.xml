@@ -8,6 +8,8 @@
          Impulse. Permissão `signature`: concedida sozinha porque os dois apps usam a
          mesma keystore. targetSdk 28, então NÃO precisa de <queries> (só de 30 pra cima). -->
     <uses-permission android:name="br.com.redesurftank.havalshisuku.permission.READ_CONNECTIVITY_STATUS" />
+    <uses-permission android:name="br.com.redesurftank.havalcamera.permission.CONTROL" />
+    <uses-permission android:name="br.com.redesurftank.havalcamera.permission.READ_VIDEO" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
@@ -103,6 +105,17 @@
                      BOOT_COMPLETED). Sem este, o app morto continuava morto. -->
                 <action android:name="android.intent.action.ACTION_POWER_CONNECTED" />
                 <action android:name="br.com.redesurftank.ecotrip.VIGIA" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Snapshot de catálogo emitido pelo APK Haval Camera. A permissão de
+             assinatura impede outro app de forçar consultas/publicações. -->
+        <receiver
+            android:name=".managers.CameraCatalogChangedReceiver"
+            android:exported="true"
+            android:permission="br.com.redesurftank.havalcamera.permission.READ_VIDEO">
+            <intent-filter>
+                <action android:name="br.com.redesurftank.havalcamera.action.CATALOG_CHANGED" />
             </intent-filter>
         </receiver>
 
