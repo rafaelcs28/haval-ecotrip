@@ -155,6 +155,21 @@ targets:
       # Scheme compartilhado (gera xcshareddata/xcschemes/HavalEcoTrip.xcscheme)
       # pra `xcodebuild -scheme HavalEcoTrip` funcionar sem precisar de xcuserdata.
       gatherCoverageData: false
+      testTargets:
+        - CameraVideoTests
+
+  CameraVideoTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - CameraVideoTests
+    dependencies:
+      - target: HavalEcoTrip
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: br.com.consorciolimpagyn.havalecotrip.CameraVideoTests
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGNING_ALLOWED: NO
 
   HavalEcoTripWidget:
     type: app-extension
