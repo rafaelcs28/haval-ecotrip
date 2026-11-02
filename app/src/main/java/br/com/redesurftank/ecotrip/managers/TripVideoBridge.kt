@@ -11,6 +11,7 @@ import android.os.Looper
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
+import java.util.concurrent.Executors
 import kotlin.math.max
 
 internal object CameraVideoContract {
@@ -238,11 +239,15 @@ class TripVideoBridge(
         private const val TAG = "TripVideoBridge"
         private const val POLL_MS = 2_000L
         private val handler = Handler(Looper.getMainLooper())
+        private val catalogExecutor = Executors.newSingleThreadExecutor { runnable ->
+            Thread(runnable, "camera-catalog").apply { isDaemon = true }
+        }
         @Volatile private var runtime: TripVideoBridge? = null
         @Volatile private var running = false
         @Volatile private var remoteLive = false
         @Volatile private var unavailableLogged = false
         private var lastObservedActive: Long? = null
+        private var catalogPolls = 0
 
         private val poll = object : Runnable {
             override fun run() {
@@ -260,7 +265,7 @@ class TripVideoBridge(
             reconcileRuntime(startup = true)
             handler.postDelayed(poll, POLL_MS)
             CameraSettingsReader.start(app)
-            publishCatalog(app)
+            requestCatalogPublish(app)
         }
 
         fun stop() {
@@ -269,6 +274,7 @@ class TripVideoBridge(
             runtime = null
             remoteLive = false
             lastObservedActive = null
+            catalogPolls = 0
             CameraSettingsReader.stop()
         }
 
@@ -371,6 +377,11 @@ class TripVideoBridge(
             }
         }
 
+        fun requestCatalogPublish(context: Context) {
+            val app = context.applicationContext
+            catalogExecutor.execute { publishCatalog(app) }
+        }
+
         private fun reconcileRuntime(startup: Boolean) {
             val bridge = runtime ?: return
             try {
@@ -385,7 +396,11 @@ class TripVideoBridge(
                 } else bridge.reconcile(active, completed)
                 if (ok) {
                     noteAvailable()
-                    if (lastObservedActive != active) publishCatalog(CameraSettingsReader.contextOrNull() ?: return)
+                    catalogPolls++
+                    if (lastObservedActive != active || catalogPolls >= 30) {
+                        CameraSettingsReader.contextOrNull()?.let(::requestCatalogPublish)
+                        catalogPolls = 0
+                    }
                     lastObservedActive = active
                 } else {
                     noteUnavailable("reconciliação; viagens e telemetria seguem normais")
@@ -395,6 +410,7 @@ class TripVideoBridge(
             }
         }
 
+        @Synchronized
         private fun catalogRevision(context: Context, body: String): Long {
             val preferences = context.getSharedPreferences("camera-video-bridge", Context.MODE_PRIVATE)
             val old = preferences.getString("catalogBody", null)
@@ -438,7 +454,7 @@ class TripVideoBridge(
 class CameraCatalogChangedReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action == CameraVideoContract.CATALOG_CHANGED) {
-            TripVideoBridge.publishCatalog(context.applicationContext)
+            TripVideoBridge.requestCatalogPublish(context.applicationContext)
         }
     }
 }

@@ -5,6 +5,8 @@ import android.net.Uri
 import android.os.Bundle
 import org.json.JSONObject
 import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.TimeUnit
 
 object CameraSettingsReader {
     data class ConfirmedSettings(
@@ -14,9 +16,10 @@ object CameraSettingsReader {
     )
 
     private const val TAG = "CameraSettings"
-    private val executor = Executors.newSingleThreadExecutor { runnable ->
+    private val executor = Executors.newSingleThreadScheduledExecutor { runnable ->
         Thread(runnable, "camera-settings").apply { isDaemon = true }
     }
+    private var poll: ScheduledFuture<*>? = null
     @Volatile private var appContext: Context? = null
     @Volatile private var lastPublished: String? = null
     @Volatile private var automaticRecording = false
@@ -33,10 +36,15 @@ object CameraSettingsReader {
         if (appContext != null) return
         appContext = context.applicationContext
         executor.execute { publishConfirmed("startup") }
+        poll = executor.scheduleWithFixedDelay(
+            { publishConfirmed("poll") }, 60, 60, TimeUnit.SECONDS,
+        )
     }
 
     fun stop() {
         appContext = null
+        poll?.cancel(false)
+        poll = null
         lastPublished = null
         automaticRecording = false
         remoteLive = false
