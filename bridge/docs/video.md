@@ -36,4 +36,3 @@ Upgrade sem TLS direto, ou sem `X-Forwarded-Proto: https` do gateway, recebe `42
 Os códigos `4000` a `4008` seguem `docs/VIDEO_PROTOCOL.md` do Haval Camera.
 Rotas existentes `/ws`, `/ws/audio`, `/clockin` e OCPP continuam no mesmo roteador
 manual de upgrade.
-

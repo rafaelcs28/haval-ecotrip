@@ -254,4 +254,3 @@ test('incomplete session is removed when the 60-second connection window expires
   assert.equal(producer.closed.at(-1).code, 4000);
   assert.equal(commands.at(-1).command, 'video_live_stop');
 });
-
