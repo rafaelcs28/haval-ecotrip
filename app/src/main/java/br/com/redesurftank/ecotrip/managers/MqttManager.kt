@@ -3142,7 +3142,10 @@ class MqttManager private constructor() {
             cmdPathMissCount = 0
             return
         }
-        AppLogger.i(TAG, "Comando recebido: $cmd = '$payload'")
+        // Credenciais curtas de vídeo nunca entram no log. Os demais comandos
+        // mantêm o diagnóstico legado com payload.
+        if (cmd.startsWith("video_")) AppLogger.i(TAG, "Comando recebido: $cmd")
+        else AppLogger.i(TAG, "Comando recebido: $cmd = '$payload'")
 
         // Suprime atuação momentânea re-entregue pelo broker no burst pós-reconnect
         // (fila QoS1 da sessão persistente). Evita vidro/porta/teto/pisca abrindo sozinho.

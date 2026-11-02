@@ -11,6 +11,7 @@ import android.os.Looper
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
+import kotlin.math.max
 
 internal object CameraVideoContract {
     const val PACKAGE = "br.com.redesurftank.havalcamera"
@@ -159,7 +160,9 @@ class TripVideoBridge(
         viewerSession: String? = null,
         suppliedRequestId: String? = null,
     ): Boolean {
-        var revision = state.revision + 1
+        // Epoch milliseconds keep revisions ahead after an EcoTrip reinstall while
+        // max() preserves monotonicity if the head-unit clock moves backwards.
+        var revision = max(state.revision + 1, wallClockMs())
         repeat(2) {
             val requestId = suppliedRequestId
                 ?: "ecotrip-$revision-${action.name.lowercase()}-${wallClockMs()}-${UUID.randomUUID()}"
@@ -172,8 +175,10 @@ class TripVideoBridge(
                 CommandResult.Status.APPLIED -> return state.save(newLastTripId, revision)
                 CommandResult.Status.UNAVAILABLE -> return false
                 CommandResult.Status.STALE -> {
-                    if (result.cameraRevision < 0 || !state.save(state.lastTripId, result.cameraRevision)) return false
-                    revision = result.cameraRevision + 1
+                    if (result.cameraRevision < 0) return false
+                    val observed = max(revision, result.cameraRevision)
+                    if (!state.save(state.lastTripId, observed)) return false
+                    revision = observed + 1
                 }
             }
         }
@@ -305,6 +310,7 @@ class TripVideoBridge(
                     "video_transfer" -> {
                         val tripId = json.getString("tripId").toLongOrNull()
                             ?: throw IllegalArgumentException("tripId inválido")
+                        require(tripId > 0) { "tripId inválido" }
                         val segments = json.getJSONArray("segmentIds").toStringList()
                         require(segments.isNotEmpty() && segments.size <= 256) { "segmentIds inválidos" }
                         segments.forEach { requiredId(it, "segmentId") }

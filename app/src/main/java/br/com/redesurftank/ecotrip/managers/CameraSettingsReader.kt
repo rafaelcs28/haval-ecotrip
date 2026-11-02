@@ -92,8 +92,12 @@ object CameraSettingsReader {
                 key == "quality" -> value.toString().also {
                     require(value is String && it in setOf("economy", "standard", "high")) { "quality inválida" }
                 }
-                key == "reserveGb" -> (value as? Number)?.toInt().also {
-                    require(it in setOf(5, 10, 20)) { "reserveGb inválido" }
+                key == "reserveGb" -> (value as? Number)?.let { number ->
+                    val integer = number.toInt()
+                    require(number.toDouble() == integer.toDouble() && integer in setOf(5, 10, 20)) {
+                        "reserveGb inválido"
+                    }
+                    integer
                 } ?: throw IllegalArgumentException("reserveGb inválido")
                 key == "overlayPosition" -> value.toString().also {
                     require(value is String && it in setOf(

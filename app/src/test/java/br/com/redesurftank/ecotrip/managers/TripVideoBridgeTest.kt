@@ -82,7 +82,7 @@ class TripVideoBridgeTest {
         bridge.reconcileStartup(1_000L)
 
         assertEquals(TripVideoBridge.Action.RECONCILE, sink.commands.single().action)
-        assertEquals(10L, state.revision)
+        assertEquals(10_000L, state.revision)
     }
 
     @Test fun missingCameraPreservesActiveTripForRetry() {
@@ -98,7 +98,7 @@ class TripVideoBridgeTest {
 
     @Test fun staleRevisionRetriesAboveCameraRevision() {
         val sink = FakeSink().apply {
-            queuedResults += TripVideoBridge.CommandResult.stale(20)
+            queuedResults += TripVideoBridge.CommandResult.stale(20_000)
             queuedResults += TripVideoBridge.CommandResult.applied()
         }
         val state = MemoryState(lastTripId = 1_000L, revision = 2)
@@ -106,7 +106,7 @@ class TripVideoBridgeTest {
 
         bridge.reconcileStartup(1_000L)
 
-        assertEquals(listOf(3L, 21L), sink.commands.map { it.revision })
-        assertEquals(21L, state.revision)
+        assertEquals(listOf(10_000L, 20_001L), sink.commands.map { it.revision })
+        assertEquals(20_001L, state.revision)
     }
 }

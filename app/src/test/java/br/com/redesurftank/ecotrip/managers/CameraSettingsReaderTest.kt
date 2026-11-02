@@ -25,6 +25,9 @@ class CameraSettingsReaderTest {
             CameraSettingsReader.validatePatch(mapOf("reserveGb" to 7))
         }.isSuccess)
         assertFalse(runCatching {
+            CameraSettingsReader.validatePatch(mapOf("reserveGb" to 5.5))
+        }.isSuccess)
+        assertFalse(runCatching {
             CameraSettingsReader.validatePatch(mapOf("quality" to "ultra"))
         }.isSuccess)
     }
