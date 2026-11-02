@@ -32,10 +32,11 @@ final class CameraLiveSessionTests: XCTestCase {
         await session.stop()
     }
 
-    func testOfflineResponsePublishesOfflineAndClearsFrame() async {
+    func testOfflineResponsePublishesOfflineClearsFrameAndAllowsRetry() async {
         let renderer = FakeRenderer()
+        var attempts = 0
         let transport = CameraLiveTransport(
-            createSession: { _ in throw CameraLiveError.offline },
+            createSession: { _ in attempts += 1; throw CameraLiveError.offline },
             openSocket: { _ in XCTFail("socket must not open"); return FakeCameraLiveSocket() },
             stopSession: { _ in }
         )
@@ -44,7 +45,9 @@ final class CameraLiveSessionTests: XCTestCase {
         await session.start()
 
         XCTAssertEqual(session.state, .offline)
-        XCTAssertEqual(renderer.clearCount, 1)
+        await session.start()
+        XCTAssertEqual(attempts, 2)
+        XCTAssertEqual(renderer.clearCount, 2)
     }
 
     func testDisconnectBlanksFrameAndReconnects() async {
