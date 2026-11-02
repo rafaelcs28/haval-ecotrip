@@ -61,7 +61,7 @@ haval-ecotrip/
 │               #   pareamento, push/APNs, pré‑clima, IA (Ollama), backup.
 │   ├── server.js
 │   ├── public/             # PWA (celular) — dash, drive, conforto, posto, etc.
-│   ├── .env.example
+│   ├── env.template
 │   ├── docker-compose.yml  # subir bridge (+ Mosquitto opcional)
 │   └── Dockerfile
 ├── cluster/    # APK do TABLET (Android) — WebView do cluster consumindo o
@@ -80,7 +80,7 @@ haval-ecotrip/
 ```bash
 git clone https://github.com/rafaelcs28/haval-ecotrip.git
 cd haval-ecotrip/bridge
-cp .env.example .env          # edite: MQTT_*, BRIDGE_TOKEN, BRIDGE_PUBLIC_URL, CAR_MQTT_*
+cp env.template .env          # edite: MQTT_*, BRIDGE_TOKEN, BRIDGE_PUBLIC_URL, CAR_MQTT_*
 docker compose up -d --build  # sobe o bridge (descomente 'mosquitto:' no compose se precisar de broker)
 ```
 Abra `http://IP-DO-SERVIDOR:3000`, entre com a senha (`BRIDGE_TOKEN`), e siga o **[guia de instalação](docs/INSTALACAO-AMIGO.md)** (configurar veículo → gerar código → parear o carro → tablet → celular).
@@ -120,7 +120,7 @@ Baixe a tag `cluster-vX.Y` em Releases. Builds do módulo também seguem a fila 
 
 ### Rodar sem Docker (dev)
 ```bash
-cd bridge && npm install && cp .env.example .env
+cd bridge && npm install && cp env.template .env
 npm run dev        # http://localhost:3000
 ```
 
@@ -168,7 +168,7 @@ sudo systemctl enable --now mosquitto
 ```bash
 curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt install -y nodejs
 sudo npm install -g pm2
-cd haval-ecotrip/bridge && npm install --production && cp .env.example .env && nano .env
+cd haval-ecotrip/bridge && npm install --production && cp env.template .env && nano .env
 pm2 start server.js --name ecotrip-bridge && pm2 startup && pm2 save
 ```
 

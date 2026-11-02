@@ -1,7 +1,7 @@
 # EcoTrip Bridge — docker-compose
 #
 # Setup (uma vez):
-#   cp .env.example .env  →  edita .env com seus valores
+#   cp env.template .env  →  edita .env com seus valores
 #   docker compose up -d --build
 #
 # Logs:    docker compose logs -f bridge

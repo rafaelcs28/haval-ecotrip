@@ -46,7 +46,7 @@ Xcode também executa no Mac Mini autorizado. A fila aceita simulador com projet
 
 ## Bridge e segredos
 
-Use `bridge/.env.example` como referência de nomes, nunca como local para valores reais. `.env`, tokens, certificados, dados pessoais, históricos e backups permanecem fora do Git. Não conecte produção para obter baseline.
+Use `bridge/env.template` como referência de nomes, nunca como local para valores reais. `.env`, tokens, certificados, dados pessoais, históricos e backups permanecem fora do Git. Não conecte produção para obter baseline.
 
 ## Agentes
 

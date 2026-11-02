@@ -44,7 +44,7 @@ Guia completo pra rodar **tudo na sua casa/carro**, com **seu próprio servidor*
 ```bash
 git clone https://github.com/rafaelcs28/haval-ecotrip.git
 cd haval-ecotrip/bridge
-cp .env.example .env
+cp env.template .env
 ```
 
 ### 2.3. Editar o `.env`

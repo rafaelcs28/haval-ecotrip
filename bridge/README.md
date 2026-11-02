@@ -25,7 +25,7 @@ Pré-requisitos: Docker Desktop ou Docker Engine + Compose.
 ```bash
 git clone https://github.com/rafaelcs28/haval-ecotrip.git
 cd haval-ecotrip/bridge
-cp .env.example .env
+cp env.template .env
 # edita o .env com seus valores — leia os comentários inline
 docker compose up -d --build
 ```
@@ -52,7 +52,7 @@ docker compose down
 git clone https://github.com/rafaelcs28/haval-ecotrip.git
 cd haval-ecotrip/bridge
 npm install
-cp .env.example .env
+cp env.template .env
 # edita o .env com seus valores
 node server.js
 # ou via pm2: pm2 start server.js --name ecotrip-bridge
