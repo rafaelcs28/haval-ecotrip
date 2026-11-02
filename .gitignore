@@ -77,3 +77,4 @@ ios-app/AutoShareReady.shortcut
 
 # Logs de runtime dos vigias/backup
 logs/
+.worktrees/
