@@ -41,6 +41,7 @@ struct CameraLanClient {
     })
 
     func createLiveSession(endpoint: CameraLanEndpoint, bridgeToken: String) async throws -> CameraLanSession {
+        guard !bridgeToken.isEmpty else { throw CameraLanError.invalidServerProof }
         let capabilitiesRequest = try request(endpoint: endpoint, path: "/api/capabilities", method: "GET")
         let (capabilitiesData, capabilitiesResponse) = try await http(capabilitiesRequest)
         try requireStatus(capabilitiesResponse, 200)
