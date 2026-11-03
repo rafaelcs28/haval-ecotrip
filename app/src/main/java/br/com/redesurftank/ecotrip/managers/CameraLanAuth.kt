@@ -57,6 +57,9 @@ class CameraLanAuth(
         }
     }
 
+    @Synchronized fun admit(requestedSession: String, capturedSession: String, role: String, token: String): Boolean =
+        requestedSession == capturedSession && consume(capturedSession, role, token)
+
     @Synchronized fun consume(id: String, role: String, token: String): Boolean {
         if (role !in setOf("producer", "viewer") || !authorize(id, role, token)) return false
         sessions[id]?.credentials?.remove(role)

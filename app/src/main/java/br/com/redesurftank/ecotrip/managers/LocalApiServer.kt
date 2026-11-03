@@ -223,7 +223,8 @@ class LocalApiServer(
             val id = lanSessionQuery(session) ?: return lanJson(401)
             val live = lanLive ?: return lanJson(401)
             if (id != live.id || !CameraLanAuth.cameraAvailable(appCtx) ||
-                !lanAuth.consume(id, role, lanBearer(session))) return lanJson(401)
+                !lanAuth.authorize(id, role, lanBearer(session))) return lanJson(401)
+            return try { super.serve(session) } catch (_: IllegalStateException) { lanJson(401) }
         }
         return super.serve(session)
     }
@@ -455,7 +456,11 @@ class LocalApiServer(
     override fun openWebSocket(handshake: IHTTPSession): WebSocket {
         if (handshake.uri.startsWith("/ws/video/lan/")) {
             val live = lanLive ?: throw IllegalStateException("Session ended")
-            return VideoWebSocket(handshake, live, if (handshake.uri.endsWith("/car")) "producer" else "viewer")
+            val role = if (handshake.uri.endsWith("/car")) "producer" else "viewer"
+            check(lanAuth.admit(lanSessionQuery(handshake).orEmpty(), live.id, role, lanBearer(handshake))) {
+                "LAN session ended"
+            }
+            return VideoWebSocket(handshake, live, role)
         }
         val remote = handshake.remoteIpAddress ?: ""
         if (!isPrivateIp(remote)) {
