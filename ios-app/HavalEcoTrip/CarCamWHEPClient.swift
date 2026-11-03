@@ -70,7 +70,7 @@ actor CarCamWHEPClient {
         configuration: CarCamBridgeConfiguration
     ) throws -> CarCamWHEPSession {
         guard response.statusCode == 201 else {
-            throw error(forHTTPStatus: response.statusCode)
+            throw error(forHTTPStatus: response.statusCode, body: body)
         }
         guard response.value(forHTTPHeaderField: "Content-Type")?
             .split(separator: ";", maxSplits: 1).first?
@@ -101,6 +101,15 @@ actor CarCamWHEPClient {
         }
     }
 
+    private static func error(forHTTPStatus status: Int, body: Data) -> CarCamViewerError {
+        if status == 422,
+           let problem = try? JSONDecoder().decode(Problem.self, from: body),
+           problem.code == "media_required" {
+            return .mediaRequired
+        }
+        return error(forHTTPStatus: status)
+    }
+
     private static func validatedLocation(
         _ location: URL,
         configuration: CarCamBridgeConfiguration
@@ -115,6 +124,10 @@ actor CarCamWHEPClient {
               candidate.path.hasPrefix("/api/v1/live/sessions/"),
               candidate.path.count > "/api/v1/live/sessions/".count else { return nil }
         return location
+    }
+
+    private struct Problem: Decodable {
+        let code: String
     }
 }
 

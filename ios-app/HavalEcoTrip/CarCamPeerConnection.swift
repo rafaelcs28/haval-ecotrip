@@ -16,6 +16,7 @@ protocol CarCamPeerConnectioning: AnyObject {
 final class CarCamPeerConnection: NSObject, CarCamPeerConnectioning {
     private static let initializeWebRTC: Void = { RTCInitializeSSL() }()
 
+    private let factory: RTCPeerConnectionFactory
     private let connection: RTCPeerConnection
     private var closed = false
     private(set) var videoTrack: CarCamVideoTrack?
@@ -32,7 +33,7 @@ final class CarCamPeerConnection: NSObject, CarCamPeerConnectioning {
             with: configuration, constraints: constraints, delegate: nil) else {
             throw CarCamViewerError.peerConnectionFailed
         }
-        let result = CarCamPeerConnection(connection: connection)
+        let result = CarCamPeerConnection(factory: factory, connection: connection)
         let receiveOnly = RTCRtpTransceiverInit()
         receiveOnly.direction = .recvOnly
         guard connection.addTransceiver(of: .audio, init: receiveOnly) != nil,
@@ -43,7 +44,8 @@ final class CarCamPeerConnection: NSObject, CarCamPeerConnectioning {
         return result
     }
 
-    private init(connection: RTCPeerConnection) {
+    private init(factory: RTCPeerConnectionFactory, connection: RTCPeerConnection) {
+        self.factory = factory
         self.connection = connection
         super.init()
         connection.delegate = self
