@@ -240,7 +240,7 @@ class CameraLanAuthTest {
     }
     // Mutation caught: internal live revocation discards control authority instead of retaining its digest until expiry.
     @Test fun internalLiveRevocationKeepsAuthenticatedDeleteIdempotentThroughOriginalExpiry() {
-        val a = auth(); val s = session(a, challenge(a))!!
+        val a = auth() as CameraLanAuth; val s = session(a, challenge(a))!!
         val id = s["sessionId"] as String
         val control = s["controlToken"] as String
 
