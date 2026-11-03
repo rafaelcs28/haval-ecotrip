@@ -87,6 +87,24 @@ final class CarCamViewerSessionTests: XCTestCase {
         XCTAssertEqual(viewer.state, .failed(.tailscaleUnavailable))
         XCTAssertEqual(peer.closes, 1)
     }
+
+    func testPeerFailureDeletesRemoteSessionAndAllowsManualRetry() async {
+        let peer = PeerSpy()
+        let calls = CallCounter()
+        let viewer = CarCamViewerSession(
+            makePeer: { peer },
+            createRemote: { _ in self.remote },
+            stopRemote: { _ in await calls.stopped() }
+        )
+        await viewer.start()
+
+        await peer.fail(.peerConnectionFailed)
+
+        XCTAssertEqual(viewer.state, .failed(.peerConnectionFailed))
+        XCTAssertEqual(peer.closes, 1)
+        let snapshot = await calls.snapshot()
+        XCTAssertEqual(snapshot.stops, 1)
+    }
 }
 
 @MainActor
@@ -95,6 +113,7 @@ private final class PeerSpy: CarCamPeerConnectioning {
     var answers: [String] = []
     var closes = 0
     var videoTrack: CarCamVideoTrack? { nil }
+    var onFailure: (@MainActor (CarCamViewerError) async -> Void)?
 
     func makeOffer() async throws -> String {
         offers += 1
@@ -107,6 +126,10 @@ private final class PeerSpy: CarCamPeerConnectioning {
 
     func close() {
         closes += 1
+    }
+
+    func fail(_ error: CarCamViewerError) async {
+        await onFailure?(error)
     }
 }
 
