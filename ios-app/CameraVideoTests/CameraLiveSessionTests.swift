@@ -607,16 +607,12 @@ private final class FakeRenderer: CameraVideoRendering {
     private var requiresKeyframe = false
     private var displayedFrames = 0
     var displayedFrameCount: Int { displayedFrames }
-    private var displayWaiters: [(Int, CheckedContinuation<Void, Never>)] = []
     init(onClear: @escaping () -> Void = {}) { self.onClear = onClear }
     func consume(_ packet: CameraVideoPacket) throws -> Bool {
         if case .accessUnit(_, let keyframe) = packet.payload {
             if requiresKeyframe && !keyframe { return false }
             requiresKeyframe = false
             displayedFrames += 1
-            let ready = displayWaiters.filter { displayedFrames >= $0.0 }
-            displayWaiters.removeAll { displayedFrames >= $0.0 }
-            ready.forEach { $0.1.resume() }
             return true
         }
         return false
@@ -624,8 +620,9 @@ private final class FakeRenderer: CameraVideoRendering {
     func setFailureHandler(_ handler: @escaping () -> Void) { failureHandler = handler }
     func failAsynchronously() { failureHandler?() }
     func waitForDisplayedFrames(_ count: Int) async {
-        if displayedFrames >= count { return }
-        await withCheckedContinuation { displayWaiters.append((count, $0)) }
+        for _ in 0..<1_000 where displayedFrames < count {
+            try? await Task.sleep(nanoseconds: 1_000_000)
+        }
     }
     func clear() {
         clearCount += 1
