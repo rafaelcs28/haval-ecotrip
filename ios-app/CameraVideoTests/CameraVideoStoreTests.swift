@@ -327,9 +327,10 @@ final class CameraVideoStoreTests: XCTestCase {
         XCTAssertEqual(activeRemote, 0)
     }
 
-    func testCancellationClosesIgnoringAdaptersPromptly() async throws {
+    func testCancelReturnsBoundedWhileDefiantSocketKeepsOwnershipUntilRelease() async throws {
         let bytes = Data("abc".utf8), segment = Self.segment(bytes)
         let socket = BlockingTransferSocket()
+        let returned = ReturnProbe()
         var transport = CameraVideoTransport.testing
         transport.openRemoteTransfer = { _, _, _, _, _ in socket }
         let store = makeStore(transport)
@@ -337,12 +338,52 @@ final class CameraVideoStoreTests: XCTestCase {
         let transfer = try store.startDownload(tripID: "42", segment: segment, route: .internet,
             lanEndpoint: nil, bridgeURL: Self.bridge, bridgeToken: "paired")
         while !socket.started { await Task.yield() }
-        let cancellation = Task { await store.cancelDownload(tripID: "42", segmentID: 1) }
-        try await Task.sleep(for: .milliseconds(50))
+        let cancellation = Task {
+            await store.cancelDownload(tripID: "42", segmentID: 1)
+            returned.value = true
+        }
+        try await Task.sleep(for: .milliseconds(400))
+
+        XCTAssertTrue(returned.value, "cancel must return after the documented 250 ms join bound")
         XCTAssertTrue(socket.closed, "cancellation must close a receive that ignores Task cancellation")
+        XCTAssertTrue(store.isDownloading(tripID: "42", segmentID: 1),
+                      "a defiant worker remains owned until it really terminates")
+        XCTAssertThrowsError(try store.startDownload(tripID: "42", segment: segment, route: .internet,
+            lanEndpoint: nil, bridgeURL: Self.bridge, bridgeToken: "paired"))
+
         socket.unblock()
         await cancellation.value
         _ = await transfer.result
+        XCTAssertFalse(store.isDownloading(tripID: "42", segmentID: 1))
+    }
+
+    func testCloseActionReturnsBoundedButBlocksDuplicateUntilDefiantWorkerTerminates() async throws {
+        let bytes = Data("abc".utf8), segment = Self.segment(bytes)
+        let socket = BlockingTransferSocket()
+        let returned = ReturnProbe()
+        var transport = CameraVideoTransport.testing
+        transport.openRemoteTransfer = { _, _, _, _, _ in socket }
+        let store = makeStore(transport)
+        authorizeRemoteDownload(store)
+        let transfer = try store.startDownload(tripID: "42", segment: segment, route: .internet,
+            lanEndpoint: nil, bridgeURL: Self.bridge, bridgeToken: "paired")
+        while !socket.started { await Task.yield() }
+        let closing = Task {
+            await store.closeDownloadAction()
+            returned.value = true
+        }
+        try await Task.sleep(for: .milliseconds(400))
+
+        XCTAssertTrue(returned.value, "closing the UI action must honor the 250 ms join bound")
+        XCTAssertTrue(socket.closed)
+        XCTAssertTrue(store.isDownloading(tripID: "42", segmentID: 1))
+        XCTAssertThrowsError(try store.startDownload(tripID: "42", segment: segment, route: .internet,
+            lanEndpoint: nil, bridgeURL: Self.bridge, bridgeToken: "paired"))
+
+        socket.unblock()
+        await closing.value
+        _ = await transfer.result
+        XCTAssertFalse(store.isDownloading(tripID: "42", segmentID: 1))
     }
 
     func testLANAdapterCancellationInvokesUnderlyingDownloadCancel() async throws {
@@ -374,6 +415,45 @@ final class CameraVideoStoreTests: XCTestCase {
         XCTAssertTrue(blocker.cancelled)
         blocker.unblock()
         _ = await operation.result
+    }
+
+    func testHTTPCompletionDeletesOwnedFileWhenCancellationWinsAfterMove() async throws {
+        let request = URLRequest(url: URL(string: "https://bridge.example/download")!)
+        let handle = URLSessionCameraHTTPDownload(session: .shared, request: request)
+        let owned = root.appendingPathComponent("moved-before-cancel.download")
+        try Data("abc".utf8).write(to: owned)
+        let response = Self.response(request, 200, headers: ["Content-Length": "3"])
+
+        handle.cancel()
+        handle.acceptOwnedDownload(owned, response: response)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: owned.path),
+                       "a moved success that loses the terminal race must be deleted")
+        if case .success = await Task { try await handle.value() }.result {
+            XCTFail("Cancellation must remain the accepted terminal result")
+        }
+    }
+
+    func testAcceptedHTTPCompletionKeepsFileUntilStreamOwnerCleansUp() async throws {
+        let request = URLRequest(url: URL(string: "https://bridge.example/download")!)
+        let handle = URLSessionCameraHTTPDownload(session: .shared, request: request)
+        let owned = root.appendingPathComponent("accepted-owned.download")
+        try Data("abc".utf8).write(to: owned)
+        let response = Self.response(request, 200, headers: ["Content-Length": "3"])
+        let before = Self.lanTemporaryFiles()
+
+        handle.acceptOwnedDownload(owned, response: response)
+        let (accepted, _) = try await handle.value()
+        XCTAssertEqual(accepted, owned)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: owned.path))
+
+        let stream = try TemporaryFileLANStream(downloadURL: accepted, statusCode: 200,
+                                                contentRange: nil, contentLength: 3)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: owned.path))
+        XCTAssertEqual(Self.lanTemporaryFiles().subtracting(before).count, 1)
+        XCTAssertEqual(try await stream.nextChunk(), Data("abc".utf8))
+        stream.cancel()
+        XCTAssertEqual(Self.lanTemporaryFiles(), before)
     }
 
     func testLANResumeUsesExactRangeAndRouteSpecificPartialIdentity() async throws {
@@ -804,6 +884,11 @@ final class CameraVideoStoreTests: XCTestCase {
         HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: "HTTP/1.1",
                         headerFields: headers)!
     }
+    private static func lanTemporaryFiles() -> Set<String> {
+        let values = (try? FileManager.default.contentsOfDirectory(
+            at: FileManager.default.temporaryDirectory, includingPropertiesForKeys: nil)) ?? []
+        return Set(values.filter { $0.lastPathComponent.hasPrefix("haval-camera-lan-") }.map(\.path))
+    }
     private static func segment(_ bytes: Data, id: UInt32 = 1) -> CameraVideoSegment {
         .init(id: id, byteSize: UInt64(bytes.count), sha256: Data(SHA256.hash(data: bytes)))
     }
@@ -864,15 +949,20 @@ private final class BlockingTransferSocket: CameraTransferSocket, @unchecked Sen
     }
     func send(_ data: Data) async throws {}
     func close() {
-        let pending = lock.withLock { () -> CheckedContinuation<Data, Error>? in
+        lock.withLock {
             didClose = true
+        }
+    }
+    func unblock() {
+        let pending = lock.withLock { () -> CheckedContinuation<Data, Error>? in
             defer { continuation = nil }
             return continuation
         }
         pending?.resume(throwing: CancellationError())
     }
-    func unblock() { close() }
 }
+
+@MainActor private final class ReturnProbe { var value = false }
 
 private final class BlockingHTTPDownload: @unchecked Sendable {
     private let lock = NSLock()
