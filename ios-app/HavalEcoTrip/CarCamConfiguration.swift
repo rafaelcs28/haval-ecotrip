@@ -22,6 +22,7 @@ enum CarCamViewerError: Error, Equatable {
     case invalidResponse
     case invalidLocation
     case tlsPinMismatch
+    case peerConnectionFailed
     case unauthorized
     case viewerExists
     case bodyTooLarge

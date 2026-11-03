@@ -20,6 +20,11 @@ settings:
   # distribuição. No Debug, usa development/sandbox. O export app-store
   # (ExportOptions.plist) re-assina tudo como distribuição.
 
+packages:
+  WebRTC:
+    url: https://github.com/stasel/WebRTC.git
+    exactVersion: "155.0.0"
+
 targets:
   HavalEcoTrip:
     type: application
@@ -149,6 +154,7 @@ targets:
           CODE_SIGN_ENTITLEMENTS: HavalEcoTrip/HavalEcoTrip-prod.entitlements
     dependencies:
       - target: HavalEcoTripWidget
+      - package: WebRTC
       # - target: ShareExtension   # fora do archive até registrar o App Group do
       #   App ID br.com.consorciolimpagyn.havalecotrip.ShareExtension no portal.
     scheme:
@@ -170,6 +176,8 @@ targets:
       - path: HavalEcoTrip/LANDiscovery.swift
       - path: HavalEcoTrip/CarCamConfiguration.swift
       - path: HavalEcoTrip/CarCamWHEPClient.swift
+      - path: HavalEcoTrip/CarCamPeerConnection.swift
+      - path: HavalEcoTrip/CarCamViewerSession.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: br.com.consorciolimpagyn.havalecotrip.CameraVideoTests
@@ -180,6 +188,8 @@ targets:
       gatherCoverageData: false
       testTargets:
         - CameraVideoTests
+    dependencies:
+      - package: WebRTC
 
   HavalEcoTripWidget:
     type: app-extension
