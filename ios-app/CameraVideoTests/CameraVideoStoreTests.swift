@@ -210,7 +210,8 @@ final class CameraVideoStoreTests: XCTestCase {
         _ = try await network.fetchLANCatalog(endpoint: Self.lan, bridgeToken: bridgeToken)
         let stream = try await network.openLANSegment(tripID: "42", segment: Self.segment(Data("abc".utf8)),
             ordinal: 1, offset: 1, endpoint: Self.lan, bridgeToken: bridgeToken)
-        XCTAssertLessThanOrEqual(try await stream.nextChunk()?.count ?? 0, 64 * 1_024)
+        let streamedCount = try await stream.nextChunk()?.count ?? 0
+        XCTAssertLessThanOrEqual(streamedCount, 64 * 1_024)
         await network.closeLANCatalogSession(endpoint: Self.lan)
 
         XCTAssertEqual(sessionCreates, 1)
