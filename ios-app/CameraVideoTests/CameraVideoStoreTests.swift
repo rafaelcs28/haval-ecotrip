@@ -429,7 +429,8 @@ final class CameraVideoStoreTests: XCTestCase {
 
         XCTAssertFalse(FileManager.default.fileExists(atPath: owned.path),
                        "a moved success that loses the terminal race must be deleted")
-        if case .success = await Task { try await handle.value() }.result {
+        let terminal = await Task(operation: { try await handle.value() }).result
+        if case .success = terminal {
             XCTFail("Cancellation must remain the accepted terminal result")
         }
     }
@@ -451,7 +452,8 @@ final class CameraVideoStoreTests: XCTestCase {
                                                 contentRange: nil, contentLength: 3)
         XCTAssertFalse(FileManager.default.fileExists(atPath: owned.path))
         XCTAssertEqual(Self.lanTemporaryFiles().subtracting(before).count, 1)
-        XCTAssertEqual(try await stream.nextChunk(), Data("abc".utf8))
+        let chunk = try await stream.nextChunk()
+        XCTAssertEqual(chunk, Data("abc".utf8))
         stream.cancel()
         XCTAssertEqual(Self.lanTemporaryFiles(), before)
     }
