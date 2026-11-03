@@ -567,7 +567,8 @@ const jsonBuffer = value => Buffer.from(JSON.stringify(value));
 function catalog(revision = 1, trips) {
   return { ok: true, catalogRevision: revision, updatedAt: 1_700_000_000_000 + revision,
     trips: trips || [{ tripId: '42', source: 'automatic', startMs: 1000, endMs: 2000,
-      byteSize: 3, completed: true, segments: [{ segmentId: 1, byteSize: 3, sha256: SHA_ABC }] }] };
+      byteSize: 3, completed: true, segmentCount: 1,
+      segments: [{ segmentId: 1, byteSize: 3, sha256: SHA_ABC }] }] };
 }
 function transferFixture(options = {}) {
   const f = fixture(options);
@@ -674,9 +675,40 @@ test('catalog preserves legacy completed summaries, excludes active trips and ma
   assert.equal(relay.acceptCatalog(jsonBuffer(catalog(1, [summary, active]))), true);
   assert.equal(relay.getCatalog().trips.length, 1);
   assert.equal(relay.getCatalog().trips[0].tripId, '43');
+  assert.equal(relay.getCatalog().trips[0].segmentCount, 1);
+  assert.equal(relay.getCatalog().trips[0].segments, undefined);
   assert.equal(relay.getCatalog().stale, false);
   advance(5 * 60_000 + 2);
   assert.equal(relay.getCatalog().stale, true);
+});
+
+test('catalog normalizes the exact Android payload for GET while retaining download metadata', async t => {
+  const { relay } = fixture();
+  const android = catalog(7, [{
+    tripId: '42', source: 'automatic', startMs: 1000, endMs: 2000,
+    byteSize: 3, segmentCount: 1, completed: true,
+    segments: [{ segmentId: 1, byteSize: 3, sha256: SHA_ABC }],
+  }]);
+  assert.equal(relay.acceptCatalog(jsonBuffer(android)), true);
+  const normalized = relay.getCatalog();
+  assert.deepEqual(normalized.trips[0], android.trips[0]);
+
+  const request = await api(t, relay);
+  const response = await request('/api/video/catalog');
+  assert.equal(response.status, 200);
+  assert.deepEqual((await response.json()).trips[0], android.trips[0]);
+});
+
+test('catalog accepts 4096 segment metadata entries but rejects 4097', () => {
+  const makeTrip = count => ({
+    tripId: '42', source: 'automatic', startMs: 1000, endMs: 2000,
+    byteSize: count, segmentCount: count, completed: true,
+    segments: Array.from({ length: count }, (_, index) => ({
+      segmentId: index + 1, byteSize: 1, sha256: SHA_ABC,
+    })),
+  });
+  assert.equal(fixture().relay.acceptCatalog(jsonBuffer(catalog(1, [makeTrip(4096)]))), true);
+  assert.equal(fixture().relay.acceptCatalog(jsonBuffer(catalog(1, [makeTrip(4097)]))), false);
 });
 
 test('catalog rejects invalid paths, sizes, digests, duplicate ordinals and unknown captured fields', () => {

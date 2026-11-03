@@ -122,27 +122,46 @@ final class CameraVideoStoreTests: XCTestCase {
         XCTAssertEqual(store.localState(tripID: "42", segment: segment), .verified(url))
     }
 
-    func testCatalogRejectsUntrustedIdentityOrderingSizeDigestAndLegacyCount() {
+    func testCatalogRejectsUntrustedIdentityOrderingSizeAndDigestButKeepsLegacyCountForDisplay() throws {
         let sha = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
         let validSegment = "{\"segmentId\":1,\"byteSize\":3,\"sha256\":\"\(sha)\"}"
         let invalidTrips = [
-            ("01", 3, "[\(validSegment)]"),
-            ("../42", 3, "[\(validSegment)]"),
-            ("18446744073709551616", 3, "[\(validSegment)]"),
-            ("42", 3, "[{\"segmentId\":2,\"byteSize\":3,\"sha256\":\"\(sha)\"}]"),
-            ("42", 6, "[\(validSegment),\(validSegment)]"),
-            ("42", 3, "[{\"segmentId\":1,\"byteSize\":0,\"sha256\":\"\(sha)\"}]"),
-            ("42", 4, "[\(validSegment)]"),
-            ("42", 3, "[{\"segmentId\":1,\"byteSize\":3,\"sha256\":\"00\"}]"),
+            ("01", 3, 1, "[\(validSegment)]"),
+            ("../42", 3, 1, "[\(validSegment)]"),
+            ("18446744073709551616", 3, 1, "[\(validSegment)]"),
+            ("42", 3, 1, "[{\"segmentId\":2,\"byteSize\":3,\"sha256\":\"\(sha)\"}]"),
+            ("42", 6, 2, "[\(validSegment),\(validSegment)]"),
+            ("42", 3, 1, "[{\"segmentId\":1,\"byteSize\":0,\"sha256\":\"\(sha)\"}]"),
+            ("42", 4, 1, "[\(validSegment)]"),
+            ("42", 3, 1, "[{\"segmentId\":1,\"byteSize\":3,\"sha256\":\"00\"}]"),
         ]
-        for (tripID, byteSize, segments) in invalidTrips {
+        for (tripID, byteSize, segmentCount, segments) in invalidTrips {
             let json = "{\"trips\":[{\"tripId\":\"\(tripID)\",\"source\":\"automatic\",\"startMs\":1," +
-                "\"endMs\":2,\"byteSize\":\(byteSize),\"completed\":true,\"segments\":\(segments)}]}"
+                "\"endMs\":2,\"byteSize\":\(byteSize),\"completed\":true," +
+                "\"segmentCount\":\(segmentCount),\"segments\":\(segments)}]}"
             XCTAssertThrowsError(try CameraVideoCatalog.decode(Data(json.utf8), route: .lan), tripID)
         }
         let legacy = "{\"trips\":[{\"tripId\":\"42\",\"source\":\"automatic\",\"startMs\":1," +
-            "\"endMs\":2,\"byteSize\":3,\"completed\":true,\"segments\":1}]}"
-        XCTAssertThrowsError(try CameraVideoCatalog.decode(Data(legacy.utf8), route: .lan))
+            "\"endMs\":2,\"byteSize\":3,\"completed\":true,\"segmentCount\":1}]}"
+        let legacyCatalog = try CameraVideoCatalog.decode(Data(legacy.utf8), route: .internet)
+        XCTAssertEqual(legacyCatalog.trips[0].segments, [])
+        XCTAssertFalse(CameraVideoStore(rootURL: root, transport: .testing).isTripReadyForPlayback(legacyCatalog.trips[0]))
+    }
+
+    func testBridgeCatalogFixtureSupportsTask3LimitAndRejects4097Segments() throws {
+        let sha = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        func fixture(_ count: Int) -> Data {
+            let segments = (1...count).map {
+                "{\"segmentId\":\($0),\"byteSize\":1,\"sha256\":\"\(sha)\"}"
+            }.joined(separator: ",")
+            return Data(("{\"ok\":true,\"catalogRevision\":7,\"updatedAt\":1000,\"stale\":false," +
+                "\"trips\":[{\"tripId\":\"42\",\"source\":\"automatic\",\"startMs\":1,\"endMs\":2," +
+                "\"byteSize\":\(count),\"completed\":true,\"segmentCount\":\(count)," +
+                "\"segments\":[\(segments)]}]}").utf8)
+        }
+        XCTAssertEqual(try CameraVideoCatalog.decode(fixture(4_096), route: .internet)
+            .trips[0].segments.count, 4_096)
+        XCTAssertThrowsError(try CameraVideoCatalog.decode(fixture(4_097), route: .internet))
     }
 
     func testGalleryReusesOneLANSessionAndRevokesOnCloseAndFailure() async {
@@ -199,11 +218,13 @@ final class CameraVideoStoreTests: XCTestCase {
             default: throw CameraVideoError.invalidResponse
             }
         }, download: { request in
-            XCTAssertEqual(request.url?.path, "/api/video/lan/trips/42/segments/1")
-            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer \(downloadToken)")
-            XCTAssertEqual(request.value(forHTTPHeaderField: "Range"), "bytes=1-")
-            return (temp, Self.response(request, 206,
-                headers: ["Content-Range": "bytes 1-2/3", "Content-Length": "2"]))
+            CameraHTTPDownload(value: {
+                XCTAssertEqual(request.url?.path, "/api/video/lan/trips/42/segments/1")
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer \(downloadToken)")
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Range"), "bytes=1-")
+                return (temp, Self.response(request, 206,
+                    headers: ["Content-Range": "bytes 1-2/3", "Content-Length": "2"]))
+            }, cancel: {})
         }, webSocket: { _, _, _ in throw CameraVideoError.invalidResponse })
         let network = CameraVideoNetwork(http: http, now: { 1_000 })
 
@@ -232,7 +253,7 @@ final class CameraVideoStoreTests: XCTestCase {
                 return (Data(), Self.response(request, 204))
             default: throw CameraVideoError.invalidResponse
             }
-        }, download: { _ in throw CameraVideoError.invalidResponse }, webSocket: { request, offset, id in
+        }, download: { _ in CameraHTTPDownload(value: { throw CameraVideoError.invalidResponse }, cancel: {}) }, webSocket: { request, offset, id in
             XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer short-viewer-token")
             XCTAssertEqual(offset, 0); XCTAssertEqual(id, sessionID)
             return socket
@@ -245,6 +266,114 @@ final class CameraVideoStoreTests: XCTestCase {
         await network.releaseRemoteTransfer(tripID: "42", segmentID: 1, base: Self.bridge,
                                             token: "paired", terminate: true)
         XCTAssertEqual(posts, 1); XCTAssertEqual(deletes, 1)
+    }
+
+    func testFailedLANAndRemoteDeletesRemainRetryableBeforeAllocatingAnotherSlot() async throws {
+        let sessionID = "0123456789abcdef0123456789abcdef"
+        let remoteID = "remote_session_1"
+        let bridgeToken = "paired"
+        let nonce = "000102030405060708090a0b0c0d0e0f"
+        let expires: Int64 = 31_000
+        let proof = Data(HMAC<SHA256>.authenticationCode(
+            for: Data("haval-camera-lan-server-v1|car-1|\(nonce)|\(expires)".utf8),
+            using: SymmetricKey(data: Data(bridgeToken.utf8)))).hex
+        var lanDeletes = 0, remoteDeletes = 0, activeLAN = 0, activeRemote = 0
+        let http = CameraVideoHTTPClient(data: { request in
+            switch (request.httpMethod ?? "GET", request.url?.path ?? "") {
+            case ("GET", "/api/capabilities"):
+                return (Data("{\"cameraDownloadLan\":1,\"hvtVersion\":1}".utf8), Self.response(request, 200))
+            case ("POST", "/api/video/lan/challenge"):
+                return (Data("{\"deviceId\":\"car-1\",\"nonce\":\"\(nonce)\",\"expiresAt\":\(expires),\"serverProof\":\"\(proof)\"}".utf8), Self.response(request, 200))
+            case ("POST", "/api/video/lan/session"):
+                activeLAN += 1; XCTAssertLessThanOrEqual(activeLAN, 1)
+                return (Data("{\"sessionId\":\"\(sessionID)\",\"scope\":\"download\",\"downloadToken\":\"download-token-012345678901234567890123\",\"controlToken\":\"control-token-0123456789012345678901234\",\"expiresAt\":301000}".utf8), Self.response(request, 201))
+            case ("GET", "/api/video/lan/catalog"):
+                return (Self.catalogJSON(), Self.response(request, 200))
+            case ("DELETE", "/api/video/lan/session/\(sessionID)"):
+                lanDeletes += 1
+                if lanDeletes == 1 { throw CameraVideoError.disconnected }
+                activeLAN = 0; return (Data(), Self.response(request, 204))
+            case ("POST", "/api/video/transfer/session"):
+                XCTAssertEqual(activeRemote, 0, "pending remote DELETE must retry before POST")
+                activeRemote = 1
+                return (Data("{\"sessionId\":\"\(remoteID)\",\"viewerUrl\":\"wss://bridge.example/ws/video/transfer/viewer?session=\(remoteID)\",\"viewerToken\":\"short-viewer-token\",\"offsets\":{\"1\":\"0\"}}".utf8), Self.response(request, 201))
+            case ("DELETE", "/api/video/transfer/session/\(remoteID)"):
+                remoteDeletes += 1
+                if remoteDeletes == 1 { throw CameraVideoError.disconnected }
+                activeRemote = 0; return (Data(), Self.response(request, 204))
+            default: throw CameraVideoError.invalidResponse
+            }
+        }, download: { _ in CameraHTTPDownload(value: { throw CameraVideoError.invalidResponse }, cancel: {}) },
+           webSocket: { _, _, _ in FakeTransferSocket(messages: []) })
+        let network = CameraVideoNetwork(http: http, now: { 1_000 })
+
+        _ = try await network.fetchLANCatalog(endpoint: Self.lan, bridgeToken: bridgeToken)
+        await network.closeLANCatalogSession(endpoint: Self.lan)
+        _ = try await network.fetchLANCatalog(endpoint: Self.lan, bridgeToken: bridgeToken)
+        await network.closeLANCatalogSession(endpoint: Self.lan)
+        XCTAssertEqual(lanDeletes, 3)
+        XCTAssertEqual(activeLAN, 0)
+
+        let segment = Self.segment(Data("abc".utf8))
+        _ = try await network.openRemoteTransfer(tripID: "42", segment: segment, offset: 0,
+                                                 base: Self.bridge, token: bridgeToken)
+        await network.releaseRemoteTransfer(tripID: "42", segmentID: 1, base: Self.bridge,
+                                            token: bridgeToken, terminate: true)
+        _ = try await network.openRemoteTransfer(tripID: "42", segment: segment, offset: 0,
+                                                 base: Self.bridge, token: bridgeToken)
+        await network.releaseRemoteTransfer(tripID: "42", segmentID: 1, base: Self.bridge,
+                                            token: bridgeToken, terminate: true)
+        XCTAssertEqual(remoteDeletes, 3)
+        XCTAssertEqual(activeRemote, 0)
+    }
+
+    func testCancellationClosesIgnoringAdaptersPromptly() async throws {
+        let bytes = Data("abc".utf8), segment = Self.segment(bytes)
+        let socket = BlockingTransferSocket()
+        var transport = CameraVideoTransport.testing
+        transport.openRemoteTransfer = { _, _, _, _, _ in socket }
+        let store = makeStore(transport)
+        authorizeRemoteDownload(store)
+        let transfer = try store.startDownload(tripID: "42", segment: segment, route: .internet,
+            lanEndpoint: nil, bridgeURL: Self.bridge, bridgeToken: "paired")
+        while !socket.started { await Task.yield() }
+        let cancellation = Task { await store.cancelDownload(tripID: "42", segmentID: 1) }
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertTrue(socket.closed, "cancellation must close a receive that ignores Task cancellation")
+        socket.unblock()
+        await cancellation.value
+        _ = await transfer.result
+    }
+
+    func testLANAdapterCancellationInvokesUnderlyingDownloadCancel() async throws {
+        let bridgeToken = "paired", nonce = "000102030405060708090a0b0c0d0e0f"
+        let expires: Int64 = 31_000
+        let proof = Data(HMAC<SHA256>.authenticationCode(
+            for: Data("haval-camera-lan-server-v1|car-1|\(nonce)|\(expires)".utf8),
+            using: SymmetricKey(data: Data(bridgeToken.utf8)))).hex
+        let blocker = BlockingHTTPDownload()
+        let http = CameraVideoHTTPClient(data: { request in
+            switch request.url?.path {
+            case "/api/capabilities":
+                return (Data("{\"cameraDownloadLan\":1,\"hvtVersion\":1}".utf8), Self.response(request, 200))
+            case "/api/video/lan/challenge":
+                return (Data("{\"deviceId\":\"car-1\",\"nonce\":\"\(nonce)\",\"expiresAt\":\(expires),\"serverProof\":\"\(proof)\"}".utf8), Self.response(request, 200))
+            case "/api/video/lan/session":
+                return (Data("{\"sessionId\":\"0123456789abcdef0123456789abcdef\",\"scope\":\"download\",\"downloadToken\":\"download-token-012345678901234567890123\",\"controlToken\":\"control-token-0123456789012345678901234\",\"expiresAt\":301000}".utf8), Self.response(request, 201))
+            default: throw CameraVideoError.invalidResponse
+            }
+        }, download: { _ in blocker.download }, webSocket: { _, _, _ in throw CameraVideoError.invalidResponse })
+        let network = CameraVideoNetwork(http: http, now: { 1_000 })
+        let operation = Task {
+            try await network.openLANSegment(tripID: "42", segment: Self.segment(Data("abc".utf8)),
+                ordinal: 1, offset: 0, endpoint: Self.lan, bridgeToken: bridgeToken)
+        }
+        while !blocker.started { await Task.yield() }
+        operation.cancel()
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertTrue(blocker.cancelled)
+        blocker.unblock()
+        _ = await operation.result
     }
 
     func testLANResumeUsesExactRangeAndRouteSpecificPartialIdentity() async throws {
@@ -604,6 +733,29 @@ final class CameraVideoStoreTests: XCTestCase {
         XCTAssertEqual(store.settings, conflict); XCTAssertEqual(store.settingsState, .failed)
     }
 
+    func testSettingsConflictBodySurvivesFailedAuthoritativeRefetch() async {
+        let initial = CameraSettings.fixture(quality: .standard, reserveGB: 5)
+        let conflict = CameraSettings.fixture(quality: .economy, reserveGB: 10)
+        var fetches = 0
+        var transport = CameraVideoTransport.testing
+        transport.fetchSettings = { _, _ in
+            fetches += 1
+            if fetches == 1 {
+                return .init(revision: 7, settings: initial, updatedAt: Date(), stale: false, conflict: false)
+            }
+            throw CameraVideoError.offline
+        }
+        transport.updateSettings = { _, _, _, _ in
+            .init(revision: 9, settings: conflict, updatedAt: Date(), stale: false, conflict: true)
+        }
+        let store = makeStore(transport)
+        await store.loadSettings(bridgeURL: Self.bridge, bridgeToken: "paired")
+        await store.updateSettings(.init(quality: .high), bridgeURL: Self.bridge, bridgeToken: "paired")
+        XCTAssertEqual(store.settings, conflict)
+        XCTAssertEqual(store.settingsRevision, 9)
+        XCTAssertEqual(store.settingsState, .conflict)
+    }
+
     func testDelayedOlderSettingsResponseCannotOverwriteNewerAuthoritativeEdit() async {
         let initial = CameraSettings.fixture(quality: .standard, reserveGB: 5)
         let older = CameraSettings.fixture(quality: .standard, reserveGB: 1)
@@ -692,6 +844,65 @@ private final class FakeTransferSocket: CameraTransferSocket {
     }
     func send(_ data: Data) async throws { try onSend?(data); sent.append(data) }
     func close() {}
+}
+
+private final class BlockingTransferSocket: CameraTransferSocket, @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<Data, Error>?
+    private var didStart = false
+    private var didClose = false
+    var started: Bool { lock.withLock { didStart } }
+    var closed: Bool { lock.withLock { didClose } }
+
+    func receive() async throws -> Data {
+        try await withCheckedThrowingContinuation { continuation in
+            lock.withLock {
+                didStart = true
+                self.continuation = continuation
+            }
+        }
+    }
+    func send(_ data: Data) async throws {}
+    func close() {
+        let pending = lock.withLock { () -> CheckedContinuation<Data, Error>? in
+            didClose = true
+            defer { continuation = nil }
+            return continuation
+        }
+        pending?.resume(throwing: CancellationError())
+    }
+    func unblock() { close() }
+}
+
+private final class BlockingHTTPDownload: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<(URL, HTTPURLResponse), Error>?
+    private var didStart = false
+    private var didCancel = false
+    var started: Bool { lock.withLock { didStart } }
+    var cancelled: Bool { lock.withLock { didCancel } }
+    lazy var download = CameraHTTPDownload(value: {
+        try await withCheckedThrowingContinuation { continuation in
+            self.lock.withLock {
+                self.didStart = true
+                self.continuation = continuation
+            }
+        }
+    }, cancel: {
+        let pending = self.lock.withLock { () -> CheckedContinuation<(URL, HTTPURLResponse), Error>? in
+            self.didCancel = true
+            defer { self.continuation = nil }
+            return self.continuation
+        }
+        pending?.resume(throwing: CancellationError())
+    })
+    func unblock() {
+        let pending = lock.withLock { () -> CheckedContinuation<(URL, HTTPURLResponse), Error>? in
+            defer { continuation = nil }
+            return continuation
+        }
+        pending?.resume(throwing: CameraVideoError.disconnected)
+    }
 }
 
 private final class FakeLANStream: CameraLANStream {

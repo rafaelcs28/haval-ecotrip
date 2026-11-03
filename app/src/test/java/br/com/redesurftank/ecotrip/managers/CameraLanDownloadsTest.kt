@@ -70,6 +70,20 @@ class CameraLanDownloadsTest {
         assertTrue((LanTest.call(downloads(values = listOf(nonCanonical)), "catalog") as List<*>).isEmpty())
         assertEquals(0, opened)
     }
+
+    @Test fun catalogMetadataUsesTask3BoundaryNotTransferSelectionBoundary() {
+        fun trip(count: Int): Map<String, Any> {
+            val metadata = (1..count).joinToString(prefix = "[", postfix = "]") {
+                "{\"segmentId\":$it,\"byteSize\":1,\"sha256\":\"$shaOne\"}"
+            }
+            return mapOf("tripId" to "1000", "source" to "automatic", "startMs" to 1L,
+                "endMs" to 2L, "byteSize" to count.toLong(), "segments" to count,
+                "completed" to true, "segmentMetadataJson" to metadata)
+        }
+        assertEquals(1, (LanTest.call(downloads(values = listOf(trip(256))), "catalog") as List<*>).size)
+        assertEquals(1, (LanTest.call(downloads(values = listOf(trip(4096))), "catalog") as List<*>).size)
+        assertTrue((LanTest.call(downloads(values = listOf(trip(4097))), "catalog") as List<*>).isEmpty())
+    }
     @Test fun strictIdsAndCompletedMembershipBeforeProviderOpen() {
         val d = downloads()
         for ((trip, segment) in listOf("../1000" to "1", "1000" to "1.partial", "01000" to "1",
