@@ -107,7 +107,7 @@ struct CameraLanClient {
         var stop = try request(endpoint: endpoint, path: "/api/video/lan/session/" + session.sessionId, method: "DELETE")
         stop.setValue("Bearer " + session.controlToken, forHTTPHeaderField: "Authorization")
         let (_, response) = try await http(stop)
-        guard response.statusCode == 200 || response.statusCode == 404 else { throw CameraLanError.rejected(response.statusCode) }
+        guard [200, 204, 404].contains(response.statusCode) else { throw CameraLanError.rejected(response.statusCode) }
     }
 
     private func decodeChallenge(_ data: Data) throws -> Challenge {

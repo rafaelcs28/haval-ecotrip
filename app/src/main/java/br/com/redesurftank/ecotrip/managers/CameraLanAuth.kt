@@ -87,15 +87,12 @@ class CameraLanAuth(
         val control = session.credentials["control"] ?: return false
         if (!matches(control, token)) return false
         sessions.remove(id)
-        val retained = control.copyOf()
-        session.credentials.values.forEach { it.fill(0) }
-        if (tombstones.size >= MAX_TOMBSTONES) removeTombstone(tombstones.keys.first())
-        tombstones[id] = Tombstone(session.expires, retained)
+        retainControlTombstone(id, session)
         return true
     }
 
     @Synchronized fun active(id: String): Boolean { prune(); return sessions.containsKey(id) }
-    @Synchronized fun revoke(id: String) { sessions.remove(id)?.credentials?.values?.forEach { it.fill(0) } }
+    @Synchronized fun revoke(id: String) { sessions.remove(id)?.let { retainControlTombstone(id, it) } }
     @Synchronized fun clear() {
         sessions.keys.toList().forEach(::revoke)
         tombstones.keys.toList().forEach(::removeTombstone)
@@ -110,6 +107,13 @@ class CameraLanAuth(
         tombstones.filterValues { it.expires <= now }.keys.toList().forEach(::removeTombstone)
     }
     private fun removeTombstone(id: String) { tombstones.remove(id)?.controlDigest?.fill(0) }
+    private fun retainControlTombstone(id: String, session: Session) {
+        val retained = session.credentials["control"]?.copyOf()
+        session.credentials.values.forEach { it.fill(0) }
+        if (retained == null || session.expires <= clock()) { retained?.fill(0); return }
+        if (tombstones.size >= MAX_TOMBSTONES) removeTombstone(tombstones.keys.first())
+        tombstones[id] = Tombstone(session.expires, retained)
+    }
     private fun matches(expected: ByteArray, token: String): Boolean {
         val supplied = if (token.length == 64) digest(token) else ByteArray(expected.size)
         return try { MessageDigest.isEqual(expected, supplied) && token.length == 64 }
