@@ -107,6 +107,16 @@ class CameraLanAuthTest {
         now = s["expiresAt"] as Long
         assertEquals(false, LanTest.call(a, "authorize", s["sessionId"], "download", s["downloadToken"]))
     }
+    @Test fun handshakeAdmissionIsBoundToCapturedLiveSessionAfterReplacement() {
+        val a = auth(); val old = session(a, challenge(a))!!
+        LanTest.call(a, "revoke", old["sessionId"])
+        val next = session(a, challenge(a))!!
+        assertEquals(false, LanTest.call(a, "admit", old["sessionId"], next["sessionId"], "viewer", old["viewerToken"]))
+        assertEquals(false, LanTest.call(a, "admit", old["sessionId"], next["sessionId"], "viewer", next["viewerToken"]))
+        assertEquals(true, LanTest.call(a, "admit", next["sessionId"], next["sessionId"], "viewer", next["viewerToken"]))
+        assertEquals(false, LanTest.call(a, "admit", next["sessionId"], next["sessionId"], "viewer", next["viewerToken"]))
+    }
+
     @Test fun capabilityFieldsRequirePresentAuthorizedCamera() {
         val a = auth()
         for (installed in listOf(false, true)) for (authorized in listOf(false, true)) {
