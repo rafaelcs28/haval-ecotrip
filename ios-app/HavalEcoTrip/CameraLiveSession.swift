@@ -128,7 +128,7 @@ final class CameraLiveSession: ObservableObject {
         now: @escaping () -> Date = Date.init,
         delays: CameraLiveDelays = .live,
         lanClient: CameraLanClient = .live,
-        discovery: LANDiscovery? = LANDiscovery()
+        discovery: LANDiscovery? = nil
     ) {
         let selectedRenderer = renderer ?? CameraVideoDecoder()
         self.transport = transport
@@ -139,7 +139,7 @@ final class CameraLiveSession: ObservableObject {
         self.now = now
         self.delays = delays
         self.lanClient = lanClient
-        self.discovery = discovery
+        self.discovery = discovery ?? LANDiscovery()
         selectedRenderer.setFailureHandler { [weak self] in
             self?.handleRendererFailure()
         }
