@@ -95,7 +95,7 @@ class CameraLanDownloads(
                     ?: return@runCatching null
                 val byteSize = (raw["byteSize"] as? Number)?.toLong()?.takeIf { it > 0 }
                     ?: return@runCatching null
-                val segmentCount = (raw["segments"] as? Number)?.toLong()?.takeIf { it in 1..256 }
+                val segmentCount = (raw["segments"] as? Number)?.toLong()?.takeIf { it in 1..4096 }
                     ?: return@runCatching null
                 val encoded = (raw["segmentMetadataJson"] as? String)?.takeIf { it.length <= 1_048_576 }
                     ?: return@runCatching null

@@ -54,7 +54,7 @@ function normalizeCatalog(value) {
   const ids = new Set();
   const trips = [];
   for (const trip of value.trips) {
-    if (!objectKeys(trip, ['tripId', 'source', 'startMs', 'endMs', 'durationMs', 'byteSize', 'completed', 'segments'])
+    if (!objectKeys(trip, ['tripId', 'source', 'startMs', 'endMs', 'durationMs', 'byteSize', 'completed', 'segmentCount', 'segments'])
         || typeof trip.tripId !== 'string' || !/^[1-9][0-9]{0,18}$/.test(trip.tripId)
         || !['automatic', 'manual'].includes(trip.source) || !validInteger(trip.startMs)
         || !validInteger(trip.byteSize) || ids.has(trip.tripId)
@@ -63,10 +63,13 @@ function normalizeCatalog(value) {
     if (trip.completed === false || trip.endMs === null) continue;
     if (!validInteger(trip.endMs, trip.startMs)
         || (trip.durationMs !== undefined && trip.durationMs !== trip.endMs - trip.startMs)) throw new Error('invalid trip time');
+    let segmentCount;
     let segments;
-    if (validInteger(trip.segments)) segments = trip.segments;
-    else {
-      if (!Array.isArray(trip.segments) || trip.segments.length > 4096) throw new Error('invalid segments');
+    if (Array.isArray(trip.segments)) {
+      if (trip.segments.length < 1 || trip.segments.length > 4096) throw new Error('invalid segments');
+      segmentCount = trip.segmentCount === undefined ? trip.segments.length : trip.segmentCount;
+      if (!validInteger(segmentCount, 1) || segmentCount > 4096
+          || segmentCount !== trip.segments.length) throw new Error('invalid segment count');
       let bytes = 0;
       segments = trip.segments.map((segment, index) => {
         if (!objectKeys(segment, ['segmentId', 'byteSize', 'sha256', 'fileName', 'startMs', 'endMs', 'durationUs', 'codec'])
@@ -85,9 +88,14 @@ function normalizeCatalog(value) {
         return { segmentId: segment.segmentId, byteSize: segment.byteSize, sha256: segment.sha256 };
       });
       if (bytes !== trip.byteSize) throw new Error('catalog size mismatch');
+    } else {
+      segmentCount = trip.segmentCount === undefined ? trip.segments : trip.segmentCount;
+      if (!validInteger(segmentCount, 1) || segmentCount > 4096
+          || (trip.segments !== undefined && trip.segments !== segmentCount)) throw new Error('invalid segment count');
     }
     trips.push({ tripId: trip.tripId, source: trip.source, startMs: trip.startMs,
-      endMs: trip.endMs, byteSize: trip.byteSize, completed: true, segments });
+      endMs: trip.endMs, byteSize: trip.byteSize, completed: true, segmentCount,
+      ...(segments === undefined ? {} : { segments }) });
   }
   return { ok: true, catalogRevision: value.catalogRevision, updatedAt: value.updatedAt, trips };
 }

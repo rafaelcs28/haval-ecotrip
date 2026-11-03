@@ -36,11 +36,18 @@ struct CameraVideoCatalog: Equatable, Sendable {
         let trips = try value.trips.map { trip -> CameraVideoTrip in
             guard canonicalTripID(trip.tripId), trip.startMs > 0, let endMs = trip.endMs,
                   endMs >= trip.startMs, trip.byteSize > 0, trip.completed,
-                  trip.segmentCount == trip.segments.count, (1...256).contains(trip.segments.count) else {
+                  (1...4_096).contains(trip.segmentCount) else {
                 throw CameraVideoError.invalidResponse
             }
+            guard let metadata = trip.segments else {
+                return CameraVideoTrip(id: trip.tripId, source: trip.source,
+                    start: Date(timeIntervalSince1970: Double(trip.startMs) / 1_000),
+                    end: Date(timeIntervalSince1970: Double(endMs) / 1_000), byteSize: trip.byteSize,
+                    completed: true, segments: [])
+            }
+            guard trip.segmentCount == metadata.count else { throw CameraVideoError.invalidResponse }
             var aggregate: UInt64 = 0
-            let segments = try trip.segments.enumerated().map { index, segment -> CameraVideoSegment in
+            let segments = try metadata.enumerated().map { index, segment -> CameraVideoSegment in
                 guard segment.segmentId == UInt64(index + 1), segment.segmentId <= UInt64(UInt32.max),
                       segment.byteSize > 0, segment.sha256.count == 64,
                       segment.sha256.allSatisfy({ $0.isNumber || ("a"..."f").contains(String($0)) }),
@@ -84,7 +91,7 @@ private struct CatalogResponse: Decodable {
         let byteSize: UInt64
         let completed: Bool
         let segmentCount: Int
-        let segments: [Segment]
+        let segments: [Segment]?
     }
 
     struct Segment: Decodable {
@@ -130,7 +137,7 @@ protocol CameraVideoFileSink: AnyObject {
 
 struct CameraVideoHTTPClient {
     var data: (URLRequest) async throws -> (Data, HTTPURLResponse)
-    var download: (URLRequest) async throws -> (URL, HTTPURLResponse)
+    var download: (URLRequest) -> CameraHTTPDownload
     var webSocket: (URLRequest, UInt64, String) throws -> CameraTransferSocket
 
     static var live: Self {
@@ -140,14 +147,18 @@ struct CameraVideoHTTPClient {
             guard let http = response as? HTTPURLResponse else { throw CameraVideoError.invalidResponse }
             return (data, http)
         }, download: { request in
-            let (url, response) = try await session.download(for: request)
-            guard let http = response as? HTTPURLResponse else { throw CameraVideoError.invalidResponse }
-            return (url, http)
+            let handle = URLSessionCameraHTTPDownload(session: session, request: request)
+            return CameraHTTPDownload(value: { try await handle.value() }, cancel: { handle.cancel() })
         }, webSocket: { request, offset, sessionID in
             URLSessionCameraTransferSocket(request: request, session: session,
                                            authoritativeOffset: offset, sessionID: sessionID)
         })
     }
+}
+
+struct CameraHTTPDownload {
+    let value: () async throws -> (URL, HTTPURLResponse)
+    let cancel: () -> Void
 }
 
 protocol CameraTransferSocket: AnyObject {
@@ -566,36 +577,38 @@ final class CameraVideoStore: ObservableObject {
                                 bridgeURL: URL, bridgeToken: String) async throws {
         let socket = try await transport.openRemoteTransfer(tripID, segment, offset, bridgeURL, bridgeToken)
         defer { socket.close() }
-        guard socket.authoritativeOffset == offset else { throw CameraVideoError.invalidOffset }
-        let sink = try fileSinkFactory(partial)
-        defer { try? sink.close() }
-        var expected = offset
-        while true {
-            try Task.checkCancellation()
-            let message = try CameraTransferProtocol.parse(try await socket.receive())
-            guard message.ordinal == segment.id else { throw CameraVideoError.invalidSelection }
-            switch message.type {
-            case .data:
-                guard message.offset == expected, expected <= segment.byteSize,
-                      UInt64(message.payload.count) <= segment.byteSize - expected else { throw CameraVideoError.invalidOffset }
-                try await sink.write(message.payload)
+        try await withTaskCancellationHandler(operation: {
+            guard socket.authoritativeOffset == offset else { throw CameraVideoError.invalidOffset }
+            let sink = try fileSinkFactory(partial)
+            defer { try? sink.close() }
+            var expected = offset
+            while true {
                 try Task.checkCancellation()
-                try sink.synchronize()
-                expected += UInt64(message.payload.count)
-                try await socket.send(CameraTransferProtocol.ack(ordinal: segment.id, nextOffset: expected))
-                downloadState = .downloading(route: .internet, progress: Double(expected) / Double(segment.byteSize))
-            case .eof:
-                guard message.offset == segment.byteSize, expected == segment.byteSize,
-                      message.sha256 == segment.sha256, try verify(partial, segment: segment) else {
-                    throw CameraVideoError.digestMismatch
+                let message = try CameraTransferProtocol.parse(try await socket.receive())
+                guard message.ordinal == segment.id else { throw CameraVideoError.invalidSelection }
+                switch message.type {
+                case .data:
+                    guard message.offset == expected, expected <= segment.byteSize,
+                          UInt64(message.payload.count) <= segment.byteSize - expected else { throw CameraVideoError.invalidOffset }
+                    try await sink.write(message.payload)
+                    try Task.checkCancellation()
+                    try sink.synchronize()
+                    expected += UInt64(message.payload.count)
+                    try await socket.send(CameraTransferProtocol.ack(ordinal: segment.id, nextOffset: expected))
+                    downloadState = .downloading(route: .internet, progress: Double(expected) / Double(segment.byteSize))
+                case .eof:
+                    guard message.offset == segment.byteSize, expected == segment.byteSize,
+                          message.sha256 == segment.sha256, try verify(partial, segment: segment) else {
+                        throw CameraVideoError.digestMismatch
+                    }
+                    try sink.synchronize()
+                    try await socket.send(CameraTransferProtocol.ack(ordinal: segment.id, nextOffset: expected))
+                    return
+                case .error: throw CameraVideoError.offline
+                case .ack: throw CameraVideoError.invalidResponse
                 }
-                try sink.synchronize()
-                try await socket.send(CameraTransferProtocol.ack(ordinal: segment.id, nextOffset: expected))
-                return
-            case .error: throw CameraVideoError.offline
-            case .ack: throw CameraVideoError.invalidResponse
             }
-        }
+        }, onCancel: { socket.close() })
     }
 
     func completedURL(tripID: String, segmentID: UInt32) throws -> URL {
@@ -674,10 +687,14 @@ final class CameraVideoStore: ObservableObject {
             guard generation == settingsGeneration else { return }
             settings = snapshot.settings; settingsRevision = snapshot.revision
             if snapshot.conflict {
-                let authoritative = try await transport.fetchSettings(bridgeURL, bridgeToken)
-                guard generation == settingsGeneration else { return }
-                settings = authoritative.settings; settingsRevision = authoritative.revision
                 settingsState = .conflict
+                do {
+                    let authoritative = try await transport.fetchSettings(bridgeURL, bridgeToken)
+                    guard generation == settingsGeneration else { return }
+                    settings = authoritative.settings; settingsRevision = authoritative.revision
+                } catch {
+                    return
+                }
             } else {
                 settingsState = .loaded(stale: snapshot.stale)
             }
@@ -807,11 +824,22 @@ final class CameraVideoNetwork {
         let controlToken: String
         let expiresAt: Int64
     }
+    private struct LANCleanup {
+        let endpoint: CameraLanEndpoint
+        let credential: LANCredential
+    }
+    private struct RemoteCleanup {
+        let base: URL
+        let token: String
+        let sessionID: String
+    }
 
     private let http: CameraVideoHTTPClient
     private let now: () -> Int64
     private var lanSessions: [String: LANCredential] = [:]
     private var transferSessions: [String: String] = [:]
+    private var pendingLANCleanup: [String: LANCleanup] = [:]
+    private var pendingRemoteCleanup: [String: RemoteCleanup] = [:]
 
     init(http: CameraVideoHTTPClient = .live,
          now: @escaping () -> Int64 = { Int64(Date().timeIntervalSince1970 * 1_000) }) {
@@ -852,7 +880,12 @@ final class CameraVideoNetwork {
         request.setValue("Bearer \(credential.downloadToken)", forHTTPHeaderField: "Authorization")
         if offset > 0 { request.setValue("bytes=\(offset)-", forHTTPHeaderField: "Range") }
         do {
-            let (url, response) = try await http.download(request)
+            let download = http.download(request)
+            let (url, response) = try await withTaskCancellationHandler(operation: {
+                try await download.value()
+            }, onCancel: {
+                download.cancel()
+            })
             let length = response.value(forHTTPHeaderField: "Content-Length").flatMap(UInt64.init)
             return try TemporaryFileLANStream(downloadURL: url, statusCode: response.statusCode,
                 contentRange: response.value(forHTTPHeaderField: "Content-Range"), contentLength: length)
@@ -864,15 +897,15 @@ final class CameraVideoNetwork {
 
     func closeLANCatalogSession(endpoint: CameraLanEndpoint) async {
         let key = endpointKey(endpoint)
-        guard let credential = lanSessions.removeValue(forKey: key) else { return }
-        guard let url = try? lanURL(endpoint, "/api/video/lan/session/\(credential.id)") else { return }
-        var request = URLRequest(url: url); request.httpMethod = "DELETE"
-        request.setValue("Bearer \(credential.controlToken)", forHTTPHeaderField: "Authorization")
-        _ = try? await http.data(request)
+        if let credential = lanSessions.removeValue(forKey: key) {
+            pendingLANCleanup["\(key)/\(credential.id)"] = LANCleanup(endpoint: endpoint, credential: credential)
+        }
+        _ = await retryLANCleanup(endpoint: endpoint)
     }
 
     func openRemoteTransfer(tripID: String, segment: CameraVideoSegment, offset: UInt64,
                             base: URL, token: String) async throws -> CameraTransferSocket {
+        guard await retryRemoteCleanup() else { throw CameraVideoError.offline }
         let key = "\(tripID)/\(segment.id)"
         var body: [String: Any] = ["tripId": tripID, "segmentIds": [String(segment.id)]]
         if let existing = transferSessions[key] { body["sessionId"] = existing }
@@ -895,10 +928,10 @@ final class CameraVideoNetwork {
     func releaseRemoteTransfer(tripID: String, segmentID: UInt32, base: URL,
                                token: String, terminate: Bool) async {
         let key = "\(tripID)/\(segmentID)"
-        guard let sessionID = transferSessions.removeValue(forKey: key), terminate,
-              Self.sessionID(sessionID),
-              let request = try? ownerRequest(base, "/api/video/transfer/session/\(sessionID)", token, "DELETE") else { return }
-        _ = try? await http.data(request)
+        if let sessionID = transferSessions.removeValue(forKey: key), terminate, Self.sessionID(sessionID) {
+            pendingRemoteCleanup[key] = RemoteCleanup(base: base, token: token, sessionID: sessionID)
+        }
+        _ = await retryRemoteCleanup()
     }
 
     func fetchSettings(base: URL, token: String) async throws -> CameraSettingsSnapshot {
@@ -929,6 +962,9 @@ final class CameraVideoNetwork {
                                             base: base, token: token, terminate: true)
             }
         }
+        guard await retryRemoteCleanup(), !pendingRemoteCleanup.keys.contains(where: { key in
+            ids.contains { key.hasPrefix("\($0)/") }
+        }) else { throw CameraVideoError.offline }
         var request = try ownerRequest(base, "/api/video/recordings", token, "DELETE")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: ["tripIds": ids, "confirmation": confirmation])
@@ -939,9 +975,13 @@ final class CameraVideoNetwork {
     private func lanCredential(endpoint: CameraLanEndpoint, bridgeToken: String) async throws -> LANCredential {
         guard !bridgeToken.isEmpty else { throw CameraVideoError.offline }
         let keyName = endpointKey(endpoint)
+        guard await retryLANCleanup(endpoint: endpoint) else { throw CameraVideoError.offline }
         if let current = lanSessions[keyName] {
             if current.expiresAt > now() { return current }
             await closeLANCatalogSession(endpoint: endpoint)
+            guard !pendingLANCleanup.keys.contains(where: { $0.hasPrefix("\(keyName)/") }) else {
+                throw CameraVideoError.offline
+            }
         }
         var challengeRequest = URLRequest(url: try lanURL(endpoint, "/api/video/lan/challenge")); challengeRequest.httpMethod = "POST"
         let (challengeData, challengeResponse) = try await http.data(challengeRequest)
@@ -975,6 +1015,32 @@ final class CameraVideoNetwork {
                                        controlToken: value.controlToken, expiresAt: value.expiresAt)
         lanSessions[keyName] = credential
         return credential
+    }
+
+    private func retryLANCleanup(endpoint: CameraLanEndpoint) async -> Bool {
+        let prefix = "\(endpointKey(endpoint))/"
+        for (key, cleanup) in pendingLANCleanup where key.hasPrefix(prefix) {
+            guard let url = try? lanURL(cleanup.endpoint, "/api/video/lan/session/\(cleanup.credential.id)") else {
+                continue
+            }
+            var request = URLRequest(url: url); request.httpMethod = "DELETE"
+            request.setValue("Bearer \(cleanup.credential.controlToken)", forHTTPHeaderField: "Authorization")
+            if let (_, response) = try? await http.data(request), response.statusCode == 204 || response.statusCode == 404 {
+                pendingLANCleanup.removeValue(forKey: key)
+            }
+        }
+        return !pendingLANCleanup.keys.contains(where: { $0.hasPrefix(prefix) })
+    }
+
+    private func retryRemoteCleanup() async -> Bool {
+        for (key, cleanup) in pendingRemoteCleanup {
+            guard let request = try? ownerRequest(cleanup.base,
+                "/api/video/transfer/session/\(cleanup.sessionID)", cleanup.token, "DELETE") else { continue }
+            if let (_, response) = try? await http.data(request), response.statusCode == 204 || response.statusCode == 404 {
+                pendingRemoteCleanup.removeValue(forKey: key)
+            }
+        }
+        return pendingRemoteCleanup.isEmpty
     }
 
     private func lanURL(_ endpoint: CameraLanEndpoint, _ path: String) throws -> URL {
@@ -1054,6 +1120,59 @@ private final class URLSessionCameraTransferSocket: CameraTransferSocket {
     }
     func send(_ data: Data) async throws { try await task.send(.data(data)) }
     func close() { task.cancel(with: .goingAway, reason: nil) }
+}
+
+private final class URLSessionCameraHTTPDownload {
+    private let lock = NSLock()
+    private var task: URLSessionDownloadTask!
+    private var continuation: CheckedContinuation<(URL, HTTPURLResponse), Error>?
+    private var result: Result<(URL, HTTPURLResponse), Error>?
+    private var started = false
+
+    init(session: URLSession, request: URLRequest) {
+        task = session.downloadTask(with: request) { [weak self] url, response, error in
+            guard let self else { return }
+            if let error { self.finish(.failure(error)); return }
+            guard let url, let response = response as? HTTPURLResponse else {
+                self.finish(.failure(CameraVideoError.invalidResponse)); return
+            }
+            let owned = FileManager.default.temporaryDirectory
+                .appendingPathComponent("haval-camera-http-\(UUID().uuidString).download")
+            do {
+                try FileManager.default.moveItem(at: url, to: owned)
+                self.finish(.success((owned, response)))
+            } catch {
+                self.finish(.failure(error))
+            }
+        }
+    }
+
+    func value() async throws -> (URL, HTTPURLResponse) {
+        try await withCheckedThrowingContinuation { continuation in
+            let immediate = lock.withLock { () -> Result<(URL, HTTPURLResponse), Error>? in
+                if let result { return result }
+                self.continuation = continuation
+                if !started { started = true; task.resume() }
+                return nil
+            }
+            if let immediate { continuation.resume(with: immediate) }
+        }
+    }
+
+    func cancel() {
+        task.cancel()
+        finish(.failure(CancellationError()))
+    }
+
+    private func finish(_ value: Result<(URL, HTTPURLResponse), Error>) {
+        let pending = lock.withLock { () -> CheckedContinuation<(URL, HTTPURLResponse), Error>? in
+            guard result == nil else { return nil }
+            result = value
+            defer { continuation = nil }
+            return continuation
+        }
+        pending?.resume(with: value)
+    }
 }
 
 private extension Data {
