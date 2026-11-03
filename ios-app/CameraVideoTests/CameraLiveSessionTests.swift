@@ -418,17 +418,24 @@ final class CameraLiveSessionTests: XCTestCase {
         await session.cancelInternet()
     }
 
-    func testRetainedDecoderFailureFromOldLANDoesNotTearDownNewInternetRoute() async {
+    func testStaleDecoderFailureCannotFlushOrSuppressNewInternetRoute() async throws {
         let decoder = CameraVideoDecoder()
         let lanSocket = FakeCameraLiveSocket()
-        let internetSocket = FakeCameraLiveSocket()
+        let firstInternetSocket = FakeCameraLiveSocket()
+        let secondInternetSocket = FakeCameraLiveSocket()
         var remoteCreates = 0
+        let genuineFailureReported = expectation(description: "genuine Internet decoder failure reconnects once")
         let transport = CameraLiveTransport(
             createSession: { _ in
                 remoteCreates += 1
                 return Self.credentials(session: "internet-\(remoteCreates)")
             },
-            openSocket: { request in request.url?.scheme == "ws" ? lanSocket : internetSocket },
+            openSocket: { request in
+                guard request.url?.scheme != "ws" else { return lanSocket }
+                if remoteCreates == 1 { return firstInternetSocket }
+                genuineFailureReported.fulfill()
+                return secondInternetSocket
+            },
             stopSession: { _ in }
         )
         let delays = CameraLiveDelays(
@@ -453,18 +460,34 @@ final class CameraLiveSessionTests: XCTestCase {
         await session.confirmInternet()
         XCTAssertEqual(session.route, .internet)
         XCTAssertEqual(remoteCreates, 1)
+        await firstInternetSocket.waitForReceiveCalls(1)
 
-        let observationWindow = expectation(description: "old failure observation window")
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 50_000_000)
-            observationWindow.fulfill()
-        }
+        let sps = Data([0x67, 0x42, 0x00, 0x1f, 0xe5, 0x88, 0x68, 0x54, 0x05, 0x01, 0xed, 0x00, 0xf0, 0x88, 0x45, 0x80])
+        let pps = Data([0x68, 0xce, 0x38, 0x80])
+        XCTAssertFalse(try decoder.consume(try CameraVideoProtocol.parse(CameraVideoProtocolTests.config(sequence: 10, sps: sps, pps: pps))))
+        XCTAssertTrue(try decoder.consume(try CameraVideoProtocol.parse(CameraVideoProtocolTests.access(sequence: 11, keyframe: true))))
+        let currentInternetFailureEvent = decoder.handleDisplayFailure
+
         oldLANFailureEvent()
-        await fulfillment(of: [observationWindow], timeout: 1)
 
         XCTAssertEqual(session.route, .internet)
         XCTAssertEqual(remoteCreates, 1)
-        XCTAssertFalse(internetSocket.cancelled)
+        XCTAssertFalse(firstInternetSocket.cancelled)
+        XCTAssertTrue(try decoder.consume(try CameraVideoProtocol.parse(CameraVideoProtocolTests.access(sequence: 12, keyframe: false))))
+
+        currentInternetFailureEvent()
+        currentInternetFailureEvent()
+        await fulfillment(of: [genuineFailureReported], timeout: 1)
+        let duplicateObservation = expectation(description: "duplicate failure observation window")
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 50_000_000)
+            duplicateObservation.fulfill()
+        }
+        await fulfillment(of: [duplicateObservation], timeout: 1)
+
+        XCTAssertEqual(remoteCreates, 2)
+        XCTAssertTrue(firstInternetSocket.cancelled)
+        XCTAssertFalse(secondInternetSocket.cancelled)
         await session.stop()
     }
 
@@ -697,10 +720,15 @@ private final class FakeCameraLiveSocket: CameraLiveSocket {
     }
     func yield(_ data: Data) { complete(.success(data)) }
     func fail(_ error: Error) { complete(.failure(error)) }
-    func waitForReceiveCalls(_ count: Int) async {
+    func waitForReceiveCalls(
+        _ count: Int,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async {
         for _ in 0..<3_000 where receiveCalls < count {
             try? await Task.sleep(nanoseconds: 1_000_000)
         }
+        XCTAssertGreaterThanOrEqual(receiveCalls, count, "Timed out waiting for socket receive demand", file: file, line: line)
     }
     private func complete(_ result: Result<Data, Error>) {
         if let waiter {
