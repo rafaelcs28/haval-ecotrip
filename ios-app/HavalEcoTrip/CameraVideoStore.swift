@@ -431,10 +431,10 @@ final class CameraVideoStore: ObservableObject {
             do {
                 let result = try await self.performDownload(tripID: tripID, segment: segment, route: route,
                     lanEndpoint: lanEndpoint, bridgeURL: bridgeURL, bridgeToken: bridgeToken)
-                self.finishDownload(key)
+                self.finishDownload(key, stopPolicy: true)
                 return result
             } catch {
-                self.finishDownload(key)
+                self.finishDownload(key, stopPolicy: (error as? CameraVideoError) != .internetConfirmationRequired)
                 throw error
             }
         }
@@ -465,10 +465,10 @@ final class CameraVideoStore: ObservableObject {
         trip.segments.contains { isDownloading(tripID: trip.id, segmentID: $0.id) }
     }
 
-    private func finishDownload(_ key: String) {
+    private func finishDownload(_ key: String, stopPolicy: Bool) {
         activeDownloads.removeValue(forKey: key)
         activeDownloadKeys.remove(key)
-        downloadPolicy.stop()
+        if stopPolicy { downloadPolicy.stop() }
     }
 
     private func performDownload(tripID: String, segment: CameraVideoSegment, route: CameraDownloadRoute,

@@ -461,14 +461,15 @@ final class CameraVideoStoreTests: XCTestCase {
         let store = makeStore(transport)
         let task = try store.startDownload(tripID: "42", segment: segment, route: .lan,
             lanEndpoint: Self.lan, bridgeURL: Self.bridge, bridgeToken: "paired")
-        while stream.readCount == 0 { await Task.yield() }
+        let partial = try store.partialURL(tripID: "42", segmentID: 1, route: .lan)
+        while ((try? Data(contentsOf: partial).count) ?? 0) < 1 { await Task.yield() }
 
         await store.closeDownloadAction()
 
         if case .success = await task.result { XCTFail("Closed action must cancel its transfer") }
         XCTAssertTrue(stream.cancelled)
         XCTAssertFalse(FileManager.default.fileExists(atPath: try store.completedURL(tripID: "42", segmentID: 1).path))
-        XCTAssertEqual(try Data(contentsOf: try store.partialURL(tripID: "42", segmentID: 1, route: .lan)), Data("a".utf8))
+        XCTAssertEqual(try Data(contentsOf: partial), Data("a".utf8))
     }
 
     func testCancellationDuringFileWriteNeverPromotesAndJoinsOwnedTask() async throws {
