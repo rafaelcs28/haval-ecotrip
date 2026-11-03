@@ -73,6 +73,25 @@ class CameraLanAuthTest {
         token = ""
         assertNull(LanTest.call(a, "challenge"))
     }
+    @Test fun mqttBridgeTokenHasVolatileJvmContractAndRotationUsesFreshProof() {
+        val field = MqttManager::class.java.getDeclaredField("bridgeToken")
+        assertEquals(String::class.java, field.type)
+        assertTrue("Pairing must publish the existing token field across threads",
+            java.lang.reflect.Modifier.isVolatile(field.modifiers))
+        val current = java.util.concurrent.atomic.AtomicReference("synthetic-paired-secret")
+        val a = LanTest.create("CameraLanAuth", "car-1", { current.get() }, { now })
+        val before = challenge(a)
+        val next = challenge(a)
+        val rotated = "rotated-synthetic-secret"
+        val setter = kotlin.concurrent.thread { current.set(rotated) }
+        setter.join(5_000)
+        assertFalse(setter.isAlive)
+        assertNull(session(a, before))
+        val fresh = session(a, next, proof = LanTest.proof("car-1", next["nonce"] as String, next["expiresAt"] as Long, rotated))
+        assertNotNull(fresh)
+        assertFalse(fresh.toString().contains(rotated))
+    }
+
     @Test fun credentialsAreDistinctScopedSingleUseAndNeverTheHmacOrBridgeSecret() {
         val a = auth(); val c = challenge(a); val s = session(a, c)!!
         val id = s["sessionId"] as String

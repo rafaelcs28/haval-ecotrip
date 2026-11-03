@@ -131,6 +131,162 @@ class CameraLanRelayTest {
         assertArrayEquals(bytes, received)
     }
 
+    @Test fun watchdogCompletionBetweenSnapshotAndDeadlineDoesNotDropHealthySession() {
+        val entered = java.util.concurrent.CountDownLatch(1)
+        val release = java.util.concurrent.CountDownLatch(1)
+        val completed = java.util.concurrent.CountDownLatch(1)
+        var readingDeadline = false
+        val writer = LanTest.create("CameraLanFrameWriter", {
+            if (readingDeadline) {
+                release.countDown()
+                await(completed) // Writer clears its timestamp before deadline evaluation resumes.
+                2_000L
+            } else 1_000L
+        }, { _: fi.iki.elonen.NanoWSD.WebSocketFrame -> entered.countDown(); await(release); Unit })
+        val failure = java.util.concurrent.atomic.AtomicReference<Throwable>()
+        val sender = kotlin.concurrent.thread {
+            try { LanTest.call(writer, "sendFrame", binaryFrame()) } catch (t: Throwable) { failure.set(t) }
+            finally { completed.countDown() }
+        }
+        try {
+            await(entered)
+            readingDeadline = true
+            assertEquals(false, LanTest.call(writer, "writeTimedOut"))
+            await(completed)
+            assertNull(failure.get())
+        } finally { release.countDown(); sender.join(5_000) }
+    }
+
+    @Test fun automaticPongAndCloseRepliesParticipateInWatchdogAndAbortCleanup() {
+        for (opcode in listOf(fi.iki.elonen.NanoWSD.WebSocketFrame.OpCode.Ping,
+                fi.iki.elonen.NanoWSD.WebSocketFrame.OpCode.Close)) {
+            assertBlockedFrameIsTimed { socket ->
+                val receive = fi.iki.elonen.NanoWSD.WebSocket::class.java.getDeclaredMethod(
+                    "handleWebsocketFrame", fi.iki.elonen.NanoWSD.WebSocketFrame::class.java).apply { isAccessible = true }
+                try { receive.invoke(socket, fi.iki.elonen.NanoWSD.WebSocketFrame(opcode, true, byteArrayOf())) }
+                catch (failure: java.lang.reflect.InvocationTargetException) { throw failure.targetException }
+            }
+        }
+    }
+
+    @Test fun binaryMediaAndTextKeyframeRequestUseTheSameTimedWriter() {
+        assertBlockedFrameIsTimed { it.send(config) }
+        assertBlockedFrameIsTimed { it.send("{\"type\":\"request_keyframe\"}") }
+    }
+
+    @Test fun serializedWriterCompletionCannotClearTheNextWrite() {
+        val now = java.util.concurrent.atomic.AtomicLong(1_000)
+        val firstEntered = java.util.concurrent.CountDownLatch(1)
+        val secondEntered = java.util.concurrent.CountDownLatch(1)
+        val releaseFirst = java.util.concurrent.CountDownLatch(1)
+        val releaseSecond = java.util.concurrent.CountDownLatch(1)
+        val firstCompleted = java.util.concurrent.CountDownLatch(1)
+        val call = java.util.concurrent.atomic.AtomicInteger()
+        val writer = LanTest.create("CameraLanFrameWriter", { now.get() }, { _: fi.iki.elonen.NanoWSD.WebSocketFrame ->
+            if (call.incrementAndGet() == 1) { firstEntered.countDown(); await(releaseFirst) }
+            else { secondEntered.countDown(); await(releaseSecond) }
+            Unit
+        })
+        val send = writer.javaClass.getMethod("sendFrame", fi.iki.elonen.NanoWSD.WebSocketFrame::class.java)
+        assertTrue("Hold one writer monitor through finally", java.lang.reflect.Modifier.isSynchronized(send.modifiers))
+        val failures = java.util.concurrent.ConcurrentLinkedQueue<Throwable>()
+        val first = kotlin.concurrent.thread {
+            try { LanTest.call(writer, "sendFrame", binaryFrame()) } catch (t: Throwable) { failures.add(t) }
+            finally { firstCompleted.countDown() }
+        }
+        var second: Thread? = null
+        try {
+            await(firstEntered)
+            now.set(2_000)
+            second = kotlin.concurrent.thread {
+                try { LanTest.call(writer, "sendFrame", binaryFrame()) } catch (t: Throwable) { failures.add(t) }
+            }
+            releaseFirst.countDown()
+            await(secondEntered); await(firstCompleted)
+            now.set(5_001)
+            assertEquals(true, LanTest.call(writer, "writeTimedOut"))
+            releaseSecond.countDown(); second.join(5_000)
+            assertFalse(second.isAlive)
+            assertEquals(false, LanTest.call(writer, "writeTimedOut"))
+            assertTrue(failures.isEmpty())
+        } finally { releaseFirst.countDown(); releaseSecond.countDown(); first.join(5_000); second?.join(5_000) }
+    }
+
+    @Test fun writeFailureAlwaysClearsWatchdogState() {
+        val now = java.util.concurrent.atomic.AtomicLong(1_000)
+        val writer = LanTest.create("CameraLanFrameWriter", { now.get() }, { _: fi.iki.elonen.NanoWSD.WebSocketFrame ->
+            throw java.io.IOException("synthetic write failure")
+        })
+        try { LanTest.call(writer, "sendFrame", binaryFrame()); fail("Expected write failure") }
+        catch (_: java.io.IOException) { }
+        now.set(10_000)
+        assertEquals(false, LanTest.call(writer, "writeTimedOut"))
+    }
+
+    @Test fun videoSocketInstrumentsTheSharedNanoWsdFrameBoundary() {
+        val type = Class.forName("br.com.redesurftank.ecotrip.managers.LocalApiServer\$VideoWebSocket")
+        assertTrue("Automatic replies must dispatch through the video override", type.declaredMethods.any {
+            it.name == "sendFrame" && it.parameterTypes.contentEquals(arrayOf(fi.iki.elonen.NanoWSD.WebSocketFrame::class.java))
+        })
+    }
+
+    private fun assertBlockedFrameIsTimed(send: (TimedSocket) -> Unit) {
+        val now = java.util.concurrent.atomic.AtomicLong(1_000)
+        val entered = java.util.concurrent.CountDownLatch(1)
+        val closed = java.util.concurrent.CountDownLatch(1)
+        val completed = java.util.concurrent.CountDownLatch(1)
+        val input = object : ByteArrayInputStream(byteArrayOf()) {
+            override fun close() { closed.countDown() }
+        }
+        val output = object : java.io.OutputStream() {
+            override fun write(value: Int) {
+                entered.countDown(); await(closed)
+                throw java.io.IOException("synthetic socket abort")
+            }
+        }
+        val socket = TimedSocket(input, output) { now.get() }
+        val failure = java.util.concurrent.atomic.AtomicReference<Throwable>()
+        val sender = kotlin.concurrent.thread {
+            try { send(socket) } catch (t: Throwable) { failure.set(t) }
+            finally { completed.countDown() }
+        }
+        try {
+            await(entered)
+            now.set(4_000); assertEquals(false, LanTest.call(socket.writer, "writeTimedOut"))
+            now.set(4_001); assertEquals(true, LanTest.call(socket.writer, "writeTimedOut"))
+            input.close() // The existing session watchdog aborts the underlying socket input.
+            await(completed)
+            assertTrue(failure.get() is java.io.IOException)
+            assertEquals(false, LanTest.call(socket.writer, "writeTimedOut"))
+        } finally { input.close(); sender.join(5_000) }
+    }
+
+    private class TimedSocket(input: InputStream, output: java.io.OutputStream, clock: () -> Long) :
+        fi.iki.elonen.NanoWSD.WebSocket(java.lang.reflect.Proxy.newProxyInstance(
+            fi.iki.elonen.NanoHTTPD.IHTTPSession::class.java.classLoader,
+            arrayOf(fi.iki.elonen.NanoHTTPD.IHTTPSession::class.java),
+        ) { _, method, _ -> if (method.name == "getInputStream") input else null } as fi.iki.elonen.NanoHTTPD.IHTTPSession) {
+        val writer = LanTest.create("CameraLanFrameWriter", clock,
+            { frame: fi.iki.elonen.NanoWSD.WebSocketFrame -> super.sendFrame(frame) })
+        init {
+            // Install only the transport boundary; exercise NanoWSD's real automatic reply handlers.
+            fi.iki.elonen.NanoWSD.WebSocket::class.java.getDeclaredField("out").apply { isAccessible = true }.set(this, output)
+            fi.iki.elonen.NanoWSD.WebSocket::class.java.getDeclaredField("state").apply { isAccessible = true }
+                .set(this, fi.iki.elonen.NanoWSD.State.OPEN)
+        }
+        override fun sendFrame(frame: fi.iki.elonen.NanoWSD.WebSocketFrame) { LanTest.call(writer, "sendFrame", frame) }
+        override fun onOpen() { }
+        override fun onClose(code: fi.iki.elonen.NanoWSD.WebSocketFrame.CloseCode?, reason: String?, initiatedByRemote: Boolean) { }
+        override fun onMessage(message: fi.iki.elonen.NanoWSD.WebSocketFrame) { }
+        override fun onPong(pong: fi.iki.elonen.NanoWSD.WebSocketFrame) { }
+        override fun onException(exception: java.io.IOException) { }
+    }
+
+    private fun binaryFrame() = fi.iki.elonen.NanoWSD.WebSocketFrame(fi.iki.elonen.NanoWSD.WebSocketFrame.OpCode.Binary, true, config)
+    private fun await(latch: java.util.concurrent.CountDownLatch) {
+        assertTrue("Timed out waiting for controlled interleaving", latch.await(5, java.util.concurrent.TimeUnit.SECONDS))
+    }
+
     private fun frame(payload: Int): ByteArray = ByteBuffer.allocate(24 + payload)
         .putInt(0x48564331).put(1).put(2).putShort(1).putInt(3).putLong(0).putInt(payload)
         .putInt(payload - 4).put(ByteArray(payload - 4) { 0x65 }).array()
