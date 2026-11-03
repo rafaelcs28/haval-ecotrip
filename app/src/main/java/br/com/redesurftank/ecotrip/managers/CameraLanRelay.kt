@@ -10,6 +10,7 @@ class CameraLanRelay {
     private var producer = false
     private var viewer = false
     private var config: ByteArray? = null
+    private var deliveredConfig: ByteArray? = null
     private var recovering = true
     private var keyframeRequested = false
     private val queue = ArrayDeque<ByteArray>()
@@ -19,7 +20,7 @@ class CameraLanRelay {
     @Synchronized fun join(role: String): Boolean = when (role) {
         "producer" -> if (producer) false else { producer = true; true }
         "viewer" -> if (viewer) false else {
-            viewer = true; recovering = true; keyframeRequested = true
+            viewer = true; deliveredConfig = null; recovering = true; keyframeRequested = true
             config?.let { enqueue(it) }; true
         }
         else -> false
@@ -38,7 +39,7 @@ class CameraLanRelay {
         if (!viewer) return true
         val key = kind == 3
         if (recovering && !key) return true
-        if (recovering && queue.none { it === currentConfig } && inFlight !== currentConfig) {
+        if (recovering && deliveredConfig !== currentConfig && queue.none { it === currentConfig } && inFlight !== currentConfig) {
             if (!fits(currentConfig.size + bytes.size, 2)) { drop(); return true }
             enqueue(currentConfig)
         }
@@ -52,18 +53,21 @@ class CameraLanRelay {
         if (inFlight != null) return null
         return queue.pollFirst()?.also { queuedBytes -= it.size; inFlight = it }
     }
-    @Synchronized fun delivered() { inFlight = null }
+    @Synchronized fun delivered() {
+        inFlight?.takeIf { it[5].toInt() == 1 }?.let { deliveredConfig = it }
+        inFlight = null
+    }
     @Synchronized fun takeKeyframeRequest(): Boolean = keyframeRequested.also { keyframeRequested = false }
     @Synchronized fun stats(): Map<String, Int> = mapOf("messages" to queue.size + if (inFlight == null) 0 else 1,
         "bytes" to queuedBytes + (inFlight?.size ?: 0))
     @Synchronized fun disconnect() {
-        producer = false; viewer = false; config = null; recovering = true
+        producer = false; viewer = false; config = null; deliveredConfig = null; recovering = true
         queue.clear(); queuedBytes = 0; inFlight = null; keyframeRequested = false
     }
     private fun fits(bytes: Int, messages: Int) = queuedBytes + (inFlight?.size ?: 0) + bytes <= 1_048_576 &&
         queue.size + (if (inFlight == null) 0 else 1) + messages <= 30
     private fun enqueue(bytes: ByteArray) { queue.addLast(bytes); queuedBytes += bytes.size }
-    private fun drop() { queue.clear(); queuedBytes = 0; recovering = true; keyframeRequested = true }
+    private fun drop() { queue.clear(); queuedBytes = 0; deliveredConfig = null; recovering = true; keyframeRequested = true }
 
     private fun validate(bytes: ByteArray): Int? {
         if (bytes.size !in 25..4_194_328) return null
@@ -99,6 +103,7 @@ class CameraLanFrameInput(private val source: InputStream) : InputStream() {
     private var remaining = 0L
     private var fragmented = false
     private var messageBytes = 0L
+    private var fragments = 0
     override fun read(): Int {
         if (headerOffset < header.size) return header[headerOffset++].toInt() and 255
         if (remaining > 0) { remaining--; return required() }
@@ -129,7 +134,8 @@ class CameraLanFrameInput(private val source: InputStream) : InputStream() {
             if (!fin || length > 125) throw IOException("Invalid video control")
         } else {
             if ((op == 0) != fragmented) throw IOException("Invalid video fragmentation")
-            if (op == 2) messageBytes = 0
+            if (op == 2) { messageBytes = 0; fragments = 0 }
+            if (++fragments > 1024) throw IOException("Too many video fragments")
             messageBytes += length
             if (messageBytes > 4_194_328L) throw IOException("Video frame too large")
             fragmented = !fin

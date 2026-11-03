@@ -214,7 +214,6 @@ class TripVideoBridge(
         @Volatile private var running = false
         @Volatile private var remoteLive = false
         @Volatile private var remoteLiveExpiresAtMs = 0L
-        @Volatile private var lanLiveExpiresAtMs = 0L
         @Volatile private var unavailableLogged = false
         private var lastObservedActive: Long? = null
         private var catalogPolls = 0
@@ -244,7 +243,6 @@ class TripVideoBridge(
             runtime = null
             remoteLive = false
             remoteLiveExpiresAtMs = 0L
-            lanLiveExpiresAtMs = 0L
             lastObservedActive = null
             catalogPolls = 0
             CameraSettingsReader.stop()
@@ -254,17 +252,14 @@ class TripVideoBridge(
             (runtime?.state?.lastTripId != null && CameraSettingsReader.automaticRecordingEnabled()) ||
                 (remoteLive && System.currentTimeMillis() < remoteLiveExpiresAtMs &&
                     CameraSettingsReader.remoteLiveEnabled()) ||
-                System.currentTimeMillis() < lanLiveExpiresAtMs
+                LocalApiServer.current?.isCameraLanLiveActive() == true
 
         fun startLanSession(id: String, port: Int, token: String, expiry: Long): Boolean {
-            val ok = runtime?.startLanLive(id, port, token, expiry) == true
-            if (ok) lanLiveExpiresAtMs = expiry
-            return ok
+            return runtime?.startLanLive(id, port, token, expiry) == true
         }
 
         fun stopLanSession(id: String) {
             runtime?.stopLanLive(id)
-            lanLiveExpiresAtMs = 0L
         }
 
         fun handleRemoteCommand(command: String, payload: String): JSONObject {

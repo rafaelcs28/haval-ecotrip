@@ -92,6 +92,8 @@ class LocalApiServer(
     /** Snapshot in-process (mesmo JSON que o iPad recebe via LAN). */
     fun snapshotJson(): String = buildStateJson()
 
+    fun isCameraLanLiveActive(): Boolean = lanLive?.let { System.currentTimeMillis() < it.expires } == true
+
     fun startServer() {
         current = this
         try {
@@ -282,17 +284,7 @@ class LocalApiServer(
                 val code = result.getValue("status") as Int
                 if (code == 404) return lanJson(404)
                 if (code == 416) return lanJson(416).also { it.addHeader("Content-Range", result.getValue("contentRange").toString()) }
-                val body = result.getValue("body") as java.io.InputStream
-                return object : Response(if (code == 206) Response.Status.PARTIAL_CONTENT else Response.Status.OK,
-                    "video/mp4", body, result.getValue("length") as Long) {
-                    override fun send(output: java.io.OutputStream) {
-                        try { super.send(output) } finally { runCatching { body.close() } }
-                    }
-                }.also {
-                    it.addHeader("Accept-Ranges", "bytes")
-                    it.addHeader("Cache-Control", "no-store")
-                    if (code == 206) it.addHeader("Content-Range", result.getValue("contentRange").toString())
-                }
+                return CameraLanDownloadResponse(result)
             }
             lanJson(404)
         } catch (_: IllegalArgumentException) { lanJson(400) }
@@ -341,8 +333,10 @@ class LocalApiServer(
         @Volatile var writeStarted = 0L
         @Volatile private var ended = false
         override fun onOpen() {
-            if (lanLive !== live || !lanAuth.active(live.id) || !live.relay.join(role)) { abort(); return }
-            live.sockets.add(this)
+            synchronized(lanLock) {
+                if (lanLive !== live || !lanAuth.active(live.id) || !live.relay.join(role)) { abort(); return }
+                live.sockets.add(this)
+            }
             Thread({
                 try {
                     while (!ended && lanLive === live) {
@@ -694,6 +688,23 @@ class LocalApiServer(
             // (porta usa payload-objeto e segue só por MQTT, fora da via LAN.)
             "vehicle/shade", "vehicle/skylight", "vehicle/window_all",
         )
+    }
+}
+
+/** NanoHTTPD does not close response data when a socket write throws. */
+class CameraLanDownloadResponse(result: Map<String, Any>) : fi.iki.elonen.NanoHTTPD.Response(
+    if (result["status"] == 206) fi.iki.elonen.NanoHTTPD.Response.Status.PARTIAL_CONTENT
+        else fi.iki.elonen.NanoHTTPD.Response.Status.OK,
+    "video/mp4", result.getValue("body") as java.io.InputStream, result.getValue("length") as Long,
+) {
+    private val lease = result.getValue("body") as java.io.InputStream
+    init {
+        addHeader("Accept-Ranges", "bytes")
+        addHeader("Cache-Control", "no-store")
+        if (result["status"] == 206) addHeader("Content-Range", result.getValue("contentRange").toString())
+    }
+    override fun send(output: java.io.OutputStream) {
+        try { super.send(output) } finally { runCatching { lease.close() } }
     }
 }
 
