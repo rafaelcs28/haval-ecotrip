@@ -76,6 +76,22 @@ final class CarCamWHEPClientTests: XCTestCase {
         XCTAssertEqual(CarCamWHEPClient.error(forHTTPStatus: 418), .invalidResponse)
     }
 
+    func testMediaRequiredProblemKeepsItsStableError() throws {
+        let configuration = try CarCamBridgeConfiguration.fixed(token: token)
+        let response = HTTPURLResponse(
+            url: configuration.baseURL.appendingPathComponent("api/v1/live/whep"),
+            statusCode: 422,
+            httpVersion: nil,
+            headerFields: ["Content-Type": "application/problem+json"]
+        )!
+        let body = Data(#"{"code":"media_required"}"#.utf8)
+
+        XCTAssertThrowsError(try CarCamWHEPClient.validateCreatedSession(
+            response: response, body: body, configuration: configuration)) { error in
+            XCTAssertEqual(error as? CarCamViewerError, .mediaRequired)
+        }
+    }
+
     func testRedirectPolicyAlwaysRejects() {
         XCTAssertFalse(CarCamWHEPClient.shouldFollowRedirect)
     }
