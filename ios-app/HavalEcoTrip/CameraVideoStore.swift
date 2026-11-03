@@ -513,7 +513,16 @@ final class CameraVideoStore: ObservableObject {
         }
         let partial = try partialURL(tripID: tripID, segmentID: segment.id, route: route)
         try FileManager.default.createDirectory(at: partial.deletingLastPathComponent(), withIntermediateDirectories: true)
-        let offset = try fileSize(partial)
+        var offset = try fileSize(partial)
+        if offset == segment.byteSize {
+            if try verify(partial, segment: segment) {
+                try promote(partial: partial, final: final, segment: segment)
+                downloadState = .complete(final)
+                return final
+            }
+            try FileManager.default.removeItem(at: partial)
+            offset = 0
+        }
         guard offset <= segment.byteSize else { throw CameraVideoError.invalidOffset }
         let remaining = segment.byteSize - offset
         guard let capacity = availableCapacity(rootURL), capacity >= 0, UInt64(capacity) >= remaining else {
@@ -547,6 +556,9 @@ final class CameraVideoStore: ObservableObject {
         } catch is CancellationError {
             downloadState = .cancelled; throw CancellationError()
         } catch {
+            if let cameraError = error as? CameraVideoError, cameraError == .digestMismatch {
+                try? FileManager.default.removeItem(at: partial)
+            }
             downloadState = .failed; throw error
         }
     }
@@ -1004,7 +1016,7 @@ final class CameraVideoNetwork {
         let currentTime = now()
         guard challenge.nonce.count == 32, challenge.nonce.allSatisfy({ $0.isNumber || ("a"..."f").contains(String($0)) }),
               challenge.serverProof.count == 64, challenge.expiresAt > currentTime,
-              challenge.expiresAt <= currentTime + 30_000 else { throw CameraVideoError.invalidResponse }
+              challenge.expiresAt <= Self.deadline(currentTime, after: 30_000) else { throw CameraVideoError.invalidResponse }
         let key = SymmetricKey(data: Data(bridgeToken.utf8))
         let serverInput = Data("haval-camera-lan-server-v1|\(challenge.deviceId)|\(challenge.nonce)|\(challenge.expiresAt)".utf8)
         guard let proof = Data(cameraHex: challenge.serverProof),
@@ -1020,9 +1032,10 @@ final class CameraVideoNetwork {
         let (data, response) = try await http.data(request)
         guard response.statusCode == 201 else { throw CameraVideoError.offline }
         let value = try JSONDecoder().decode(LANSessionResponse.self, from: data)
+        let receivedAt = now()
         guard value.scope == "download", value.sessionId.range(of: "^[a-f0-9]{32}$", options: .regularExpression) != nil,
               value.downloadToken.count >= 32, value.controlToken.count >= 32,
-              value.expiresAt > currentTime, value.expiresAt <= currentTime + 300_000 else {
+              value.expiresAt > receivedAt, value.expiresAt <= Self.deadline(receivedAt, after: 300_000) else {
             throw CameraVideoError.invalidResponse
         }
         let credential = LANCredential(id: value.sessionId, downloadToken: value.downloadToken,
@@ -1039,7 +1052,7 @@ final class CameraVideoNetwork {
             }
             var request = URLRequest(url: url); request.httpMethod = "DELETE"
             request.setValue("Bearer \(cleanup.credential.controlToken)", forHTTPHeaderField: "Authorization")
-            if let (_, response) = try? await http.data(request), response.statusCode == 204 || response.statusCode == 404 {
+            if let (_, response) = try? await http.data(request), [200, 204, 404].contains(response.statusCode) {
                 pendingLANCleanup.removeValue(forKey: key)
             }
         }
@@ -1066,6 +1079,11 @@ final class CameraVideoNetwork {
         let host = endpoint.host.contains(":") ? "[\(encoded)]" : encoded
         guard let url = URL(string: "http://\(host):\(endpoint.port)\(path)") else { throw CameraVideoError.invalidResponse }
         return url
+    }
+
+    private static func deadline(_ start: Int64, after duration: Int64) -> Int64 {
+        let (value, overflow) = start.addingReportingOverflow(duration)
+        return overflow ? Int64.max : value
     }
 
     private func ownerRequest(_ base: URL, _ path: String, _ token: String, _ method: String) throws -> URLRequest {

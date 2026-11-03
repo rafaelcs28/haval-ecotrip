@@ -15,9 +15,11 @@ class CameraLanAuth(
     private val clock: () -> Long,
 ) {
     private class Session(val expires: Long, val scope: String, val credentials: MutableMap<String, ByteArray>)
+    private class Tombstone(val expires: Long, val controlDigest: ByteArray)
     private val random = SecureRandom()
     private val challenges = linkedMapOf<String, Long>()
     private val sessions = linkedMapOf<String, Session>()
+    private val tombstones = linkedMapOf<String, Tombstone>()
 
     @Synchronized fun challenge(): Map<String, Any>? {
         prune()
@@ -25,7 +27,7 @@ class CameraLanAuth(
         if (deviceId.isBlank() || secret.isBlank()) return null
         if (challenges.size >= 128) challenges.remove(challenges.keys.first())
         val nonce = randomHex(16)
-        val expires = clock() + 30_000L
+        val expires = deadline(clock(), 30_000L)
         challenges[nonce] = expires
         return linkedMapOf(
             "deviceId" to deviceId,
@@ -54,7 +56,7 @@ class CameraLanAuth(
         expected.fill(0); supplied.fill(0)
         if (!matches || sessions.size >= 16 || (scope == "live" && sessions.values.any { it.scope == "live" })) return null
         val id = randomHex(16)
-        val expiry = clock() + 5 * 60_000L
+        val expiry = deadline(clock(), 5 * 60_000L)
         val roles = if (scope == "live") listOf("producer", "viewer", "control") else listOf("download", "control")
         val credentials = roles.associateWith { randomHex(32) }
         sessions[id] = Session(expiry, scope, credentials.mapValues { digest(it.value) }.toMutableMap())
@@ -74,21 +76,47 @@ class CameraLanAuth(
 
     @Synchronized fun authorize(id: String, role: String, token: String): Boolean {
         prune()
-        if (token.length != 64) return false
         val expected = sessions[id]?.credentials?.get(role) ?: return false
-        return MessageDigest.isEqual(expected, digest(token))
+        return matches(expected, token)
+    }
+
+    @Synchronized fun authorizeAndRevoke(id: String, token: String): Boolean {
+        prune()
+        tombstones[id]?.let { return matches(it.controlDigest, token) }
+        val session = sessions[id] ?: return false
+        val control = session.credentials["control"] ?: return false
+        if (!matches(control, token)) return false
+        sessions.remove(id)
+        val retained = control.copyOf()
+        session.credentials.values.forEach { it.fill(0) }
+        if (tombstones.size >= MAX_TOMBSTONES) removeTombstone(tombstones.keys.first())
+        tombstones[id] = Tombstone(session.expires, retained)
+        return true
     }
 
     @Synchronized fun active(id: String): Boolean { prune(); return sessions.containsKey(id) }
     @Synchronized fun revoke(id: String) { sessions.remove(id)?.credentials?.values?.forEach { it.fill(0) } }
-    @Synchronized fun clear() { sessions.keys.toList().forEach(::revoke); challenges.clear() }
+    @Synchronized fun clear() {
+        sessions.keys.toList().forEach(::revoke)
+        tombstones.keys.toList().forEach(::removeTombstone)
+        challenges.clear()
+    }
 
     fun capabilities(installed: Boolean, authorized: Boolean): Map<String, Int> = capabilityFields(installed && authorized)
     private fun prune() {
         val now = clock()
         challenges.entries.removeAll { it.value <= now }
         sessions.filterValues { it.expires <= now }.keys.toList().forEach(::revoke)
+        tombstones.filterValues { it.expires <= now }.keys.toList().forEach(::removeTombstone)
     }
+    private fun removeTombstone(id: String) { tombstones.remove(id)?.controlDigest?.fill(0) }
+    private fun matches(expected: ByteArray, token: String): Boolean {
+        val supplied = if (token.length == 64) digest(token) else ByteArray(expected.size)
+        return try { MessageDigest.isEqual(expected, supplied) && token.length == 64 }
+        finally { supplied.fill(0) }
+    }
+    private fun deadline(start: Long, duration: Long): Long =
+        if (start > Long.MAX_VALUE - duration) Long.MAX_VALUE else start + duration
     private fun randomHex(bytes: Int) = ByteArray(bytes).also(random::nextBytes).joinToString("") { "%02x".format(it) }
     private fun digest(value: String) = MessageDigest.getInstance("SHA-256").digest(value.toByteArray(Charsets.UTF_8))
     private fun hmacHex(domain: String, device: String, nonce: String, expires: Long, secret: String): String {
@@ -107,6 +135,7 @@ class CameraLanAuth(
     companion object {
         private const val CLIENT_DOMAIN = "haval-camera-lan-v1"
         private const val SERVER_DOMAIN = "haval-camera-lan-server-v1"
+        private const val MAX_TOMBSTONES = 128
 
         fun capabilityFields(available: Boolean): Map<String, Int> = mapOf(
             "cameraLiveLan" to if (available) 1 else 0,

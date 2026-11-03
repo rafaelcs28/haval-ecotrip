@@ -56,6 +56,9 @@ class LocalApiServer(
         /** Instância viva — usada pela tela Controles embarcada p/ snapshot in-process. */
         @Volatile var current: LocalApiServer? = null
             private set
+
+        internal fun deleteSessionStatus(auth: CameraLanAuth, id: String, token: String): Int =
+            if (auth.authorizeAndRevoke(id, token)) 204 else 401
     }
 
     private val gson = Gson()
@@ -239,10 +242,10 @@ class LocalApiServer(
             }
             if (uri.startsWith("/api/video/lan/session/") && method == Method.DELETE) {
                 val id = uri.removePrefix("/api/video/lan/session/")
-                if (!lanAuth.authorize(id, "control", lanBearer(session))) return lanJson(401)
+                val status = deleteSessionStatus(lanAuth, id, lanBearer(session))
+                if (status != 204) return lanJson(status)
                 lanLive?.takeIf { it.id == id }?.let(::endLanLive)
-                lanAuth.revoke(id)
-                return lanJson(200, mapOf("ok" to true))
+                return lanNoContent()
             }
             if (!CameraLanAuth.cameraAvailable(appCtx)) return lanJson(503)
             if (uri == "/api/video/lan/challenge" && method == Method.POST) {
@@ -310,6 +313,10 @@ class LocalApiServer(
         ?.takeIf { it.startsWith("Bearer ") }?.removePrefix("Bearer ").orEmpty()
     private fun lanJson(code: Int, payload: Any = mapOf("ok" to false)): Response =
         newFixedLengthResponse(Response.Status.lookup(code), "application/json", gson.toJson(payload)).also {
+            it.addHeader("Cache-Control", "no-store")
+        }
+    private fun lanNoContent(): Response =
+        newFixedLengthResponse(Response.Status.NO_CONTENT, "application/json", "").also {
             it.addHeader("Cache-Control", "no-store")
         }
 
