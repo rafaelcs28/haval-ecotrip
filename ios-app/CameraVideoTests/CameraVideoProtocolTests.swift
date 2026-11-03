@@ -53,6 +53,52 @@ final class CameraVideoProtocolTests: XCTestCase {
         XCTAssertEqual(try stream.accept(CameraVideoProtocol.parse(Self.access(sequence: 2, keyframe: false))), .waitingForKeyframe)
     }
 
+#if TASK8_IMPLEMENTED
+    func testHVT1CanonicalFixturesPreserveUnsignedFieldsAndTypes() throws {
+        let fixtures = [
+            "485654310101000000000001000000000000000000000003ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad616263",
+            "485654310102000000000001000000000000000300000000ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+            "4856543101030000000000010000000000000003000000000000000000000000000000000000000000000000000000000000000000000000",
+            "485654310104000000000001000000000000000000000003ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad616263",
+            "4856543101030000000000018000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+            "485654310103000000000001ffffffffffffffff000000000000000000000000000000000000000000000000000000000000000000000000"
+        ].map { Data(testHex: $0)! }
+
+        let decoded = try fixtures.map(CameraTransferProtocol.parse)
+        XCTAssertEqual(decoded.map(\.type), [.data, .eof, .ack, .error, .ack, .ack])
+        XCTAssertEqual(decoded.map(\.ordinal), [1, 1, 1, 1, 1, 1])
+        XCTAssertEqual(decoded.map(\.offset), [0, 3, 3, 0, 1 << 63, .max])
+        XCTAssertEqual(decoded[0].payload, Data("abc".utf8))
+        XCTAssertEqual(decoded[3].errorText, "abc")
+        XCTAssertEqual(CameraTransferProtocol.ack(ordinal: 1, nextOffset: 3), fixtures[2])
+    }
+
+    func testHVT1RejectsMalformedFramingDigestAndUnknownFields() throws {
+        let fixture = Data(testHex: "485654310101000000000001000000000000000000000003ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad616263")!
+        var cases: [Data] = []
+        var wrongLength = fixture; wrongLength[23] = 4; cases.append(wrongLength)
+        var wrongDigest = fixture; wrongDigest[24] ^= 1; cases.append(wrongDigest)
+        var flags = fixture; flags[7] = 1; cases.append(flags)
+        var type = fixture; type[5] = 9; cases.append(type)
+        var trailing = fixture; trailing.append(0); cases.append(trailing)
+        for malformed in cases { XCTAssertThrowsError(try CameraTransferProtocol.parse(malformed)) }
+
+        var overflow = fixture
+        overflow.replaceSubrange(12..<20, with: Data(repeating: 0xff, count: 8))
+        XCTAssertThrowsError(try CameraTransferProtocol.parse(overflow))
+
+        let maximum = try CameraTransferProtocol.data(ordinal: .max, offset: UInt64.max - 262_143,
+                                                      payload: Data(repeating: 0x5a, count: 262_144))
+        XCTAssertEqual(try CameraTransferProtocol.parse(maximum).payload.count, 262_144)
+        XCTAssertThrowsError(try CameraTransferProtocol.data(ordinal: 1, offset: 0,
+                                                              payload: Data(repeating: 0, count: 262_145)))
+    }
+#else
+    func testTask8HVT1ContractIsImplemented() {
+        XCTFail("Task 8 RED: HVT1 v1 Swift codec is not implemented")
+    }
+#endif
+
     static func config(
         sequence: UInt32 = 1,
         pts: UInt64 = 0,
@@ -74,6 +120,20 @@ final class CameraVideoProtocolTests: XCTestCase {
         var data = Data("HVC1".utf8); data.append(1); data.append(type)
         data.appendBE(flags); data.appendBE(sequence); data.appendBE(pts); data.appendBE(UInt32(payload.count)); data.append(payload)
         return data
+    }
+}
+
+private extension Data {
+    init?(testHex: String) {
+        guard testHex.count.isMultiple(of: 2) else { return nil }
+        var result = Data(); result.reserveCapacity(testHex.count / 2)
+        var index = testHex.startIndex
+        while index < testHex.endIndex {
+            let next = testHex.index(index, offsetBy: 2)
+            guard let byte = UInt8(testHex[index..<next], radix: 16) else { return nil }
+            result.append(byte); index = next
+        }
+        self = result
     }
 }
 
