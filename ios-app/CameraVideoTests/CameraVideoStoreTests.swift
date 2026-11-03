@@ -307,11 +307,11 @@ final class CameraVideoStoreTests: XCTestCase {
            webSocket: { _, _, _ in FakeTransferSocket(messages: []) })
         let network = CameraVideoNetwork(http: http, now: { 1_000 })
 
-        _ = try await network.fetchLANCatalog(endpoint: Self.lan, bridgeToken: bridgeToken)
-        await network.closeLANCatalogSession(endpoint: Self.lan)
-        _ = try await network.fetchLANCatalog(endpoint: Self.lan, bridgeToken: bridgeToken)
-        await network.closeLANCatalogSession(endpoint: Self.lan)
-        XCTAssertEqual(lanDeletes, 3)
+        for _ in 0..<20 {
+            _ = try await network.fetchLANCatalog(endpoint: Self.lan, bridgeToken: bridgeToken)
+            await network.closeLANCatalogSession(endpoint: Self.lan)
+        }
+        XCTAssertEqual(lanDeletes, 21)
         XCTAssertEqual(activeLAN, 0)
 
         let segment = Self.segment(Data("abc".utf8))
