@@ -7,6 +7,7 @@ typealias CarCamVideoTrack = RTCVideoTrack
 @MainActor
 protocol CarCamPeerConnectioning: AnyObject {
     var videoTrack: CarCamVideoTrack? { get }
+    var onFailure: (@MainActor (CarCamViewerError) async -> Void)? { get set }
     func makeOffer() async throws -> String
     func applyAnswer(_ sdp: String) async throws
     func close()
@@ -20,6 +21,7 @@ final class CarCamPeerConnection: NSObject, CarCamPeerConnectioning {
     private let connection: RTCPeerConnection
     private var closed = false
     private(set) var videoTrack: CarCamVideoTrack?
+    var onFailure: (@MainActor (CarCamViewerError) async -> Void)?
 
     static func make() throws -> CarCamPeerConnection {
         _ = Self.initializeWebRTC
@@ -122,4 +124,11 @@ extension CarCamPeerConnection: RTCPeerConnectionDelegate {
     nonisolated func peerConnection(_ peerConnection: RTCPeerConnection, didGenerate candidate: RTCIceCandidate) {}
     nonisolated func peerConnection(_ peerConnection: RTCPeerConnection, didRemove candidates: [RTCIceCandidate]) {}
     nonisolated func peerConnection(_ peerConnection: RTCPeerConnection, didOpen dataChannel: RTCDataChannel) {}
+    nonisolated func peerConnection(_ peerConnection: RTCPeerConnection, didChange newState: RTCPeerConnectionState) {
+        guard newState == .failed || newState == .disconnected || newState == .closed else { return }
+        Task { @MainActor [weak self] in
+            guard let self, !self.closed else { return }
+            await self.onFailure?(.peerConnectionFailed)
+        }
+    }
 }

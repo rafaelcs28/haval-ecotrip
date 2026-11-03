@@ -63,6 +63,9 @@ final class CarCamViewerSession: ObservableObject {
         do {
             let newPeer = try makePeer()
             peer = newPeer
+            newPeer.onFailure = { [weak self] error in
+                await self?.handlePeerFailure(generation: run, error: error)
+            }
             let offer = try await newPeer.makeOffer()
             guard run == generation else { return }
             let remote = try await createRemote(offer)
@@ -78,6 +81,7 @@ final class CarCamViewerSession: ObservableObject {
         } catch {
             guard run == generation else { return }
             await cleanupCurrentRemote()
+            peer?.onFailure = nil
             peer?.close()
             peer = nil
             videoTrack = nil
@@ -93,7 +97,19 @@ final class CarCamViewerSession: ObservableObject {
         peer = nil
         videoTrack = nil
         state = .idle
+        currentPeer?.onFailure = nil
         currentPeer?.close()
+        await cleanupCurrentRemote()
+    }
+
+    private func handlePeerFailure(generation run: Int, error: CarCamViewerError) async {
+        guard run == generation, let currentPeer = peer else { return }
+        generation += 1
+        peer = nil
+        videoTrack = nil
+        currentPeer.onFailure = nil
+        currentPeer.close()
+        state = .failed(error)
         await cleanupCurrentRemote()
     }
 

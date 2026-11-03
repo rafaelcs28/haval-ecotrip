@@ -56,7 +56,7 @@ Arquivos de estado, históricos, tokens, certificados e configurações reais do
 
 - Bridge: 66 testes Node cobrem contratos de vídeo, autenticação, catálogo, relay e limites de transferência.
 - EcoTrip Android: 70 testes unitários cobrem os componentes de câmera LAN/IPC e contratos relacionados; Android Debug e testes executam apenas na fila autorizada.
-- iOS: 106 testes no target `CameraVideoTests` cobrem protocolo HVC1/HVT1, sessão, roteamento, WHEP/WebRTC, catálogo, downloads verificados, limpeza e configurações; o app completo compila como simulador sem assinatura.
+- iOS: 107 testes no target `CameraVideoTests` cobrem protocolo HVC1/HVT1, sessão, roteamento, WHEP/WebRTC, catálogo, downloads verificados, limpeza e configurações; o app completo compila como simulador sem assinatura.
 - Haval Camera: suíte JVM e gates de pacote cobrem reducer, catálogo, retenção, framing, relay, provider e lifecycle em dados sintéticos.
 - Nenhuma dessas suítes comprova captura OEM, IPC entre APKs reais, rede física, reprodução em dispositivo, 4G, durabilidade/armazenamento sob perda de energia ou limites térmicos; esses gates permanecem de hardware.
 - Há arquivos Kotlin e Swift grandes, aumentando o custo de revisão. Contratos distribuídos entre APK, bridge, PWA e apps Apple exigem revisão de consumidores antes de mudar nomes ou semântica.

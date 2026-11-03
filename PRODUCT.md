@@ -50,7 +50,7 @@ Este é um produto pessoal. Não há evidência de um SaaS público ou de requis
 ## Cobertura atual e pendências conhecidas
 
 - O bridge possui 66 testes Node para contratos de catálogo, autenticação, relay e transferência de vídeo.
-- O EcoTrip Android possui 70 testes unitários, incluindo autenticação/relay/download LAN da câmera; o target iOS `CameraVideoTests` possui 106 testes de protocolo, sessão, rota, WebRTC, download, persistência e limpeza.
+- O EcoTrip Android possui 70 testes unitários, incluindo autenticação/relay/download LAN da câmera; o target iOS `CameraVideoTests` possui 107 testes de protocolo, sessão, rota, WebRTC, download, persistência e limpeza.
 - O Haval Camera possui suíte JVM e verificação de pacote no Mac Mini para catálogo, retenção, lifecycle, protocolo e relay. Essa evidência automatizada não valida o sensor físico.
 - Continuam exclusivamente dependentes de hardware: captura e mux no Android 9 do veículo, Binder/provider entre APKs assinados, Bonjour/Wi-Fi real, interrupção de Range, reprodução H.264/WebRTC no iPhone, SDP real, sincronismo A/V, latência/consumo em 4G, durabilidade após perda de energia e comportamento térmico.
 - Arquivos grandes indicam dívida de organização, mas refatorações devem ser incrementais e guiadas por comportamento reproduzível.
