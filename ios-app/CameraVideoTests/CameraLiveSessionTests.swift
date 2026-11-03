@@ -25,7 +25,7 @@ final class CameraLiveSessionTests: XCTestCase {
         )
         let session = CameraLiveSession(transport: transport, renderer: FakeRenderer(), bridgeURL: { "https://bridge.example" }, bridgeToken: { "owner-token" })
 
-        await session.start()
+        await startInternet(session)
 
         await fulfillment(of: [requestSeen, socketSeen], timeout: 1)
         XCTAssertEqual(session.state, .connecting)
@@ -42,10 +42,10 @@ final class CameraLiveSessionTests: XCTestCase {
         )
         let session = CameraLiveSession(transport: transport, renderer: renderer, bridgeURL: { "https://bridge.example" }, bridgeToken: { "owner" })
 
-        await session.start()
+        await startInternet(session)
 
         XCTAssertEqual(session.state, .offline)
-        await session.start()
+        await startInternet(session)
         XCTAssertEqual(attempts, 2)
         XCTAssertEqual(renderer.clearCount, 2)
     }
@@ -62,7 +62,7 @@ final class CameraLiveSessionTests: XCTestCase {
         )
         let delays = CameraLiveDelays(reconnect: { _ in }, stale: CameraLiveDelays.live.stale, renewal: CameraLiveDelays.live.renewal)
         let session = CameraLiveSession(transport: transport, renderer: renderer, bridgeURL: { "https://bridge.example" }, bridgeToken: { "owner" }, delays: delays)
-        await session.start()
+        await startInternet(session)
 
         first.fail(CameraLiveError.disconnected)
 
@@ -79,7 +79,7 @@ final class CameraLiveSessionTests: XCTestCase {
         let transport = CameraLiveTransport(createSession: { _ in Self.credentials() }, openSocket: { _ in socket }, stopSession: { _ in })
         let delays = CameraLiveDelays(reconnect: CameraLiveDelays.live.reconnect, stale: { _ in try await Task.sleep(nanoseconds: 5_000_000) }, renewal: CameraLiveDelays.live.renewal)
         let session = CameraLiveSession(transport: transport, renderer: renderer, bridgeURL: { "https://bridge.example" }, bridgeToken: { "owner" }, delays: delays)
-        await session.start()
+        await startInternet(session)
         socket.yield(CameraVideoProtocolTests.config())
         socket.yield(CameraVideoProtocolTests.access())
 
@@ -102,7 +102,7 @@ final class CameraLiveSessionTests: XCTestCase {
         )
         let renderer = FakeRenderer()
         let session = CameraLiveSession(transport: transport, renderer: renderer, bridgeURL: { "https://bridge.example" }, bridgeToken: { "owner" })
-        await session.start()
+        await startInternet(session)
 
         await session.stop()
 
@@ -123,7 +123,7 @@ final class CameraLiveSessionTests: XCTestCase {
         let transport = CameraLiveTransport(createSession: { _ in Self.credentials(expiresAt: Date(timeIntervalSince1970: 1_800)) }, openSocket: { _ in FakeCameraLiveSocket() }, stopSession: { _ in })
         let session = CameraLiveSession(transport: transport, renderer: FakeRenderer(), bridgeURL: { "https://bridge.example" }, bridgeToken: { "owner" }, now: { Date(timeIntervalSince1970: 0) }, delays: delays)
 
-        await session.start()
+        await startInternet(session)
 
         await fulfillment(of: [scheduled], timeout: 1)
         XCTAssertNotNil(renewalDelay)
@@ -142,7 +142,7 @@ final class CameraLiveSessionTests: XCTestCase {
         let renderer = FakeRenderer()
         let transport = CameraLiveTransport(createSession: { _ in Self.credentials() }, openSocket: { _ in socket }, stopSession: { _ in })
         let session = CameraLiveSession(transport: transport, renderer: renderer, bridgeURL: { "https://bridge.example" }, bridgeToken: { "owner" })
-        await session.start()
+        await startInternet(session)
         socket.yield(CameraVideoProtocolTests.config())
         socket.yield(CameraVideoProtocolTests.access())
         await renderer.waitForDisplayedFrames(1)
@@ -166,7 +166,7 @@ final class CameraLiveSessionTests: XCTestCase {
         let renderer = FakeRenderer()
         let transport = CameraLiveTransport(createSession: { _ in Self.credentials() }, openSocket: { _ in socket }, stopSession: { _ in })
         let session = CameraLiveSession(transport: transport, renderer: renderer, bridgeURL: { "https://bridge.example" }, bridgeToken: { "owner" })
-        await session.start()
+        await startInternet(session)
         await socket.waitForReceiveCalls(1)
         socket.yield(CameraVideoProtocolTests.config())
         await socket.waitForReceiveCalls(2)
@@ -191,10 +191,10 @@ final class CameraLiveSessionTests: XCTestCase {
         )
         let session = CameraLiveSession(transport: transport, renderer: FakeRenderer(), bridgeURL: { "https://bridge.example" }, bridgeToken: { "owner" })
 
-        let oldStart = Task { await session.start() }
+        let oldStart = Task { await self.startInternet(session) }
         await deferred.waitForRequests(1)
         await session.stop()
-        let newStart = Task { await session.start() }
+        let newStart = Task { await self.startInternet(session) }
         await deferred.waitForRequests(2)
         deferred.succeed(index: 1, with: Self.credentials(session: "new"))
         await newStart.value
@@ -220,10 +220,10 @@ final class CameraLiveSessionTests: XCTestCase {
         )
         let session = CameraLiveSession(transport: transport, renderer: FakeRenderer(), bridgeURL: { "https://bridge.example" }, bridgeToken: { "owner" })
 
-        let oldStart = Task { await session.start() }
+        let oldStart = Task { await self.startInternet(session) }
         await deferred.waitForRequests(1)
         await session.stop()
-        let newStart = Task { await session.start() }
+        let newStart = Task { await self.startInternet(session) }
         await deferred.waitForRequests(2)
         deferred.succeed(index: 1, with: Self.credentials(session: "new"))
         await newStart.value
@@ -235,6 +235,153 @@ final class CameraLiveSessionTests: XCTestCase {
         await session.stop()
     }
 
+    func testInitialNoLANDoesNotCreateRemoteSessionBeforeConfirmation() async {
+        var creates = 0
+        let transport = CameraLiveTransport(
+            createSession: { _ in creates += 1; return Self.credentials() },
+            openSocket: { _ in FakeCameraLiveSocket() },
+            stopSession: { _ in }
+        )
+        let session = CameraLiveSession(
+            transport: transport,
+            renderer: FakeRenderer(),
+            bridgeURL: { "https://bridge.example" },
+            bridgeToken: { "owner" },
+            discovery: nil
+        )
+
+        await session.start()
+
+        XCTAssertEqual(session.state, .askingInternet)
+        XCTAssertEqual(creates, 0)
+        await session.cancelInternet()
+    }
+
+    func testSupportedLANIsPreferredWithoutRemoteSession() async {
+        let socket = FakeCameraLiveSocket()
+        var remoteCreates = 0
+        let transport = CameraLiveTransport(
+            createSession: { _ in remoteCreates += 1; return Self.credentials() },
+            openSocket: { request in
+                XCTAssertEqual(request.url?.scheme, "ws")
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer viewer-short-token")
+                return socket
+            },
+            stopSession: { _ in }
+        )
+        let session = CameraLiveSession(
+            transport: transport,
+            renderer: FakeRenderer(),
+            bridgeURL: { "https://bridge.example" },
+            bridgeToken: { "synthetic-paired-secret" },
+            lanClient: Self.lanClient(),
+            discovery: nil
+        )
+        await session.updateLANEndpoint(CameraLanEndpoint(host: "192.168.8.20", port: 8080))
+
+        await session.start()
+
+        XCTAssertEqual(session.route, .lan)
+        XCTAssertEqual(session.state, .connecting)
+        XCTAssertEqual(remoteCreates, 0)
+        await session.stop()
+    }
+
+    func testLANAuthenticationFailureAsksBeforeRemoteSession() async {
+        var remoteCreates = 0
+        let transport = CameraLiveTransport(
+            createSession: { _ in remoteCreates += 1; return Self.credentials() },
+            openSocket: { _ in FakeCameraLiveSocket() },
+            stopSession: { _ in }
+        )
+        let badLAN = CameraLanClient(http: { request in
+            if request.url?.path == "/api/capabilities" {
+                return Self.httpResponse(request, 200, Self.capabilities)
+            }
+            return Self.httpResponse(request, 200, Data("{\"deviceId\":\"car-1\",\"nonce\":\"000102030405060708090a0b0c0d0e0f\",\"expiresAt\":31000,\"serverProof\":\"\(String(repeating: "0", count: 64))\"}".utf8))
+        }, nowMilliseconds: { 1_000 })
+        let session = CameraLiveSession(
+            transport: transport,
+            renderer: FakeRenderer(),
+            bridgeURL: { "https://bridge.example" },
+            bridgeToken: { "synthetic-paired-secret" },
+            lanClient: badLAN,
+            discovery: nil
+        )
+        await session.updateLANEndpoint(CameraLanEndpoint(host: "192.168.8.20", port: 8080))
+
+        await session.start()
+
+        XCTAssertEqual(session.state, .askingInternet)
+        XCTAssertEqual(remoteCreates, 0)
+        await session.cancelInternet()
+    }
+
+    func testLANLossClearsFrameBeforePromptAndRequiresSecondConfirmation() async {
+        let lanSocket = FakeCameraLiveSocket()
+        let remoteSocket = FakeCameraLiveSocket()
+        var remoteCreates = 0
+        var stateAtFirstClear: CameraLiveSession.State?
+        var session: CameraLiveSession!
+        let renderer = FakeRenderer(onClear: { stateAtFirstClear = session.state })
+        let transport = CameraLiveTransport(
+            createSession: { _ in remoteCreates += 1; return Self.credentials() },
+            openSocket: { request in request.url?.scheme == "ws" ? lanSocket : remoteSocket },
+            stopSession: { _ in }
+        )
+        session = CameraLiveSession(
+            transport: transport,
+            renderer: renderer,
+            bridgeURL: { "https://bridge.example" },
+            bridgeToken: { "synthetic-paired-secret" },
+            lanClient: Self.lanClient(),
+            discovery: nil
+        )
+        await session.updateLANEndpoint(CameraLanEndpoint(host: "192.168.8.20", port: 8080))
+        await session.start()
+
+        lanSocket.fail(CameraLiveError.disconnected)
+        await waitUntil { session.state == .askingInternet }
+
+        XCTAssertEqual(stateAtFirstClear, .connecting)
+        XCTAssertEqual(remoteCreates, 0)
+        XCTAssertNil(session.route)
+        await session.confirmInternet()
+        XCTAssertEqual(remoteCreates, 1)
+        XCTAssertEqual(session.route, .internet)
+        await session.stop()
+    }
+
+    func testReturningToLANReplacesInternetAndOldConsentIsNotReusedAfterLoss() async {
+        let lanSocket = FakeCameraLiveSocket()
+        let remoteSocket = FakeCameraLiveSocket()
+        var remoteCreates = 0
+        let transport = CameraLiveTransport(
+            createSession: { _ in remoteCreates += 1; return Self.credentials() },
+            openSocket: { request in request.url?.scheme == "ws" ? lanSocket : remoteSocket },
+            stopSession: { _ in }
+        )
+        let session = CameraLiveSession(
+            transport: transport,
+            renderer: FakeRenderer(),
+            bridgeURL: { "https://bridge.example" },
+            bridgeToken: { "synthetic-paired-secret" },
+            lanClient: Self.lanClient(),
+            discovery: nil
+        )
+        await startInternet(session)
+        XCTAssertEqual(session.route, .internet)
+
+        await session.updateLANEndpoint(CameraLanEndpoint(host: "192.168.8.20", port: 8080))
+        XCTAssertEqual(session.route, .lan)
+        lanSocket.fail(CameraLiveError.disconnected)
+        await waitUntil { session.state == .askingInternet }
+
+        XCTAssertEqual(remoteCreates, 1)
+        XCTAssertNil(session.route)
+        await session.cancelInternet()
+    }
+
     private static func credentials(session: String = "session-1", expiresAt: Date = Date().addingTimeInterval(1_800)) -> CameraLiveCredentials {
         CameraLiveCredentials(
             sessionId: session,
@@ -243,6 +390,37 @@ final class CameraLiveSessionTests: XCTestCase {
             connectExpiresAt: Date().addingTimeInterval(60),
             expiresAt: expiresAt
         )
+    }
+
+    private func startInternet(_ session: CameraLiveSession) async {
+        await session.start()
+        XCTAssertEqual(session.state, .askingInternet)
+        await session.confirmInternet()
+    }
+
+    private func waitUntil(_ condition: @escaping () -> Bool) async {
+        for _ in 0..<100 where !condition() { await Task.yield() }
+    }
+
+    private static let capabilities = Data("{\"cameraLiveLan\":1,\"cameraDownloadLan\":1,\"hvcVersion\":1,\"hvtVersion\":1}".utf8)
+
+    private static func lanClient() -> CameraLanClient {
+        CameraLanClient(http: { request in
+            switch request.url?.path {
+            case "/api/capabilities":
+                return httpResponse(request, 200, capabilities)
+            case "/api/video/lan/challenge":
+                return httpResponse(request, 200, Data("{\"deviceId\":\"car-1\",\"nonce\":\"000102030405060708090a0b0c0d0e0f\",\"expiresAt\":31000,\"serverProof\":\"74827a55d7d59155958cbf202ea29b7a9ea99213953e6831f1ee9a8ff46dd8de\"}".utf8))
+            case "/api/video/lan/session":
+                return httpResponse(request, 201, Data("{\"sessionId\":\"session-1\",\"expiresAt\":9999999999000,\"scope\":\"live\",\"viewerToken\":\"viewer-short-token\",\"controlToken\":\"control-short-token\",\"viewerPath\":\"/ws/video/lan/viewer?session=session-1\"}".utf8))
+            default:
+                return httpResponse(request, 200, Data("{\"ok\":true}".utf8))
+            }
+        }, nowMilliseconds: { 1_000 })
+    }
+
+    private static func httpResponse(_ request: URLRequest, _ status: Int, _ data: Data) -> (Data, HTTPURLResponse) {
+        (data, HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!)
     }
 }
 

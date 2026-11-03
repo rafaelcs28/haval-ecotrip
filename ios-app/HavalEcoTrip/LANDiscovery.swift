@@ -9,12 +9,14 @@ import Network
 
 @MainActor
 final class LANDiscovery {
+    typealias ResolvedEndpoint = (host: String, port: Int)
+
     /// Chamado quando acha/perde o serviço. nil = sumiu da rede.
-    var onResolve: ((String, Int)?) -> Void = { _ in }
+    var onResolve: (ResolvedEndpoint?) -> Void = { _ in }
 
     private var browser: NWBrowser?
     private var running = false
-    private var current: (String, Int)?
+    private var current: ResolvedEndpoint?
 
     func start() {
         guard !running else { return }

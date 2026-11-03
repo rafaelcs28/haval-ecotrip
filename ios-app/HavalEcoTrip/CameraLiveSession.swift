@@ -88,9 +88,11 @@ struct CameraLiveDelays {
 
 @MainActor
 final class CameraLiveSession: ObservableObject {
-    enum State: Equatable { case idle, connecting, live, degraded, offline, error(String) }
+    enum State: Equatable { case idle, connecting, askingInternet, live, degraded, offline, error(String) }
+    enum Route: Equatable { case lan, internet }
 
     @Published private(set) var state: State = .idle
+    @Published private(set) var route: Route?
     @Published private(set) var latencyMs: Int?
     @Published private(set) var quality: CameraVideoQuality = .standard
 
@@ -102,8 +104,14 @@ final class CameraLiveSession: ObservableObject {
     private let bridgeToken: () -> String
     private let now: () -> Date
     private let delays: CameraLiveDelays
+    private let lanClient: CameraLanClient
+    private let routePolicy = CameraRoutePolicy()
+    private let discovery: LANDiscovery?
     private var socket: CameraLiveSocket?
     private var credentials: CameraLiveCredentials?
+    private var localSession: CameraLanSession?
+    private var localSessionEndpoint: CameraLanEndpoint?
+    private var lanEndpoint: CameraLanEndpoint?
     private var receiveTask: Task<Void, Never>?
     private var staleTask: Task<Void, Never>?
     private var renewalTask: Task<Void, Never>?
@@ -118,7 +126,9 @@ final class CameraLiveSession: ObservableObject {
         bridgeURL: @escaping () -> String,
         bridgeToken: @escaping () -> String,
         now: @escaping () -> Date = Date.init,
-        delays: CameraLiveDelays = .live
+        delays: CameraLiveDelays = .live,
+        lanClient: CameraLanClient = .live,
+        discovery: LANDiscovery? = LANDiscovery()
     ) {
         let selectedRenderer = renderer ?? CameraVideoDecoder()
         self.transport = transport
@@ -128,32 +138,123 @@ final class CameraLiveSession: ObservableObject {
         self.bridgeToken = bridgeToken
         self.now = now
         self.delays = delays
+        self.lanClient = lanClient
+        self.discovery = discovery
         selectedRenderer.setFailureHandler { [weak self] in
             self?.handleRendererFailure()
         }
     }
 
+    func startDiscovery() {
+        discovery?.onResolve = { [weak self] value in
+            Task { @MainActor in
+                await self?.updateLANEndpoint(value.map { CameraLanEndpoint(host: $0.0, port: $0.1) })
+            }
+        }
+        discovery?.start()
+    }
+
+    func stopDiscovery() {
+        discovery?.stop()
+    }
+
     func start() async {
         guard !wantsLive else { return }
         wantsLive = true
+        generation &+= 1
+        switch routePolicy.beginAction(lanAvailable: lanEndpoint != nil) {
+        case .useLAN:
+            state = .connecting
+            await connectLAN(attemptGeneration: generation)
+        case .askInternet:
+            state = .askingInternet
+        case .offline:
+            state = .offline
+        }
+    }
+
+    func confirmInternet() async {
+        guard wantsLive, state == .askingInternet else { return }
+        routePolicy.confirmInternet()
         state = .connecting
         generation &+= 1
-        await connect(attemptGeneration: generation)
+        await connectInternet(attemptGeneration: generation)
+    }
+
+    func cancelInternet() async {
+        guard state == .askingInternet else { return }
+        _ = routePolicy.refuseInternet()
+        await stop()
     }
 
     func stop() async {
         wantsLive = false
+        routePolicy.stop()
         generation &+= 1
+        cancelTasksAndSocket()
+        let oldCredentials = credentials
+        let oldLocal = localSession
+        let oldLocalEndpoint = localSessionEndpoint
+        credentials = nil
+        localSession = nil
+        localSessionEndpoint = nil
+        renderer.clear()
+        latencyMs = nil
+        route = nil
+        state = .idle
+        if let oldCredentials { try? await stopRemote(oldCredentials) }
+        if let oldLocal, let oldLocalEndpoint { try? await lanClient.stopLiveSession(oldLocal, endpoint: oldLocalEndpoint) }
+    }
+
+    func updateLANEndpoint(_ endpoint: CameraLanEndpoint?) async {
+        guard endpoint != lanEndpoint else { return }
+        lanEndpoint = endpoint
+        guard wantsLive else { return }
+        if endpoint == nil {
+            if route == .lan || (route == nil && state == .connecting) {
+                await handleLANLoss(generation: generation)
+            }
+            return
+        }
+        guard route != .lan else { return }
+        generation &+= 1
+        let currentGeneration = generation
         cancelTasksAndSocket()
         let oldCredentials = credentials
         credentials = nil
         renderer.clear()
         latencyMs = nil
-        state = .idle
+        route = nil
+        _ = routePolicy.lanAvailable()
+        state = .connecting
         if let oldCredentials { try? await stopRemote(oldCredentials) }
+        await connectLAN(attemptGeneration: currentGeneration)
     }
 
-    private func connect(attemptGeneration: Int) async {
+    private func connectLAN(attemptGeneration: Int) async {
+        guard wantsLive, generation == attemptGeneration, let endpoint = lanEndpoint else {
+            await publishInternetPrompt(generation: attemptGeneration)
+            return
+        }
+        do {
+            let session = try await lanClient.createLiveSession(endpoint: endpoint, bridgeToken: bridgeToken())
+            guard wantsLive, generation == attemptGeneration, lanEndpoint == endpoint else {
+                try? await lanClient.stopLiveSession(session, endpoint: endpoint)
+                return
+            }
+            localSession = session
+            localSessionEndpoint = endpoint
+            route = .lan
+            attachSocket(request: session.viewerRequest, expiresAt: session.expiresAt, generation: attemptGeneration, route: .lan)
+        } catch is CancellationError {
+            return
+        } catch {
+            guard wantsLive, generation == attemptGeneration else { return }
+            await publishInternetPrompt(generation: attemptGeneration)
+        }
+    }
+
+    private func connectInternet(attemptGeneration: Int) async {
         guard wantsLive, generation == attemptGeneration else { return }
         do {
             let request = try ownerRequest(path: "/api/video/live/session", method: "POST")
@@ -163,33 +264,11 @@ final class CameraLiveSession: ObservableObject {
                 try? await stopRemote(newCredentials)
                 return
             }
-            let currentGeneration = attemptGeneration
             credentials = newCredentials
             var requestForSocket = URLRequest(url: newCredentials.viewerURL, timeoutInterval: 15)
             requestForSocket.addValue("Bearer " + newCredentials.viewerToken, forHTTPHeaderField: "Authorization")
-            let newSocket = transport.openSocket(requestForSocket)
-            socket = newSocket
-            ptsAnchor = nil
-            newSocket.resume()
-            state = .connecting
-            scheduleRenewal(newCredentials, generation: currentGeneration)
-            receiveTask = Task { [weak self] in
-                do {
-                    while let self, self.wantsLive, self.generation == currentGeneration {
-                        let data = try await newSocket.receive()
-                        guard self.wantsLive, self.generation == currentGeneration else { return }
-                        let packet = try await Task.detached(priority: .userInitiated) {
-                            try CameraVideoProtocol.parse(data)
-                        }.value
-                        try self.handle(packet, generation: currentGeneration)
-                    }
-                    return
-                } catch is CancellationError {
-                    return
-                } catch {
-                    await self?.handleDisconnect(generation: currentGeneration)
-                }
-            }
+            route = .internet
+            attachSocket(request: requestForSocket, expiresAt: newCredentials.expiresAt, generation: attemptGeneration, route: .internet)
         } catch CameraLiveError.offline {
             guard wantsLive, generation == attemptGeneration else { return }
             wantsLive = false
@@ -200,6 +279,31 @@ final class CameraLiveSession: ObservableObject {
             wantsLive = false
             renderer.clear()
             state = .error(Self.message(for: error))
+        }
+    }
+
+    private func attachSocket(request: URLRequest, expiresAt: Date, generation: Int, route: Route) {
+        let newSocket = transport.openSocket(request)
+        socket = newSocket
+        ptsAnchor = nil
+        newSocket.resume()
+        state = .connecting
+        scheduleRenewal(expiresAt: expiresAt, generation: generation, route: route)
+        receiveTask = Task { [weak self] in
+            do {
+                while let self, self.wantsLive, self.generation == generation {
+                    let data = try await newSocket.receive()
+                    guard self.wantsLive, self.generation == generation else { return }
+                    let packet = try await Task.detached(priority: .userInitiated) {
+                        try CameraVideoProtocol.parse(data)
+                    }.value
+                    try self.handle(packet, generation: generation)
+                }
+            } catch is CancellationError {
+                return
+            } catch {
+                await self?.handleDisconnect(generation: generation, route: route)
+            }
         }
     }
 
@@ -216,14 +320,16 @@ final class CameraLiveSession: ObservableObject {
         staleTask = Task { [weak self] in
             do { try await self?.delays.stale(2) } catch { return }
             guard let self, self.wantsLive, self.generation == generation else { return }
-            self.renderer.clear()
-            self.latencyMs = nil
-            self.state = .degraded
+            await self.handleDisconnect(generation: generation, route: self.route)
         }
     }
 
-    private func handleDisconnect(generation: Int) async {
+    private func handleDisconnect(generation: Int, route disconnectedRoute: Route?) async {
         guard wantsLive, self.generation == generation else { return }
+        if disconnectedRoute == .lan {
+            await handleLANLoss(generation: generation)
+            return
+        }
         renderer.clear()
         latencyMs = nil
         state = .degraded
@@ -237,31 +343,66 @@ final class CameraLiveSession: ObservableObject {
             do { try await self?.delays.reconnect(1) } catch { return }
             guard let self, self.wantsLive, self.generation == generation else { return }
             self.generation &+= 1
-            await self.connect(attemptGeneration: self.generation)
+            await self.connectInternet(attemptGeneration: self.generation)
         }
     }
 
-    private func scheduleRenewal(_ current: CameraLiveCredentials, generation: Int) {
+    private func handleLANLoss(generation: Int) async {
+        guard wantsLive, self.generation == generation else { return }
+        renderer.clear()
+        latencyMs = nil
+        staleTask?.cancel(); renewalTask?.cancel()
+        socket?.cancel(); socket = nil
+        let oldLocal = localSession
+        let oldEndpoint = localSessionEndpoint
+        localSession = nil
+        localSessionEndpoint = nil
+        route = nil
+        if let oldLocal, let oldEndpoint { try? await lanClient.stopLiveSession(oldLocal, endpoint: oldEndpoint) }
+        await publishInternetPrompt(generation: generation)
+    }
+
+    private func publishInternetPrompt(generation: Int) async {
+        guard wantsLive, self.generation == generation else { return }
+        renderer.clear()
+        latencyMs = nil
+        route = nil
+        state = routePolicy.lanUnavailable() == .askInternet ? .askingInternet : .offline
+    }
+
+    private func scheduleRenewal(expiresAt: Date, generation: Int, route scheduledRoute: Route) {
         renewalTask?.cancel()
-        let delay = max(0, current.expiresAt.timeIntervalSince(now()) - 60)
+        let delay = max(0, expiresAt.timeIntervalSince(now()) - 60)
         renewalTask = Task { [weak self] in
             do { try await self?.delays.renewal(delay) } catch { return }
             guard let self, self.wantsLive, self.generation == generation else { return }
             self.generation &+= 1
+            let nextGeneration = self.generation
             self.renderer.clear()
             self.socket?.cancel()
             self.socket = nil
-            try? await self.stopRemote(current)
-            await self.connect(attemptGeneration: self.generation)
+            if scheduledRoute == .lan {
+                let oldLocal = self.localSession
+                let oldEndpoint = self.localSessionEndpoint
+                self.localSession = nil
+                self.localSessionEndpoint = nil
+                if let oldLocal, let oldEndpoint { try? await self.lanClient.stopLiveSession(oldLocal, endpoint: oldEndpoint) }
+                await self.connectLAN(attemptGeneration: nextGeneration)
+            } else {
+                let oldRemote = self.credentials
+                self.credentials = nil
+                if let oldRemote { try? await self.stopRemote(oldRemote) }
+                await self.connectInternet(attemptGeneration: nextGeneration)
+            }
         }
     }
 
     private func handleRendererFailure() {
         guard wantsLive else { return }
         staleTask?.cancel()
-        renderer.clear()
-        latencyMs = nil
-        state = .degraded
+        let currentGeneration = generation
+        let currentRoute = route
+        Task { [weak self] in await self?.handleDisconnect(generation: currentGeneration, route: currentRoute) }
     }
 
     private func validate(_ value: CameraLiveCredentials) throws {

@@ -36,6 +36,14 @@ struct CameraVideoView: View {
             }
         }
         .interactiveDismissDisabled(session.state != .idle)
+        .task { session.startDiscovery() }
+        .onDisappear { session.stopDiscovery() }
+        .alert("Usar internet?", isPresented: internetPrompt) {
+            Button("Cancelar", role: .cancel) { Task { await session.cancelInternet() } }
+            Button("Usar internet") { Task { await session.confirmInternet() } }
+        } message: {
+            Text("A conexão LAN não está disponível. O vídeo em \(qualityName) usa cerca de \(session.quality.estimatedGBPerHour, specifier: "%.1f") GB/h.")
+        }
     }
 
     private var video: some View {
@@ -60,6 +68,11 @@ struct CameraVideoView: View {
         HStack(spacing: 8) {
             Circle().fill(stateColor).frame(width: 7, height: 7)
             Text(stateText).font(.system(size: 12, weight: .semibold)).foregroundStyle(DS.text)
+            if let route = session.route {
+                Text(route == .lan ? "LAN" : "Internet")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(DS.text2)
+            }
             Spacer()
             if let latency = session.latencyMs, session.state == .live {
                 Text("~\(latency) ms").font(.system(size: 11, design: .monospaced)).foregroundStyle(DS.text2)
@@ -80,7 +93,7 @@ struct CameraVideoView: View {
                     .background(DS.teal, in: Capsule())
             }
             .buttonStyle(.plain)
-        case .connecting, .live, .degraded:
+        case .connecting, .askingInternet, .live, .degraded:
             Button { Task { await session.stop() } } label: {
                 Label("Encerrar vídeo", systemImage: "stop.fill")
                     .font(.system(size: 13, weight: .bold))
@@ -96,6 +109,7 @@ struct CameraVideoView: View {
         switch session.state {
         case .idle: "Pronto para conectar"
         case .connecting: "Conectando…"
+        case .askingInternet: "Aguardando confirmação"
         case .live: "Ao vivo"
         case .degraded: "Sinal interrompido — reconectando"
         case .offline: "Carro offline"
@@ -107,6 +121,7 @@ struct CameraVideoView: View {
         switch session.state {
         case .live: "video.fill"
         case .connecting, .degraded: "arrow.triangle.2.circlepath"
+        case .askingInternet: "wifi.exclamationmark"
         case .offline: "car.fill"
         case .error: "exclamationmark.triangle.fill"
         case .idle: "video"
@@ -116,9 +131,21 @@ struct CameraVideoView: View {
     private var stateColor: Color {
         switch session.state {
         case .live: DS.green
-        case .connecting, .degraded: DS.yellow
+        case .connecting, .askingInternet, .degraded: DS.yellow
         case .error: DS.red
         case .idle, .offline: DS.muted
+        }
+    }
+
+    private var internetPrompt: Binding<Bool> {
+        Binding(get: { session.state == .askingInternet }, set: { _ in })
+    }
+
+    private var qualityName: String {
+        switch session.quality {
+        case .economy: "qualidade econômica"
+        case .standard: "qualidade padrão"
+        case .high: "qualidade alta"
         }
     }
 }
