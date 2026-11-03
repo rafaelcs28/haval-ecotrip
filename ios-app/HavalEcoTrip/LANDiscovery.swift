@@ -71,7 +71,7 @@ final class LANDiscovery {
         conn.start(queue: .main)
     }
 
-    static func resolvedHost(_ host: NWEndpoint.Host) -> String {
+    nonisolated static func resolvedHost(_ host: NWEndpoint.Host) -> String {
         switch host {
         case .ipv4(let address): return "\(address)"
         case .ipv6(let address): return "\(address)"
