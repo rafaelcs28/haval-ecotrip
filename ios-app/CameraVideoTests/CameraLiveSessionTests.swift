@@ -400,6 +400,56 @@ final class CameraLiveSessionTests: XCTestCase {
         await session.cancelInternet()
     }
 
+    func testRetainedDecoderFailureFromOldLANDoesNotTearDownNewInternetRoute() async {
+        let decoder = CameraVideoDecoder()
+        let lanSocket = FakeCameraLiveSocket()
+        let internetSocket = FakeCameraLiveSocket()
+        var remoteCreates = 0
+        let transport = CameraLiveTransport(
+            createSession: { _ in
+                remoteCreates += 1
+                return Self.credentials(session: "internet-\(remoteCreates)")
+            },
+            openSocket: { request in request.url?.scheme == "ws" ? lanSocket : internetSocket },
+            stopSession: { _ in }
+        )
+        let delays = CameraLiveDelays(
+            reconnect: { _ in },
+            stale: CameraLiveDelays.live.stale,
+            renewal: CameraLiveDelays.live.renewal
+        )
+        let session = CameraLiveSession(
+            transport: transport,
+            renderer: decoder,
+            bridgeURL: { "https://bridge.example" },
+            bridgeToken: { "synthetic-paired-secret" },
+            delays: delays,
+            lanClient: Self.lanClient(),
+            discovery: nil
+        )
+        await session.updateLANEndpoint(CameraLanEndpoint(host: "192.168.8.20", port: 8080))
+        await session.start()
+        let oldLANFailureEvent = decoder.handleDisplayFailure
+
+        await session.updateLANEndpoint(nil)
+        await session.confirmInternet()
+        XCTAssertEqual(session.route, .internet)
+        XCTAssertEqual(remoteCreates, 1)
+
+        let observationWindow = expectation(description: "old failure observation window")
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 50_000_000)
+            observationWindow.fulfill()
+        }
+        oldLANFailureEvent()
+        await fulfillment(of: [observationWindow], timeout: 1)
+
+        XCTAssertEqual(session.route, .internet)
+        XCTAssertEqual(remoteCreates, 1)
+        XCTAssertFalse(internetSocket.cancelled)
+        await session.stop()
+    }
+
     func testLANLossInvalidatesReceiveBeforeClearSoOldFrameCannotRepaint() async {
         let lanSocket = FakeCameraLiveSocket()
         var renderer: FakeRenderer!
