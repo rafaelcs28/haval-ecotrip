@@ -140,8 +140,8 @@ class CameraLanRelayTest {
             if (readingDeadline) {
                 release.countDown()
                 await(completed) // Writer clears its timestamp before deadline evaluation resumes.
-                2_000L
-            } else 1_000L
+                11_000L
+            } else 10_000L
         }, { _: fi.iki.elonen.NanoWSD.WebSocketFrame -> entered.countDown(); await(release); Unit })
         val failure = java.util.concurrent.atomic.AtomicReference<Throwable>()
         val sender = kotlin.concurrent.thread {
