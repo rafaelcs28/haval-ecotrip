@@ -32,7 +32,9 @@ class CameraLanRelay {
         if (kind == 1) {
             config = bytes.copyOf()
             queue.clear(); queuedBytes = 0; recovering = true
-            if (viewer && fits(config!!.size, 1)) enqueue(config!!)
+            if (viewer) {
+                if (fits(config!!.size, 1)) enqueue(config!!) else drop()
+            }
             return true
         }
         val currentConfig = config ?: return false
@@ -113,12 +115,22 @@ class CameraLanFrameInput(private val source: InputStream) : InputStream() {
     override fun read(bytes: ByteArray, off: Int, len: Int): Int {
         if (len == 0) return 0
         if (headerOffset < header.size || remaining == 0L) { bytes[off] = read().toByte(); return 1 }
-        val n = source.read(bytes, off, minOf(len.toLong(), remaining).toInt())
+        val n = readWithSessionTimeout { source.read(bytes, off, minOf(len.toLong(), remaining).toInt()) }
         if (n < 0) throw IOException("Truncated video frame")
         remaining -= n
         return n
     }
-    private fun required(): Int = source.read().also { if (it < 0) throw IOException("Truncated video frame") }
+    private fun required(): Int = readWithSessionTimeout { source.read() }.also {
+        if (it < 0) throw IOException("Truncated video frame")
+    }
+    private fun readWithSessionTimeout(read: () -> Int): Int {
+        while (true) {
+            try { return read() } catch (_: java.net.SocketTimeoutException) {
+                // HTTP's idle timeout does not end a receive-only viewer. The owner closes
+                // this input on session expiry, failed output, disconnect or server shutdown.
+            }
+        }
+    }
     private fun readHeader() {
         val first = required(); val second = required()
         val op = first and 15; val fin = first and 128 != 0
