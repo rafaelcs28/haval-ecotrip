@@ -1041,6 +1041,7 @@ test('new transfer remains paused while a live stop is still unconfirmed', async
   const stopping = relay.closeSession(live.sessionId);
   const session = await transfer(relay); const producer = transferSocket(relay, 'producer', session);
   assert.deepEqual(JSON.parse(producer.sent.at(-1).data), { type: 'pause', reason: 'live' });
+  transferSocket(relay, 'viewer', session);
   confirmStop(); await stopping;
   assert.equal(JSON.parse(producer.sent.at(-1).data).type, 'resume');
 });
@@ -1156,4 +1157,56 @@ test('a corrupt null metadata file cannot prevent relay startup', () => {
   const { relay } = fixture({ metadata: null });
   assert.deepEqual(relay.getCatalog().trips, []);
   assert.equal(relay.getSettings(), null);
+});
+
+test('producer startup before viewer readiness pauses without consuming the viewer token', async () => {
+  const { relay, commands } = transferFixture();
+  const session = await transfer(relay);
+  const producer = transferSocket(relay, 'producer', session);
+  const data = Buffer.from(HVT.data, 'hex');
+
+  // The car may send before POST has returned the credentials to the viewer.
+  producer.emit('message', data, true);
+  assert.equal(producer.readyState, WebSocket.OPEN);
+  assert.deepEqual(JSON.parse(producer.sent.at(-1).data), { type: 'pause', reason: 'viewer' });
+  assert.equal(commands.find(entry => entry.command === 'video_transfer').payload.paused, true);
+  assert.equal(producer.sent.some(entry => Buffer.isBuffer(entry.data)), false);
+  assert.equal(relay.transfers.get(session.sessionId).pending, null);
+
+  const viewer = transferSocket(relay, 'viewer', session);
+  assert.equal(viewer.readyState, WebSocket.OPEN);
+  assert.equal(viewer.closed.length, 0);
+  assert.deepEqual(JSON.parse(producer.sent.at(-1).data), { type: 'resume', offsets: { '1': '0' } });
+  assert.equal(viewer.sent.length, 0);
+  producer.emit('message', data, true);
+  assert.equal(viewer.sent[0].data, data);
+  viewer.emit('message', Buffer.from(HVT.ack, 'hex'), true);
+  assert.equal(producer.sent.at(-1).data.toString('hex'), HVT.ack);
+  await relay.closeTransfer(session.sessionId);
+});
+
+test('live resume waits for the outstanding durable ACK before advertising its updated offset', async () => {
+  const { relay } = transferFixture();
+  const session = await transfer(relay);
+  const producer = transferSocket(relay, 'producer', session);
+  const viewer = transferSocket(relay, 'viewer', session);
+  const data = Buffer.from(HVT.data, 'hex');
+  producer.emit('message', data, true);
+  assert.equal(viewer.sent[0].data, data);
+  const live = await create(relay);
+  assert.deepEqual(JSON.parse(producer.sent.at(-1).data), { type: 'pause', reason: 'live' });
+  const pausedSendCount = producer.sent.length;
+
+  await relay.closeSession(live.sessionId);
+  relay.sweep();
+  assert.equal(producer.sent.length, pausedSendCount);
+  assert.equal(relay.transfers.get(session.sessionId).pending.nextOffset, 3n);
+  viewer.emit('message', Buffer.from(HVT.ack, 'hex'), true);
+  assert.equal(producer.sent.at(-2).data.toString('hex'), HVT.ack);
+  assert.deepEqual(JSON.parse(producer.sent.at(-1).data), { type: 'resume', offsets: { '1': '3' } });
+  producer.emit('message', Buffer.from(HVT.eof, 'hex'), true);
+  assert.equal(viewer.sent.at(-1).data.toString('hex'), HVT.eof);
+  viewer.emit('message', Buffer.from(HVT.ack, 'hex'), true);
+  assert.equal(producer.closed.at(-1).code, 4000);
+  assert.equal(relay.transfers.size, 0);
 });

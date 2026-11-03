@@ -128,6 +128,11 @@ O comando `video_transfer` contém `requestId` exclusivo por tentativa,
 `producerToken`, `expiresAt`, `offsets`, `completedSegmentIds` e `paused`.
 As adições de URL/token/offsets são o contrato para o produtor da próxima tarefa;
 o handler Android legado ainda não consome esses campos.
+Cada tentativa começa com `paused: true` até o viewer conectar. Se o produtor
+conectar primeiro, recebe `{"type":"pause","reason":"viewer"}`; DATA/EOF
+antecipado é descartado sem ACK, retenção ou consumo do token do viewer.
+Quando ambas as pontas estão prontas e não há live, o produtor recebe `resume`
+com os offsets confirmados, inclusive quando o viewer conectou primeiro.
 Os WebSockets são `/ws/video/transfer/car?session=ID` e
 `/ws/video/transfer/viewer?session=ID`. Reutilizam o roteador e os servidores WS do
 relay existente, com a mesma exigência TLS/proxy confiável e limitação de tentativas
@@ -176,6 +181,9 @@ pode terminar. Após confirmação de stop live, recebe
 `{"type":"resume","offsets":{"1":"0"}}`. O produtor deve respeitar `paused` e
 reler o último offset confirmado ao retomar. Se stop live falhar, a pausa permanece
 até a expiração original do live; não se presume que a câmera parou.
+Se DATA/EOF aguarda ACK durável quando live termina, `resume` espera esse ACK e
+anuncia o offset atualizado. Se o ACK conclui o último EOF, a sessão encerra sem
+enviar `resume`.
 
 `DELETE /api/video/transfer/session/:id` remove estado/credenciais, fecha ambas as
 pontas e aguarda `video_transfer_cancel` (`requestId`, `sessionId`). Retorna `204`

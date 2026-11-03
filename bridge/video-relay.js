@@ -555,10 +555,11 @@ class VideoRelay {
         progress: new Map(segments.map(segment => [segment.segmentId,
           { size: BigInt(segment.byteSize), sha256: segment.sha256, nextOffset: 0n, complete: false }])),
         expiresAt: this.now() + SESSION_TTL_MS, producer: null, viewer: null, closing: false,
-        pending: null, paused: this.sessions.size > 0 || this.stoppingLive.size > 0 };
+        pending: null, paused: true };
       this.transfers.set(id, session);
     }
     session.starting = true;
+    session.paused = true;
     session.connectExpiresAt = Math.min(this.now() + CONNECT_TTL_MS, session.expiresAt);
     session.producerToken = { value: this.randomBytes(32).toString('base64url'), consumed: false };
     session.viewerToken = { value: this.randomBytes(32).toString('base64url'), consumed: false };
@@ -604,7 +605,10 @@ class VideoRelay {
       if (session.closing || session[role] !== socket) return;
       this.onTransferMessage(session, role, data, binary);
     });
-    if (role === 'producer' && session.paused) this.transferControl(session, { type: 'pause', reason: 'live' });
+    this.updateTransferPriority();
+    if (role === 'producer') this.transferControl(session, session.paused
+      ? { type: 'pause', reason: this.sessions.size > 0 || this.stoppingLive.size > 0 ? 'live' : 'viewer' }
+      : { type: 'resume', offsets: this.transferOffsets(session) });
   }
 
   disconnectTransfer(session, code = 4000) {
@@ -628,11 +632,12 @@ class VideoRelay {
   }
 
   updateTransferPriority() {
-    const paused = this.sessions.size > 0 || this.stoppingLive.size > 0;
+    const live = this.sessions.size > 0 || this.stoppingLive.size > 0;
     for (const session of this.transfers.values()) {
-      if (session.paused === paused) continue;
+      const paused = live || session.viewer?.readyState !== WebSocket.OPEN;
+      if (session.paused === paused || (!paused && session.pending)) continue;
       session.paused = paused;
-      this.transferControl(session, paused ? { type: 'pause', reason: 'live' }
+      this.transferControl(session, paused ? { type: 'pause', reason: live ? 'live' : 'viewer' }
         : { type: 'resume', offsets: this.transferOffsets(session) });
     }
   }
@@ -669,6 +674,7 @@ class VideoRelay {
         }); }
         catch (_) { return this.disconnectTransfer(session); }
         if ([...session.progress.values()].every(value => value.complete)) void this.closeTransfer(session.id);
+        else this.updateTransferPriority();
         return;
       }
       if (parsed.type !== 1 && parsed.type !== 2) throw new Error('producer type');
