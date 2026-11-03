@@ -243,6 +243,29 @@ final class CameraLanClientTests: XCTestCase {
         ])
     }
 
+    // Mutation caught: stopLiveSession omits final 204 while accepting only legacy terminal statuses.
+    func testStopLiveSessionAcceptsFinalAndLegacyTerminalStatuses() async throws {
+        let session = CameraLanSession(
+            sessionId: "session-1",
+            viewerRequest: URLRequest(url: URL(string: "ws://192.168.8.20:8080/ws/video/lan/viewer?session=session-1")!),
+            controlToken: "control-short-token",
+            expiresAt: Date(timeIntervalSince1970: 301)
+        )
+
+        for status in [204, 200, 404] {
+            var captured: URLRequest?
+            let client = CameraLanClient(http: { request in
+                captured = request
+                return Self.response(request, status: status, body: Data())
+            })
+
+            try await client.stopLiveSession(session, endpoint: endpoint)
+            XCTAssertEqual(captured?.httpMethod, "DELETE")
+            XCTAssertEqual(captured?.url?.path, "/api/video/lan/session/session-1")
+            XCTAssertEqual(captured?.value(forHTTPHeaderField: "Authorization"), "Bearer control-short-token")
+        }
+    }
+
     func testGlobalAndScopedIPv6PreserveExactAuthority() async throws {
         for (host, encodedHost) in [
             ("2001:db8::1", "2001:db8::1"),

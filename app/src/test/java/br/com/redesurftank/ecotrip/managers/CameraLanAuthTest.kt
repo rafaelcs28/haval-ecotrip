@@ -238,6 +238,20 @@ class CameraLanAuthTest {
         assertEquals(204, LocalApiServer.deleteSessionStatus(a, id, control))
         assertEquals(204, LocalApiServer.deleteSessionStatus(a, id, control))
     }
+    // Mutation caught: internal live revocation discards control authority instead of retaining its digest until expiry.
+    @Test fun internalLiveRevocationKeepsAuthenticatedDeleteIdempotentThroughOriginalExpiry() {
+        val a = auth(); val s = session(a, challenge(a))!!
+        val id = s["sessionId"] as String
+        val control = s["controlToken"] as String
+
+        LanTest.call(a, "revoke", id)
+
+        assertEquals(401, LocalApiServer.deleteSessionStatus(a, id, "00".repeat(32)))
+        assertEquals(204, LocalApiServer.deleteSessionStatus(a, id, control))
+        assertEquals(204, LocalApiServer.deleteSessionStatus(a, id, control))
+        now = s["expiresAt"] as Long
+        assertEquals(401, LocalApiServer.deleteSessionStatus(a, id, control))
+    }
     @Test fun handshakeAdmissionIsBoundToCapturedLiveSessionAfterReplacement() {
         val a = auth(); val old = session(a, challenge(a))!!
         LanTest.call(a, "revoke", old["sessionId"])
