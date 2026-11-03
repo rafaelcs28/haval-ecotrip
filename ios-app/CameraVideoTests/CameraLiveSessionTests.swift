@@ -64,6 +64,8 @@ final class CameraLiveSessionTests: XCTestCase {
         let session = CameraLiveSession(transport: transport, renderer: renderer, bridgeURL: { "https://bridge.example" }, bridgeToken: { "owner" }, delays: delays)
         await startInternet(session)
 
+        await first.waitForReceiveCalls(1)
+        XCTAssertEqual(first.receiveCallCount, 1)
         first.fail(CameraLiveError.disconnected)
 
         await fulfillment(of: [reconnected], timeout: 1)
@@ -358,6 +360,8 @@ final class CameraLiveSessionTests: XCTestCase {
         await session.updateLANEndpoint(CameraLanEndpoint(host: "192.168.8.20", port: 8080))
         await session.start()
 
+        await lanSocket.waitForReceiveCalls(1)
+        XCTAssertEqual(lanSocket.receiveCallCount, 1)
         lanSocket.fail(CameraLiveError.disconnected)
         await waitUntil { session.state == .askingInternet }
 
@@ -396,10 +400,17 @@ final class CameraLiveSessionTests: XCTestCase {
         await session.updateLANEndpoint(CameraLanEndpoint(host: "192.168.8.20", port: 8080))
         await session.start()
 
+        await lanSocket.waitForReceiveCalls(1)
+        XCTAssertEqual(lanSocket.receiveCallCount, 1)
         lanSocket.fail(CameraLiveError.disconnected)
         await waitUntil { session.state == .askingInternet }
         renderer.failAsynchronously()
-        await waitUntil { remoteCreates > 0 }
+        let observationWindow = expectation(description: "old renderer callback observation window")
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 50_000_000)
+            observationWindow.fulfill()
+        }
+        await fulfillment(of: [observationWindow], timeout: 1)
 
         XCTAssertEqual(session.state, .askingInternet)
         XCTAssertEqual(remoteCreates, 0)
