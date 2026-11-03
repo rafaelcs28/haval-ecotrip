@@ -84,7 +84,7 @@ final class CameraLanClientTests: XCTestCase {
 
         let visible = capture.requests.map { request in
             request.url!.absoluteString
-                + request.allHTTPHeaderFields.description
+                + (request.allHTTPHeaderFields ?? [:]).description
                 + String(data: request.httpBody ?? Data(), encoding: .utf8)!
         }.joined() + session.viewerRequest.description
         XCTAssertFalse(visible.contains(token))
@@ -148,7 +148,7 @@ final class CameraLanClientTests: XCTestCase {
             capture.requests.append(request)
             switch request.url?.path {
             case "/api/capabilities": return Self.response(request, status: 200, body: Self.capabilities)
-            case "/api/video/lan/challenge": return Self.response(request, status: 200, body: Self.challenge(serverProof: serverProof))
+            case "/api/video/lan/challenge": return Self.response(request, status: 200, body: Self.challenge(serverProof: self.serverProof))
             default: return Self.response(request, status: 201, body: Self.session(viewerPath: viewerPath))
             }
         }, nowMilliseconds: { 1_000 })
