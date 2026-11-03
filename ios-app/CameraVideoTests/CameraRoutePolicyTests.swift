@@ -17,6 +17,7 @@ final class CameraRoutePolicyTests: XCTestCase {
 
     func testMissingCapabilityIsUnsupported() {
         let policy = CameraRoutePolicy()
+        _ = policy.beginAction(lanAvailable: true)
         XCTAssertEqual(policy.lanUnavailable(), .askInternet)
         XCTAssertFalse(policy.internetAllowed)
     }
