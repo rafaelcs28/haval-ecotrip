@@ -1,0 +1,108 @@
+package br.com.redesurftank.ecotrip.managers
+
+import android.content.Context
+import android.content.ComponentName
+import android.content.pm.PackageManager
+import java.security.MessageDigest
+import java.security.SecureRandom
+import javax.crypto.Mac
+import javax.crypto.spec.SecretKeySpec
+
+/** Ephemeral LAN authority. The paired secret is read only while verifying a challenge. */
+class CameraLanAuth(
+    private val deviceId: String,
+    private val bridgeToken: () -> String,
+    private val clock: () -> Long,
+) {
+    private class Session(val expires: Long, val scope: String, val credentials: MutableMap<String, ByteArray>)
+    private val random = SecureRandom()
+    private val challenges = linkedMapOf<String, Long>()
+    private val sessions = linkedMapOf<String, Session>()
+
+    @Synchronized fun challenge(): Map<String, Any>? {
+        prune()
+        if (deviceId.isBlank() || bridgeToken().isBlank()) return null
+        if (challenges.size >= 128) challenges.remove(challenges.keys.first())
+        val nonce = randomHex(16)
+        val expires = clock() + 30_000L
+        challenges[nonce] = expires
+        return mapOf("deviceId" to deviceId, "nonce" to nonce, "expiresAt" to expires)
+    }
+
+    @Synchronized fun createSession(device: String, nonce: String, expires: Long, proof: String, scope: String): Map<String, Any>? {
+        prune()
+        val expectedExpiry = challenges.remove(nonce) ?: return null
+        val secret = bridgeToken()
+        if (secret.isBlank() || device != deviceId || expires != expectedExpiry || clock() >= expires ||
+            scope !in setOf("live", "download")) return null
+        val mac = Mac.getInstance("HmacSHA256")
+        val key = secret.toByteArray(Charsets.UTF_8)
+        val expected = try {
+            mac.init(SecretKeySpec(key, "HmacSHA256"))
+            mac.doFinal("haval-camera-lan-v1|$deviceId|$nonce|$expires".toByteArray(Charsets.UTF_8))
+        } finally { key.fill(0) }
+        val supplied = if (proof.matches(Regex("[0-9a-f]{64}"))) {
+            proof.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+        } else ByteArray(32)
+        val matches = MessageDigest.isEqual(expected, supplied)
+        expected.fill(0); supplied.fill(0)
+        if (!matches || sessions.size >= 16 || (scope == "live" && sessions.values.any { it.scope == "live" })) return null
+        val id = randomHex(16)
+        val expiry = clock() + 5 * 60_000L
+        val roles = if (scope == "live") listOf("producer", "viewer", "control") else listOf("download", "control")
+        val credentials = roles.associateWith { randomHex(32) }
+        sessions[id] = Session(expiry, scope, credentials.mapValues { digest(it.value) }.toMutableMap())
+        return linkedMapOf<String, Any>("sessionId" to id, "expiresAt" to expiry, "scope" to scope).apply {
+            credentials.forEach { (role, token) -> put("${role}Token", token) }
+        }
+    }
+
+    @Synchronized fun consume(id: String, role: String, token: String): Boolean {
+        if (role !in setOf("producer", "viewer") || !authorize(id, role, token)) return false
+        sessions[id]?.credentials?.remove(role)
+        return true
+    }
+
+    @Synchronized fun authorize(id: String, role: String, token: String): Boolean {
+        prune()
+        if (token.length != 64) return false
+        val expected = sessions[id]?.credentials?.get(role) ?: return false
+        return MessageDigest.isEqual(expected, digest(token))
+    }
+
+    @Synchronized fun active(id: String): Boolean { prune(); return sessions.containsKey(id) }
+    @Synchronized fun revoke(id: String) { sessions.remove(id)?.credentials?.values?.forEach { it.fill(0) } }
+    @Synchronized fun clear() { sessions.keys.toList().forEach(::revoke); challenges.clear() }
+
+    fun capabilities(installed: Boolean, authorized: Boolean): Map<String, Int> = capabilityFields(installed && authorized)
+    private fun prune() {
+        val now = clock()
+        challenges.entries.removeAll { it.value <= now }
+        sessions.filterValues { it.expires <= now }.keys.toList().forEach(::revoke)
+    }
+    private fun randomHex(bytes: Int) = ByteArray(bytes).also(random::nextBytes).joinToString("") { "%02x".format(it) }
+    private fun digest(value: String) = MessageDigest.getInstance("SHA-256").digest(value.toByteArray(Charsets.UTF_8))
+
+    companion object {
+        fun capabilityFields(available: Boolean): Map<String, Int> = mapOf(
+            "cameraLiveLan" to if (available) 1 else 0,
+            "cameraDownloadLan" to if (available) 1 else 0,
+            "hvcVersion" to 1, "hvtVersion" to 1,
+        )
+
+        fun cameraAvailable(context: Context?): Boolean = context != null && runCatching {
+            val pm = context.packageManager
+            val app = pm.getApplicationInfo(CameraVideoContract.PACKAGE, 0)
+            val service = pm.getServiceInfo(ComponentName(CameraVideoContract.PACKAGE, CameraVideoContract.SERVICE), 0)
+            val provider = pm.resolveContentProvider(CameraVideoContract.AUTHORITY, 0)
+            app.enabled && service.enabled && service.exported &&
+                service.permission == CameraVideoContract.CONTROL_PERMISSION &&
+                provider != null && provider.enabled && provider.exported &&
+                provider.packageName == CameraVideoContract.PACKAGE &&
+                provider.readPermission == CameraVideoContract.READ_PERMISSION &&
+                pm.checkSignatures(context.packageName, CameraVideoContract.PACKAGE) == PackageManager.SIGNATURE_MATCH &&
+                context.checkSelfPermission(CameraVideoContract.CONTROL_PERMISSION) == PackageManager.PERMISSION_GRANTED &&
+                context.checkSelfPermission(CameraVideoContract.READ_PERMISSION) == PackageManager.PERMISSION_GRANTED
+        }.getOrDefault(false)
+    }
+}

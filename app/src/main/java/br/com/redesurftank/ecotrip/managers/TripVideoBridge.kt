@@ -107,6 +107,23 @@ class TripVideoBridge(
         suppliedRequestId = command.requestId,
     )
 
+    @Synchronized
+    fun startLanLive(sessionId: String, port: Int, producerToken: String, expiresAtMs: Long): Boolean {
+        require(sessionId.matches(Regex("[A-Za-z0-9_-]{1,128}")))
+        require(port in 1..65535 && port != 80)
+        require(producerToken.matches(Regex("[A-Za-z0-9_-]{32,512}")))
+        CameraRemoteValidation.expiry(expiresAtMs, wallClockMs())
+        return send(Action.START_LIVE, state.lastTripId,
+            sessionUrl = "ws://127.0.0.1:$port/ws/video/lan/car?session=$sessionId",
+            sessionId = sessionId, producerToken = producerToken, expiresAtMs = expiresAtMs)
+    }
+
+    @Synchronized
+    fun stopLanLive(sessionId: String): Boolean {
+        require(sessionId.matches(Regex("[A-Za-z0-9_-]{1,128}")))
+        return send(Action.STOP_LIVE, state.lastTripId, sessionId = sessionId)
+    }
+
     private fun send(
         action: Action,
         newLastTripId: Long?,
@@ -197,6 +214,7 @@ class TripVideoBridge(
         @Volatile private var running = false
         @Volatile private var remoteLive = false
         @Volatile private var remoteLiveExpiresAtMs = 0L
+        @Volatile private var lanLiveExpiresAtMs = 0L
         @Volatile private var unavailableLogged = false
         private var lastObservedActive: Long? = null
         private var catalogPolls = 0
@@ -226,6 +244,7 @@ class TripVideoBridge(
             runtime = null
             remoteLive = false
             remoteLiveExpiresAtMs = 0L
+            lanLiveExpiresAtMs = 0L
             lastObservedActive = null
             catalogPolls = 0
             CameraSettingsReader.stop()
@@ -234,7 +253,19 @@ class TripVideoBridge(
         fun isRecordingOrLiveActive(): Boolean =
             (runtime?.state?.lastTripId != null && CameraSettingsReader.automaticRecordingEnabled()) ||
                 (remoteLive && System.currentTimeMillis() < remoteLiveExpiresAtMs &&
-                    CameraSettingsReader.remoteLiveEnabled())
+                    CameraSettingsReader.remoteLiveEnabled()) ||
+                System.currentTimeMillis() < lanLiveExpiresAtMs
+
+        fun startLanSession(id: String, port: Int, token: String, expiry: Long): Boolean {
+            val ok = runtime?.startLanLive(id, port, token, expiry) == true
+            if (ok) lanLiveExpiresAtMs = expiry
+            return ok
+        }
+
+        fun stopLanSession(id: String) {
+            runtime?.stopLanLive(id)
+            lanLiveExpiresAtMs = 0L
+        }
 
         fun handleRemoteCommand(command: String, payload: String): JSONObject {
             if (command == "video_catalog") {

@@ -69,6 +69,24 @@ class LocalApiServer(
     // "No message available on STREAM" quando o carro está parado/idle).
     private var heartbeatTimer: java.util.Timer? = null
 
+    private val lanAuth by lazy {
+        val deviceId = appCtx?.let {
+            android.provider.Settings.Secure.getString(it.contentResolver, android.provider.Settings.Secure.ANDROID_ID)
+        }.orEmpty()
+        CameraLanAuth(deviceId, { mqttManager.bridgeToken }, System::currentTimeMillis)
+    }
+    private val lanDownloads by lazy { appCtx?.let(CameraLanDownloads::from) }
+    private class LanLive(val id: String, val expires: Long) {
+        val relay = CameraLanRelay()
+        val sockets = CopyOnWriteArrayList<VideoWebSocket>()
+    }
+    private val lanLock = Any()
+    @Volatile private var lanLive: LanLive? = null
+    private var lanTimer: java.util.Timer? = null
+    private val lanCommands = java.util.concurrent.Executors.newSingleThreadExecutor { task ->
+        Thread(task, "camera-lan-commands").apply { isDaemon = true }
+    }
+
     // ── Lifecycle ────────────────────────────────────────────────────────────
 
     /** Snapshot in-process (mesmo JSON que o iPad recebe via LAN). */
@@ -82,6 +100,16 @@ class LocalApiServer(
             AppLogger.i(TAG, "✓ rodando em 0.0.0.0:$activePort (bind OK, daemon=false)")
             AppLogger.i(TAG, "  teste: curl http://<ip>:$activePort/")
             startHeartbeat()
+            lanTimer = java.util.Timer("camera-lan-expiry", true).apply {
+                scheduleAtFixedRate(object : java.util.TimerTask() {
+                    override fun run() {
+                        val live = lanLive ?: return
+                        val now = System.currentTimeMillis()
+                        if (now >= live.expires || !CameraLanAuth.cameraAvailable(appCtx) ||
+                            live.sockets.any { it.writeStarted > 0 && now - it.writeStarted > 3_000 }) endLanLive(live)
+                    }
+                }, 250L, 250L)
+            }
         } catch (e: Exception) {
             AppLogger.e(TAG, "✗ falha ao iniciar na porta $listeningPort: ${e.message}")
             activePort = -1
@@ -106,6 +134,10 @@ class LocalApiServer(
     }
 
     fun stopServer() {
+        lanTimer?.cancel(); lanTimer = null
+        lanLive?.let(::endLanLive)
+        lanAuth.clear()
+        lanCommands.shutdown()
         heartbeatTimer?.cancel(); heartbeatTimer = null
         clients.toList().forEach { try { it.close(WebSocketFrame.CloseCode.GoingAway, "shutdown", false) } catch (_: Exception) {} }
         clients.clear()
@@ -133,6 +165,9 @@ class LocalApiServer(
     // ── HTTP (NanoHTTPD) ─────────────────────────────────────────────────────
 
     override fun serveHttp(session: IHTTPSession): Response {
+        if (session.uri == "/api/capabilities" || session.uri.startsWith("/api/video/lan/")) {
+            return serveLanVideo(session)
+        }
         // Sanity: bloqueia IPs fora da LAN privada
         val remote = session.remoteIpAddress ?: ""
         if (!isPrivateIp(remote)) {
@@ -170,6 +205,173 @@ class LocalApiServer(
             AppLogger.e(TAG, "erro processando $method $uri: ${e.message}")
             newFixedLengthResponse(Response.Status.INTERNAL_ERROR, "text/plain", "500: ${e.message}")
         }
+    }
+
+    // Video routes have their own authority; legacy telemetry/control behavior is unchanged.
+    override fun serve(session: IHTTPSession): Response {
+        if (isWebsocketRequested(session) && session.uri.startsWith("/ws/video")) {
+            val role = when (session.uri) {
+                "/ws/video/lan/car" -> "producer"
+                "/ws/video/lan/viewer" -> "viewer"
+                else -> return lanJson(404)
+            }
+            val remote = session.remoteIpAddress.orEmpty()
+            if (!isPrivateIp(remote) && remote != "::1" && remote != "0:0:0:0:0:0:0:1") return lanJson(403)
+            if (role == "producer" && remote !in setOf("127.0.0.1", "::1", "0:0:0:0:0:0:0:1")) return lanJson(403)
+            val id = lanSessionQuery(session) ?: return lanJson(401)
+            val live = lanLive ?: return lanJson(401)
+            if (id != live.id || !CameraLanAuth.cameraAvailable(appCtx) ||
+                !lanAuth.consume(id, role, lanBearer(session))) return lanJson(401)
+        }
+        return super.serve(session)
+    }
+
+    private fun serveLanVideo(session: IHTTPSession): Response {
+        if (!isPrivateIp(session.remoteIpAddress.orEmpty())) return lanJson(403)
+        return try {
+            val uri = session.uri
+            val method = session.method
+            if (uri == "/api/capabilities" && method == Method.GET) {
+                return lanJson(200, CameraLanAuth.capabilityFields(CameraLanAuth.cameraAvailable(appCtx)))
+            }
+            if (uri.startsWith("/api/video/lan/session/") && method == Method.DELETE) {
+                val id = uri.removePrefix("/api/video/lan/session/")
+                if (!lanAuth.authorize(id, "control", lanBearer(session))) return lanJson(401)
+                lanLive?.takeIf { it.id == id }?.let(::endLanLive)
+                lanAuth.revoke(id)
+                return lanJson(200, mapOf("ok" to true))
+            }
+            if (!CameraLanAuth.cameraAvailable(appCtx)) return lanJson(503)
+            if (uri == "/api/video/lan/challenge" && method == Method.POST) {
+                readLanBody(session)
+                return lanAuth.challenge()?.let { lanJson(200, it) } ?: lanJson(401)
+            }
+            if (uri == "/api/video/lan/session" && method == Method.POST) {
+                val body = com.google.gson.JsonParser.parseString(readLanBody(session)).asJsonObject
+                val created = lanAuth.createSession(body.get("deviceId").asString, body.get("nonce").asString,
+                    body.get("expiresAt").asLong, body.get("hmac").asString, body.get("scope").asString)
+                    ?: return lanJson(401)
+                val id = created.getValue("sessionId") as String
+                if (created["scope"] == "live") {
+                    val live = LanLive(id, created.getValue("expiresAt") as Long)
+                    synchronized(lanLock) {
+                        if (lanLive != null) { lanAuth.revoke(id); return lanJson(409) }
+                        lanLive = live
+                    }
+                    val started = runCatching {
+                        TripVideoBridge.startLanSession(id, listeningPort, created.getValue("producerToken") as String, live.expires)
+                    }.getOrDefault(false)
+                    if (!started || lanLive !== live) {
+                        endLanLive(live)
+                        // A disconnect can precede START_LIVE's acknowledgement; stop after it too.
+                        lanCommands.execute { runCatching { TripVideoBridge.stopLanSession(id) } }
+                        return lanJson(503)
+                    }
+                    return lanJson(201, (created - "producerToken") +
+                        ("viewerPath" to "/ws/video/lan/viewer?session=$id"))
+                }
+                return lanJson(201, created)
+            }
+            if (method == Method.GET && (uri == "/api/video/lan/catalog" || uri.startsWith("/api/video/lan/trips/"))) {
+                val id = lanSessionQuery(session) ?: return lanJson(401)
+                if (!lanAuth.authorize(id, "download", lanBearer(session))) return lanJson(401)
+                val downloads = lanDownloads ?: return lanJson(503)
+                if (uri == "/api/video/lan/catalog") return lanJson(200, mapOf("trips" to downloads.catalog()))
+                val match = Regex("/api/video/lan/trips/([^/]+)/segments/([^/]+)").matchEntire(uri) ?: return lanJson(404)
+                val result = downloads.open(match.groupValues[1], match.groupValues[2], session.headers["range"])
+                val code = result.getValue("status") as Int
+                if (code == 404) return lanJson(404)
+                if (code == 416) return lanJson(416).also { it.addHeader("Content-Range", result.getValue("contentRange").toString()) }
+                val body = result.getValue("body") as java.io.InputStream
+                return object : Response(if (code == 206) Response.Status.PARTIAL_CONTENT else Response.Status.OK,
+                    "video/mp4", body, result.getValue("length") as Long) {
+                    override fun send(output: java.io.OutputStream) {
+                        try { super.send(output) } finally { runCatching { body.close() } }
+                    }
+                }.also {
+                    it.addHeader("Accept-Ranges", "bytes")
+                    it.addHeader("Cache-Control", "no-store")
+                    if (code == 206) it.addHeader("Content-Range", result.getValue("contentRange").toString())
+                }
+            }
+            lanJson(404)
+        } catch (_: IllegalArgumentException) { lanJson(400) }
+          catch (_: Exception) { lanJson(503) }
+    }
+
+    private fun readLanBody(session: IHTTPSession): String {
+        require(session.queryParameterString.isNullOrEmpty() && session.headers["transfer-encoding"] == null)
+        val size = session.headers["content-length"]?.toIntOrNull() ?: 0
+        require(size in 0..4096)
+        val bytes = ByteArray(size)
+        var offset = 0
+        while (offset < size) {
+            val n = session.inputStream.read(bytes, offset, size - offset)
+            require(n > 0); offset += n
+        }
+        return bytes.toString(Charsets.UTF_8).ifBlank { "{}" }
+    }
+    private fun lanSessionQuery(session: IHTTPSession): String? =
+        Regex("session=([a-f0-9]{32})").matchEntire(session.queryParameterString.orEmpty())?.groupValues?.get(1)
+    private fun lanBearer(session: IHTTPSession): String = session.headers["authorization"]
+        ?.takeIf { it.startsWith("Bearer ") }?.removePrefix("Bearer ").orEmpty()
+    private fun lanJson(code: Int, payload: Any = mapOf("ok" to false)): Response =
+        newFixedLengthResponse(Response.Status.lookup(code), "application/json", gson.toJson(payload)).also {
+            it.addHeader("Cache-Control", "no-store")
+        }
+
+    private fun endLanLive(live: LanLive) {
+        synchronized(lanLock) {
+            if (lanLive !== live) return
+            lanLive = null
+            lanAuth.revoke(live.id)
+            live.relay.disconnect()
+        }
+        live.sockets.toList().forEach { it.abort() }
+        if (!lanCommands.isShutdown) lanCommands.execute { runCatching { TripVideoBridge.stopLanSession(live.id) } }
+    }
+
+    private inner class VideoWebSocket(
+        handshake: IHTTPSession, private val live: LanLive, private val role: String,
+    ) : WebSocket(object : IHTTPSession by handshake {
+        private val bounded = CameraLanFrameInput(handshake.inputStream)
+        override fun getInputStream(): java.io.InputStream = bounded
+    }) {
+        private val rawInput = handshake.inputStream
+        @Volatile var writeStarted = 0L
+        @Volatile private var ended = false
+        override fun onOpen() {
+            if (lanLive !== live || !lanAuth.active(live.id) || !live.relay.join(role)) { abort(); return }
+            live.sockets.add(this)
+            Thread({
+                try {
+                    while (!ended && lanLive === live) {
+                        if (role == "viewer") {
+                            val bytes = live.relay.poll()
+                            if (bytes != null) {
+                                writeStarted = System.currentTimeMillis()
+                                try { send(bytes) } finally { writeStarted = 0 }
+                                live.relay.delivered()
+                            }
+                        } else if (live.relay.takeKeyframeRequest()) {
+                            writeStarted = System.currentTimeMillis()
+                            try { send("{\"type\":\"request_keyframe\"}") } finally { writeStarted = 0 }
+                        }
+                        Thread.sleep(10)
+                    }
+                } catch (_: Exception) { endLanLive(live) }
+            }, "camera-lan-$role").apply { isDaemon = true; start() }
+        }
+        fun abort() { ended = true; runCatching { rawInput.close() } }
+        override fun onMessage(message: WebSocketFrame) {
+            if (role != "producer" || !lanAuth.active(live.id) ||
+                !live.relay.offer(message.binaryPayload, message.opCode == WebSocketFrame.OpCode.Binary)) endLanLive(live)
+        }
+        override fun onClose(code: WebSocketFrame.CloseCode?, reason: String?, initiatedByRemote: Boolean) {
+            ended = true; live.sockets.remove(this); endLanLive(live)
+        }
+        override fun onException(exception: java.io.IOException) { endLanLive(live) }
+        override fun onPong(pong: WebSocketFrame) { }
     }
 
     private fun handleRoot(): Response {
@@ -257,6 +459,10 @@ class LocalApiServer(
     // ── WebSocket ────────────────────────────────────────────────────────────
 
     override fun openWebSocket(handshake: IHTTPSession): WebSocket {
+        if (handshake.uri.startsWith("/ws/video/lan/")) {
+            val live = lanLive ?: throw IllegalStateException("Session ended")
+            return VideoWebSocket(handshake, live, if (handshake.uri.endsWith("/car")) "producer" else "viewer")
+        }
         val remote = handshake.remoteIpAddress ?: ""
         if (!isPrivateIp(remote)) {
             AppLogger.w(TAG, "WS rejeitado de IP público: $remote — close 4003")

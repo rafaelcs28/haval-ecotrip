@@ -42,6 +42,9 @@ class LocalServiceAdvertiser(private val context: Context) {
             setAttribute("version", versionName)
             setAttribute("api", "v1")
             setAttribute("paths", "state,cmd,ws")
+            CameraLanAuth.capabilityFields(CameraLanAuth.cameraAvailable(context)).forEach { (key, value) ->
+                setAttribute(key, value.toString())
+            }
         }
 
         val listener = object : NsdManager.RegistrationListener {

@@ -58,3 +58,30 @@ Arquivos de estado, históricos, tokens, certificados e configurações reais do
 ## Manutenção
 
 Atualize este mapa quando módulos, contratos, dependências ou destinos de build mudarem. Registre apenas estrutura implementada.
+
+## Câmera LAN autenticada (Task 6)
+
+`LocalApiServer` mantém HTTP/WS de telemetria e comandos existentes e adiciona somente as rotas abaixo. `CameraLanAuth` decide desafios/credenciais, `CameraLanRelay` valida HVC1 e limita a fila, e `CameraLanDownloads` decide catálogo/Range. Nenhuma dependência, permissão, manifesto ou configuração de build muda.
+
+| Rota | Contrato |
+| --- | --- |
+| `GET /api/capabilities` | `cameraLiveLan`, `cameraDownloadLan`, `hvcVersion`, `hvtVersion`, todos inteiros. Versões = 1; ambas as capacidades de câmera = 0 se pacote, serviço/provider ou permissões de assinatura não estiverem disponíveis. |
+| `POST /api/video/lan/challenge` | Sem segredo no request. Retorna `deviceId`, `nonce` hexadecimal de 128 bits e `expiresAt` em ms, com validade de 30 s. |
+| `POST /api/video/lan/session` | JSON `deviceId`, `nonce`, `expiresAt`, `hmac` hexadecimal minúsculo e `scope` (`live` ou `download`). HMAC-SHA256 exato de `haval-camera-lan-v1|deviceId|nonce|expiresAt`, chave obtida do `MqttManager.bridgeToken` atual. Cada desafio é consumido na primeira tentativa. |
+| `DELETE /api/video/lan/session/:id` | `Authorization: Bearer <controlToken>` encerra somente essa sessão. |
+| `/ws/video/lan/car?session=ID` | Produtor exclusivo, origem loopback literal, bearer `producerToken` de uso único, enviado ao Camera somente por IPC assinado. |
+| `/ws/video/lan/viewer?session=ID` | Viewer exclusivo, bearer `viewerToken` de uso único. |
+| `GET /api/video/lan/catalog?session=ID` | Bearer `downloadToken`; somente viagens concluídas do provider. |
+| `GET /api/video/lan/trips/:tripId/segments/:segmentId?session=ID` | Mesmo bearer de download, IDs decimais positivos canônicos, ordinal presente em `1..segments` do provider. Range simples suporta fechado, aberto e sufixo, responde 206 ou 416 com Content-Range. |
+
+`deviceId` é o `Settings.Secure.ANDROID_ID` da instalação EcoTrip, estável para app/assinatura/usuário; não é o identificador de processo MQTT. O cliente deve vincular a identidade esperada antes de autenticar. O valor ausente ou token bridge vazio desabilita emissão de desafios. mDNS anuncia os mesmos quatro campos de capacidades no registro; o endpoint HTTP revalida pacote/permissões a cada consulta (autoridade para mudanças após registro).
+
+Sessões duram 5 minutos (inferior ao máximo IPC de 30 minutos). Há no máximo uma live e 16 sessões totais, 128 desafios pendentes. A resposta live contém `sessionId`, `expiresAt`, `scope`, `viewerToken`, `controlToken` e `viewerPath` relativo ao endpoint descoberto; nunca contém `producerToken` ou o segredo bridge. Download retorna `downloadToken` e `controlToken` distintos. Bearers aleatórios de 256 bits são distintos do HMAC, role/session scoped e guardados somente como SHA-256 em memória; mídia live consome cada bearer uma vez. Download/control podem ser reutilizados dentro da sessão/validade, para Range e encerramento. Nenhum segredo, prova ou byte de vídeo é persistido/logado pelo novo caminho. As respostas usam `Cache-Control: no-store`. Bodies de autenticação têm limite de 4096 bytes; query de mídia aceita somente `session=ID`, nunca credenciais.
+
+`TripVideoBridge` emite `START_LIVE` com `ws://127.0.0.1:PORT/ws/video/lan/car?session=ID`, ID extra, bearer curto e validade; `STOP_LIVE` preserva a identidade da viagem. Não recebe frames nem muda o contrato WSS remoto. O estado live local participa do guard de gravação/live; reconciliação e comandos remotos permanecem existentes.
+
+HVC1 mantém header de 24 bytes e payload exato de 1..4.194.304 bytes. Tipos, flags, PTS, comprimentos SPS/PPS e AVCC são validados sem decodificação. O input limitado valida o comprimento WS antes da alocação do NanoWSD, incluindo a soma de fragmentos. CONFIG antecede deltas; entrada do viewer e pressão solicitam keyframe. A fila conta mensagens em envio e nunca excede 1 MiB/30 mensagens; frames válidos maiores que a fila são descartados. Após descarte, deltas aguardam CONFIG/keyframe. Escritas usam threads próprias fora do lock do relay. Escrita bloqueada por mais de 3 s encerra a sessão/credenciais, fecha input/socket para destravar o escritor, e permite nova autenticação. Expiração é verificada a cada 250 ms. Nenhum comando STOP_TRIP é emitido por falha de LAN.
+
+Downloads não aceitam caminho de arquivo. A URI é construída apenas com IDs validados e autoridade fixa; o provider recusa ativo/parcial e mantém lease até o descritor fechar. A resposta possui `finally` para fechamento em sucesso/falha de envio; o stream limitado também fecha em erro de leitura e suporta fechamento idempotente. Range inválido libera o descritor imediatamente. Testes de domínio usam bytes sintéticos; comportamento Binder/assinatura, rede física e liberação do lease no processo Camera continuam exigindo validação em dispositivo autorizado.
+
+Verificação deste trabalho: executar `scripts/build-on-mac-mini.sh COMMIT` no repositório Git canônico para assembly e submeter o mesmo commit a `mac-mini-build submit-git /root/projects/haval-ecotrip-git android-test-debug COMMIT` para a suíte. A versão atual do script usa somente `android-debug`. Evidências ficam fora da árvore de fonte.
