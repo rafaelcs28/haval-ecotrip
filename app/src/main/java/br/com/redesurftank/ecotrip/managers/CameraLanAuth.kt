@@ -21,12 +21,23 @@ class CameraLanAuth(
 
     @Synchronized fun challenge(): Map<String, Any>? {
         prune()
-        if (deviceId.isBlank() || bridgeToken().isBlank()) return null
+        val secret = bridgeToken()
+        if (deviceId.isBlank() || secret.isBlank()) return null
         if (challenges.size >= 128) challenges.remove(challenges.keys.first())
         val nonce = randomHex(16)
         val expires = clock() + 30_000L
         challenges[nonce] = expires
-        return mapOf("deviceId" to deviceId, "nonce" to nonce, "expiresAt" to expires)
+        return linkedMapOf(
+            "deviceId" to deviceId,
+            "nonce" to nonce,
+            "expiresAt" to expires,
+            "serverProof" to hmacHex(SERVER_DOMAIN, deviceId, nonce, expires, secret),
+        )
+    }
+
+    fun serverProof(device: String, nonce: String, expires: Long): String? {
+        val secret = bridgeToken()
+        return if (secret.isBlank()) null else hmacHex(SERVER_DOMAIN, device, nonce, expires, secret)
     }
 
     @Synchronized fun createSession(device: String, nonce: String, expires: Long, proof: String, scope: String): Map<String, Any>? {
@@ -35,12 +46,7 @@ class CameraLanAuth(
         val secret = bridgeToken()
         if (secret.isBlank() || device != deviceId || expires != expectedExpiry || clock() >= expires ||
             scope !in setOf("live", "download")) return null
-        val mac = Mac.getInstance("HmacSHA256")
-        val key = secret.toByteArray(Charsets.UTF_8)
-        val expected = try {
-            mac.init(SecretKeySpec(key, "HmacSHA256"))
-            mac.doFinal("haval-camera-lan-v1|$deviceId|$nonce|$expires".toByteArray(Charsets.UTF_8))
-        } finally { key.fill(0) }
+        val expected = hmac(CLIENT_DOMAIN, deviceId, nonce, expires, secret)
         val supplied = if (proof.matches(Regex("[0-9a-f]{64}"))) {
             proof.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
         } else ByteArray(32)
@@ -85,8 +91,23 @@ class CameraLanAuth(
     }
     private fun randomHex(bytes: Int) = ByteArray(bytes).also(random::nextBytes).joinToString("") { "%02x".format(it) }
     private fun digest(value: String) = MessageDigest.getInstance("SHA-256").digest(value.toByteArray(Charsets.UTF_8))
+    private fun hmacHex(domain: String, device: String, nonce: String, expires: Long, secret: String): String {
+        val proof = hmac(domain, device, nonce, expires, secret)
+        return try { proof.joinToString("") { "%02x".format(it) } } finally { proof.fill(0) }
+    }
+    private fun hmac(domain: String, device: String, nonce: String, expires: Long, secret: String): ByteArray {
+        val mac = Mac.getInstance("HmacSHA256")
+        val key = secret.toByteArray(Charsets.UTF_8)
+        return try {
+            mac.init(SecretKeySpec(key, "HmacSHA256"))
+            mac.doFinal("$domain|$device|$nonce|$expires".toByteArray(Charsets.UTF_8))
+        } finally { key.fill(0) }
+    }
 
     companion object {
+        private const val CLIENT_DOMAIN = "haval-camera-lan-v1"
+        private const val SERVER_DOMAIN = "haval-camera-lan-server-v1"
+
         fun capabilityFields(available: Boolean): Map<String, Int> = mapOf(
             "cameraLiveLan" to if (available) 1 else 0,
             "cameraDownloadLan" to if (available) 1 else 0,
