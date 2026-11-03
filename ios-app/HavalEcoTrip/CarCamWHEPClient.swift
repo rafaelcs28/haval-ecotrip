@@ -155,7 +155,7 @@ final class CarCamPinnedSessionDelegate: NSObject, URLSessionDelegate, URLSessio
               let certificate = SecTrustGetCertificateAtIndex(trust, 0),
               let key = SecCertificateCopyKey(certificate),
               let attributes = SecKeyCopyAttributes(key) as? [CFString: Any],
-              attributes[kSecAttrKeyType] as? CFString == kSecAttrKeyTypeECSECPrimeRandom,
+              attributes[kSecAttrKeyType] as? String == kSecAttrKeyTypeECSECPrimeRandom as String,
               attributes[kSecAttrKeySizeInBits] as? Int == 256,
               let rawKey = SecKeyCopyExternalRepresentation(key, nil) as Data?,
               let pin = try? CarCamSPKI.p256Pin(rawPublicKey: rawKey),
