@@ -225,7 +225,9 @@ final class CameraVideoStoreTests: XCTestCase {
         .init(revision: 1, updatedAt: Date(), stale: false, route: route, trips: [trip()])
     }
     private static func hvtData(offset: UInt64 = 0, payload: Data, digest: Data? = nil) -> Data {
-        try! CameraTransferProtocol.data(ordinal: 1, offset: offset, payload: payload, digest: digest)
+        var frame = try! CameraTransferProtocol.data(ordinal: 1, offset: offset, payload: payload)
+        if let digest { frame.replaceSubrange(24..<56, with: digest) }
+        return frame
     }
     private static func hvtEOF(bytes: Data) -> Data {
         try! CameraTransferProtocol.eof(ordinal: 1, totalBytes: UInt64(bytes.count), digest: Data(SHA256.hash(data: bytes)))

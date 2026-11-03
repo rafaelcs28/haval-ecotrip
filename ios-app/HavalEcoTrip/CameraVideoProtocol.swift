@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 struct CameraVideoPacket: Equatable, Sendable {
@@ -90,6 +91,113 @@ enum CameraVideoProtocol {
 
     private static func readUInt64(_ data: Data, at offset: Int) -> UInt64 {
         (0..<8).reduce(0) { ($0 << 8) | UInt64(data[offset + $1]) }
+    }
+}
+
+struct CameraTransferMessage: Equatable, Sendable {
+    enum MessageType: UInt8, Equatable, Sendable { case data = 1, eof = 2, ack = 3, error = 4 }
+
+    let type: MessageType
+    let ordinal: UInt32
+    let offset: UInt64
+    let payload: Data
+    let sha256: Data
+
+    var errorText: String? { type == .error ? String(data: payload, encoding: .utf8) : nil }
+}
+
+enum CameraTransferProtocol {
+    static let headerSize = 56
+    static let maximumDataSize = 262_144
+    static let maximumErrorSize = 1_024
+
+    enum ParseError: Error, Equatable {
+        case invalidLength, invalidHeader, invalidType, invalidFlags, invalidFields, invalidDigest, invalidUTF8
+    }
+
+    static func parse(_ encoded: Data) throws -> CameraTransferMessage {
+        guard encoded.count >= headerSize else { throw ParseError.invalidLength }
+        guard Data(encoded[0..<4]) == Data("HVT1".utf8), encoded[4] == 1 else { throw ParseError.invalidHeader }
+        guard let type = CameraTransferMessage.MessageType(rawValue: encoded[5]) else { throw ParseError.invalidType }
+        guard readUInt16(encoded, at: 6) == 0 else { throw ParseError.invalidFlags }
+        let ordinal = readUInt32(encoded, at: 8)
+        let offset = readUInt64(encoded, at: 12)
+        let payloadLength = UInt64(readUInt32(encoded, at: 20))
+        guard payloadLength <= UInt64(Int.max), encoded.count == headerSize + Int(payloadLength) else {
+            throw ParseError.invalidLength
+        }
+        let digest = Data(encoded[24..<56])
+        let payload = Data(encoded[56..<encoded.count])
+
+        switch type {
+        case .data:
+            guard payloadLength >= 1, payloadLength <= UInt64(maximumDataSize),
+                  offset <= UInt64.max - payloadLength else { throw ParseError.invalidFields }
+            guard digest == Data(SHA256.hash(data: payload)) else { throw ParseError.invalidDigest }
+        case .eof:
+            guard payload.isEmpty else { throw ParseError.invalidFields }
+        case .ack:
+            guard payload.isEmpty, digest == Data(repeating: 0, count: 32) else { throw ParseError.invalidFields }
+        case .error:
+            guard offset == 0, payloadLength >= 1, payloadLength <= UInt64(maximumErrorSize) else {
+                throw ParseError.invalidFields
+            }
+            guard digest == Data(SHA256.hash(data: payload)) else { throw ParseError.invalidDigest }
+            guard String(data: payload, encoding: .utf8) != nil else { throw ParseError.invalidUTF8 }
+        }
+        return CameraTransferMessage(type: type, ordinal: ordinal, offset: offset, payload: payload, sha256: digest)
+    }
+
+    static func data(ordinal: UInt32, offset: UInt64, payload: Data) throws -> Data {
+        guard !payload.isEmpty, payload.count <= maximumDataSize,
+              offset <= UInt64.max - UInt64(payload.count) else { throw ParseError.invalidFields }
+        return encode(type: .data, ordinal: ordinal, offset: offset, payload: payload,
+                      digest: Data(SHA256.hash(data: payload)))
+    }
+
+    static func eof(ordinal: UInt32, totalBytes: UInt64, digest: Data) throws -> Data {
+        guard digest.count == 32 else { throw ParseError.invalidDigest }
+        return encode(type: .eof, ordinal: ordinal, offset: totalBytes, payload: Data(), digest: digest)
+    }
+
+    static func ack(ordinal: UInt32, nextOffset: UInt64) -> Data {
+        encode(type: .ack, ordinal: ordinal, offset: nextOffset, payload: Data(),
+               digest: Data(repeating: 0, count: 32))
+    }
+
+    static func error(ordinal: UInt32, message: String) throws -> Data {
+        guard let payload = message.data(using: .utf8), !payload.isEmpty, payload.count <= maximumErrorSize,
+              String(data: payload, encoding: .utf8) == message else { throw ParseError.invalidUTF8 }
+        return encode(type: .error, ordinal: ordinal, offset: 0, payload: payload,
+                      digest: Data(SHA256.hash(data: payload)))
+    }
+
+    private static func encode(type: CameraTransferMessage.MessageType, ordinal: UInt32, offset: UInt64,
+                               payload: Data, digest: Data) -> Data {
+        var result = Data("HVT1".utf8)
+        result.append(1); result.append(type.rawValue); result.appendBE(UInt16(0))
+        result.appendBE(ordinal); result.appendBE(offset); result.appendBE(UInt32(payload.count))
+        result.append(digest); result.append(payload)
+        return result
+    }
+
+    private static func readUInt16(_ data: Data, at offset: Int) -> UInt16 {
+        UInt16(data[offset]) << 8 | UInt16(data[offset + 1])
+    }
+
+    private static func readUInt32(_ data: Data, at offset: Int) -> UInt32 {
+        (0..<4).reduce(0) { ($0 << 8) | UInt32(data[offset + $1]) }
+    }
+
+    private static func readUInt64(_ data: Data, at offset: Int) -> UInt64 {
+        (0..<8).reduce(0) { ($0 << 8) | UInt64(data[offset + $1]) }
+    }
+}
+
+private extension Data {
+    mutating func appendBE<T: FixedWidthInteger>(_ value: T) {
+        var bigEndian = value.bigEndian
+        Swift.withUnsafeBytes(of: &bigEndian) { append(contentsOf: $0) }
     }
 }
 

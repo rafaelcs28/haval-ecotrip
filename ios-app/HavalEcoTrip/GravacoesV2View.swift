@@ -9,6 +9,7 @@ import SwiftUI
 
 struct GravacoesV2View: View {
     @StateObject private var store = RecordingsStore()
+    @State private var showVehicleCamera = false
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -34,6 +35,7 @@ struct GravacoesV2View: View {
         .onAppear { store.onAppear() }
         .onDisappear { store.onDisappear() }
         .sheet(item: $store.shareFile) { sf in ActivityView(items: [sf.url]) }
+        .sheet(isPresented: $showVehicleCamera) { CameraRecordingsView() }
     }
 
     // MARK: header — back ‹ Escuta + chip
@@ -65,6 +67,7 @@ struct GravacoesV2View: View {
     private var idleBody: some View {
         VStack(spacing: 14) {
             gravarTile
+            cameraTile
             sessoes
             gravacaoGroup
             Text(store.lanReady
@@ -74,6 +77,23 @@ struct GravacoesV2View: View {
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: .infinity)
         }
+    }
+
+    private var cameraTile: some View {
+        Button { showVehicleCamera = true } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "video.fill").foregroundStyle(DS.teal)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Câmeras do veículo").font(.system(size: 13.5, weight: .bold)).foregroundStyle(DS.text)
+                    Text("vídeos de viagem · LAN primeiro").font(.system(size: 9.5)).foregroundStyle(DS.text2)
+                }
+                Spacer()
+                Image(systemName: "chevron.right").foregroundStyle(DS.muted)
+            }
+            .padding(.horizontal, 14).frame(maxWidth: .infinity, minHeight: 58)
+            .background(DS.panel2, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+        }
+        .buttonStyle(.plain)
     }
 
     private var gravarTile: some View {

@@ -166,13 +166,14 @@ targets:
       - path: HavalEcoTrip/CameraLiveSession.swift
       - path: HavalEcoTrip/CameraRoutePolicy.swift
       - path: HavalEcoTrip/CameraLanClient.swift
+      - path: HavalEcoTrip/CameraVideoStore.swift
       - path: HavalEcoTrip/LANDiscovery.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: br.com.consorciolimpagyn.havalecotrip.CameraVideoTests
         GENERATE_INFOPLIST_FILE: YES
         CODE_SIGNING_ALLOWED: NO
-        SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) TASK7_IMPLEMENTED"
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) TASK7_IMPLEMENTED TASK8_IMPLEMENTED"
     scheme:
       gatherCoverageData: false
       testTargets:
