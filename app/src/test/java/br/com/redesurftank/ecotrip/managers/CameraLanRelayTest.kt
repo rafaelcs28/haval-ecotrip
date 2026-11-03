@@ -80,6 +80,41 @@ class CameraLanRelayTest {
             try { stream.readBytes(); fail("Unsafe WS frame accepted") } catch (_: java.io.IOException) { }
         }
     }
+    @Test fun emptyFragmentsCannotGrowNanoWsdFragmentListWithoutBound() {
+        val bytes = byteArrayOf(2, 0x80.toByte(), 0, 0, 0, 0) +
+            ByteArray(6 * 1100) { if (it % 6 == 1) 0x80.toByte() else 0 }
+        val source = ByteArrayInputStream(bytes)
+        val guard = LanTest.create("CameraLanFrameInput", source) as InputStream
+        try { guard.readBytes(); fail("Expected fragment rejection") } catch (_: java.io.IOException) { }
+        assertTrue("Reject before retaining over 1024 fragment headers", source.available() >= 6 * 75)
+    }
+
+    @Test fun boundedInputPreservesValidMaskedBinaryAndFragmentedMessages() {
+        val frames = listOf(
+            byteArrayOf(0x82.toByte(), 0x82.toByte(), 0, 0, 0, 0, 1, 2),
+            byteArrayOf(2, 0x81.toByte(), 0, 0, 0, 0, 1, 0x80.toByte(), 0x81.toByte(), 0, 0, 0, 0, 2))
+        for (bytes in frames) {
+            val guard = LanTest.create("CameraLanFrameInput", ByteArrayInputStream(bytes)) as InputStream
+            val received = ByteArray(bytes.size)
+            for (i in bytes.indices) received[i] = guard.read().toByte()
+            assertArrayEquals(bytes, received)
+        }
+    }
+
+    @Test fun changedConfigDuringInFlightWriteStillHonorsQueueByteCap() {
+        val r = relay(); ready(r); drain(r)
+        offer(r, frame(1_048_000))
+        assertNotNull(poll(r))
+        val payload = ByteBuffer.allocate(4 + 2 * 1000).putShort(1000).put(ByteArray(1000) { 0x67 })
+            .putShort(1000).put(ByteArray(1000) { 0x68 }).array()
+        val changed = ByteBuffer.allocate(24 + payload.size).putInt(0x48564331).put(1).put(1)
+            .putShort(0).putInt(4).putLong(0).putInt(payload.size).put(payload).array()
+        offer(r, changed)
+        assertTrue((LanTest.map(LanTest.call(r, "stats"))["bytes"] as Int) <= 1_048_576)
+        delivered(r); offer(r, key)
+        assertArrayEquals(changed, poll(r))
+    }
+
     private fun frame(payload: Int): ByteArray = ByteBuffer.allocate(24 + payload)
         .putInt(0x48564331).put(1).put(2).putShort(1).putInt(3).putLong(0).putInt(payload)
         .putInt(payload - 4).put(ByteArray(payload - 4) { 0x65 }).array()

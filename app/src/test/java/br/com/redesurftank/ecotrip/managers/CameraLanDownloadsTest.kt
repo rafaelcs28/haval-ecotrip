@@ -71,6 +71,17 @@ class CameraLanDownloadsTest {
         }
         assertEquals(opened, closed)
     }
+    @Test fun httpResponseReleasesLeaseWhenClientWriteFails() {
+        val result = open(downloads())
+        val response = LanTest.create("CameraLanDownloadResponse", result)
+        val send = response.javaClass.getDeclaredMethod("send", java.io.OutputStream::class.java).apply { isAccessible = true }
+        val output = object : java.io.OutputStream() {
+            override fun write(value: Int) { throw java.io.IOException("synthetic disconnect") }
+        }
+        send.invoke(response, output)
+        assertEquals(1, closed)
+    }
+
     @Test fun disconnectAndReadFailureReleaseExactlyOnce() {
         val result = open(downloads(), range = "bytes=1-8")
         val body = result["body"] as InputStream
