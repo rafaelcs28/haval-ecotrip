@@ -87,7 +87,7 @@ final class CameraVideoProtocolTests: XCTestCase {
         overflow.replaceSubrange(12..<20, with: Data(repeating: 0xff, count: 8))
         XCTAssertThrowsError(try CameraTransferProtocol.parse(overflow))
 
-        let maximum = try CameraTransferProtocol.data(ordinal: .max, offset: UInt64.max - 262_143,
+        let maximum = try CameraTransferProtocol.data(ordinal: .max, offset: UInt64.max - 262_144,
                                                       payload: Data(repeating: 0x5a, count: 262_144))
         XCTAssertEqual(try CameraTransferProtocol.parse(maximum).payload.count, 262_144)
         XCTAssertThrowsError(try CameraTransferProtocol.data(ordinal: 1, offset: 0,

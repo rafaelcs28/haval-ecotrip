@@ -442,8 +442,8 @@ final class CameraVideoStore: ObservableObject {
 
     private func fileSize(_ url: URL) throws -> UInt64 {
         guard FileManager.default.fileExists(atPath: url.path) else { return 0 }
-        let value = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
-        return UInt64(value)
+        let value = try FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber
+        return value?.uint64Value ?? 0
     }
 
     private static func applicationSupportRoot() -> URL {
