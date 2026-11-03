@@ -41,6 +41,17 @@ final class CameraLanClientTests: XCTestCase {
         XCTAssertEqual(capture.requests.map(\.url?.path), ["/api/capabilities", "/api/video/lan/challenge"])
     }
 
+    func testEmptyBridgeTokenFailsBeforeAnyLANRequest() async {
+        let capture = RequestCapture()
+        let client = makeClient(capture: capture)
+
+        await XCTAssertThrowsErrorAsync {
+            _ = try await client.createLiveSession(endpoint: endpoint, bridgeToken: "")
+        }
+
+        XCTAssertTrue(capture.requests.isEmpty)
+    }
+
     func testMissingMalformedAndExpiredServerProofSendNoSessionRequest() async {
         let invalidChallenges: [Data] = [
             Data("{\"deviceId\":\"car-1\",\"nonce\":\"\(nonce)\",\"expiresAt\":31000}".utf8),
