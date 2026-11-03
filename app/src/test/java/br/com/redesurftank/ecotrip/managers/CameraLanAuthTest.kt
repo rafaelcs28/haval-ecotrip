@@ -29,6 +29,12 @@ internal object LanTest {
         return mac.doFinal("haval-camera-lan-v1|$device|$nonce|$expires".toByteArray())
             .joinToString("") { "%02x".format(it) }
     }
+    fun serverProof(device: String, nonce: String, expires: Long, key: String = "synthetic-paired-secret"): String {
+        val mac = Mac.getInstance("HmacSHA256")
+        mac.init(SecretKeySpec(key.toByteArray(), "HmacSHA256"))
+        return mac.doFinal("haval-camera-lan-server-v1|$device|$nonce|$expires".toByteArray())
+            .joinToString("") { "%02x".format(it) }
+    }
 }
 
 class CameraLanAuthTest {
@@ -56,6 +62,61 @@ class CameraLanAuthTest {
         val a = auth(); val c = challenge(a)
         assertNotNull(session(a, c))
         assertNull(session(a, c))
+    }
+    @Test fun exactServerProofVectorUsesSeparateDomain() {
+        val nonce = "000102030405060708090a0b0c0d0e0f"
+        val expected = "74827a55d7d59155958cbf202ea29b7a9ea99213953e6831f1ee9a8ff46dd8de"
+        assertEquals(expected, LanTest.serverProof("car-1", nonce, 31_000))
+        assertEquals(expected, LanTest.call(auth(), "serverProof", "car-1", nonce, 31_000L))
+        assertNotEquals(LanTest.proof("car-1", nonce, 31_000), expected)
+    }
+    @Test fun serverProofBindsDeviceNonceExpiryAndCurrentToken() {
+        val a = auth()
+        val nonce = "000102030405060708090a0b0c0d0e0f"
+        val baseline = LanTest.call(a, "serverProof", "car-1", nonce, 31_000L)
+        assertNotEquals(baseline, LanTest.call(a, "serverProof", "car-2", nonce, 31_000L))
+        assertNotEquals(baseline, LanTest.call(a, "serverProof", "car-1", "100102030405060708090a0b0c0d0e0f", 31_000L))
+        assertNotEquals(baseline, LanTest.call(a, "serverProof", "car-1", nonce, 31_001L))
+        token = "rotated-synthetic-secret"
+        assertNotEquals(baseline, LanTest.call(a, "serverProof", "car-1", nonce, 31_000L))
+    }
+    @Test fun challengeEmitsExactServerProofJsonWithoutSecret() {
+        val a = auth()
+        val c = challenge(a)
+        assertEquals(linkedSetOf("deviceId", "nonce", "expiresAt", "serverProof"), c.keys)
+        val nonce = c.getValue("nonce") as String
+        val expires = c.getValue("expiresAt") as Long
+        val proof = c.getValue("serverProof") as String
+        assertTrue(proof.matches(Regex("[0-9a-f]{64}")))
+        assertEquals(LanTest.serverProof("car-1", nonce, expires), proof)
+        assertEquals(
+            "{\"deviceId\":\"car-1\",\"nonce\":\"$nonce\",\"expiresAt\":$expires,\"serverProof\":\"$proof\"}",
+            com.google.gson.Gson().toJson(c),
+        )
+        assertFalse(c.toString().contains(token))
+        assertFalse(a.toString().contains(token))
+    }
+    @Test fun challengeUsesFreshSafelyPublishedTokenAfterRotation() {
+        val current = java.util.concurrent.atomic.AtomicReference("synthetic-paired-secret")
+        val a = LanTest.create("CameraLanAuth", "car-1", { current.get() }, { now })
+        val before = challenge(a)
+        val rotated = "rotated-synthetic-secret"
+        kotlin.concurrent.thread { current.set(rotated) }.join(5_000)
+        val after = challenge(a)
+        assertEquals(
+            LanTest.serverProof("car-1", before["nonce"] as String, before["expiresAt"] as Long),
+            before["serverProof"],
+        )
+        assertEquals(
+            LanTest.serverProof("car-1", after["nonce"] as String, after["expiresAt"] as Long, rotated),
+            after["serverProof"],
+        )
+        assertNotEquals(before["serverProof"], after["serverProof"])
+        assertFalse(after.toString().contains(rotated))
+    }
+    @Test fun absentTokenStillRefusesChallenge() {
+        token = ""
+        assertNull(LanTest.call(auth(), "challenge"))
     }
     @Test fun badProofWrongDeviceAndChangedExpiryConsumeChallenge() {
         for (bad in listOf("proof", "device", "expiry")) {
