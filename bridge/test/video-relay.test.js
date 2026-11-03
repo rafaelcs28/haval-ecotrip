@@ -718,7 +718,11 @@ test('catalog rejects invalid paths, sizes, digests, duplicate ordinals and unkn
     value => { value.trips[0].byteSize = -1; },
     value => { value.trips[0].segments[0].byteSize = Number.MAX_SAFE_INTEGER + 1; },
     value => { value.trips[0].segments[0].sha256 = 'invalid'; },
-    value => { value.trips[0].segments.push(value.trips[0].segments[0]); },
+    value => {
+      value.trips[0].segments.push(value.trips[0].segments[0]);
+      value.trips[0].segmentCount = 2;
+      value.trips[0].byteSize = 6;
+    },
     value => { value.trips[0].segments[0].body = 'captured-video'; },
     value => { value.payload = 'captured-video'; },
   ];
