@@ -369,3 +369,87 @@ EcoTrip files:
 - Physical Camera/bridge behavior remains unverified for Binder pressure at the 4,096 boundary, real Wi-Fi interruption during Range download, server expiry during pending DELETE retry, WebSocket close latency, filesystem durability through power loss, low-storage races, and settings conflicts against real Camera timing.
 - The simulator proves the explicit cancellation ownership contract and the production adapter uses a real `URLSessionDownloadTask`, but real-device network-stack cancellation latency still requires hardware observation.
 - Existing unrelated Android deprecation/Gradle warnings and the known intermittent simulator exit in the pre-existing live-session tests remain. The unchanged final-head rerun passed 85/85.
+
+## Fix round 3 — bounded cancellation join and temp completion race
+
+### Observations
+
+- `cancelDownload` and `closeDownloadAction` called `Task.cancel()` and then awaited `task.result` without a deadline. The cancellation handlers correctly invoked the HTTP handle or WebSocket close, but an adapter that ignored both signals could suspend the main-actor UI entry point forever.
+- The active-download dictionary was already removed only by the worker's terminal continuation. That ownership is the correct duplicate barrier and must remain present if a cancelled worker has not actually terminated.
+- `URLSessionCameraHTTPDownload` moved the callback temp file to its owned path before calling a `Void` terminal `finish`. If cancellation won between move and finish, the success was discarded but no caller knew to delete the moved file.
+
+### Assumptions
+
+- A 250 ms continuous-clock join window is short enough for responsive UI and long enough for normal cancellation teardown; test observation allows 400 ms for simulator scheduling while requiring the operation to return before the defiant fake is released.
+- A task that ignores cancellation and explicit socket close remains unsafe to replace. Keeping its key active indefinitely is preferable to mixing a new same-segment transfer with the zombie worker.
+- The moved URL belongs to the HTTP completion until success is atomically accepted. Once accepted, ownership transfers to `TemporaryFileLANStream`, whose existing cancellation/deinit path removes its private temp file.
+
+### Decisions
+
+- Both UI cancellation entry points synchronously cancel all selected tasks, publish `.cancelled`, and poll owned keys for at most 250 ms. They return at the bound without deleting dictionary entries. The original worker continuation remains the only path that clears ownership, so duplicate starts remain rejected until real termination.
+- The explicit `URLSessionDownloadTask` and WebSocket cancellation handlers remain unchanged and are invoked immediately by `Task.cancel()`. The new defiant socket fake ignores both cooperative cancellation and `close`, proving bounded return is independent of adapter cooperation.
+- HTTP terminal `finish` now atomically returns whether its result won. A moved success that loses to cancellation is deleted immediately; an accepted success remains until the stream owner takes and cleans it.
+- `URLSessionCameraHTTPDownload` and `TemporaryFileLANStream` are module-internal, not public, so focused tests can exercise the real production ownership boundary without adding a test-only production method.
+
+### Evidence
+
+No Android, Gradle, Kotlin, Camera, Node, or local Xcode job ran. The unchanged Camera head remained `425b31e5ded9d6394126ecd6db97b7997305e4b1`. Exact queue commands were:
+
+```text
+env -u LC_ALL LC_COLLATE=C /usr/local/bin/mac-mini-build submit-git /root/projects/haval-ecotrip-git xcode-native-test <COMMIT> ios-app/HavalEcoTrip.xcodeproj CameraVideoTests
+env -u LC_ALL LC_COLLATE=C /usr/local/bin/mac-mini-build submit-git /root/projects/haval-ecotrip-git xcode-native-simulator <COMMIT> ios-app/HavalEcoTrip.xcodeproj HavalEcoTrip
+/usr/local/bin/mac-mini-build status <JOB>
+/usr/local/bin/mac-mini-build fetch <JOB> <NEW_DESTINATION>
+(cd <DESTINATION> && sha256sum -c SHA256SUMS)
+```
+
+Artifacts are outside the worktree under `/root/projects/haval-ecotrip-task8-artifacts/fix-round-3/`; every fetched manifest passed.
+
+#### Immutable tests-only RED
+
+- Commit `fe54be39e9c193a7c1ad4fcdfcfeac746a2a7603` changed only `CameraVideoStoreTests.swift`.
+- Job `haval-ecotrip-git-fe54be39e9c193a7-20261103T045730Z-29071`, archive `30b8e5298f6f605d7fb364d87b7a5ff927633c247ad0be029f06f9be20f0ef0d`, failed as expected before test execution because the real HTTP handle/stream ownership boundary was private and had no atomic `acceptOwnedDownload` operation.
+- Fetched manifest `5487daf4d0aafad4d39a1bd850c702a3f5265cc246288378453fa08680ec1416`; log `efb6c3b250e76a5e74a90f1ac09f345177c1fed72e94c870cd53c11cfcd27dc4`.
+- The same RED tests define a socket whose receive continuation ignores cooperative task cancellation and whose `close` only records invocation. Before release, they require bounded cancel/close-action return, prompt close observation, retained active ownership, and duplicate rejection; explicit release then requires worker completion and ownership removal.
+
+#### Implementation feedback
+
+- Commit `07365c3fc7ed6fe57f6c3b4dc313f6003de8776d` added only the production fix in `CameraVideoStore.swift`.
+- Job `haval-ecotrip-git-07365c3fc7ed6fe5-20261103T045823Z-12000`, archive `b1f64ae002a4962cf4ecfba9b1eecb5b09c2c008d55d5a27ec7aa612b030257e`, reached the new production APIs but failed test compilation on an `await` inside an XCTest autoclosure. This was test syntax, not a product failure.
+- Fetched manifest `4f4bf496915f060efc7e50f3b759bda40fb84a2094b615e682a069e3fe2d3d80`; log `0bec9a5eebc30d4f6fed594a2c12f470aa4e7d9f908564e57fe2c996fa505ad5`.
+- Commit `902f3121bd9984543c1c3be66971f0fe2d04dde7` moved the async reads outside XCTest autoclosures without changing expectations or production behavior.
+
+#### GREEN and full build
+
+- Focused job `haval-ecotrip-git-902f3121bd998454-20261103T045903Z-23605`, archive `d9a86942d62133cb5111074d0b9c2f8f1e617fc5e5b88b5b3ca29a45dabf3793`: 88/88 tests passed, including 31/31 `CameraVideoStoreTests`, rc 0.
+- Focused artifacts: `CameraVideoTests.xcresult.zip` `8c3f9352a60f177bf74281ef90d415d02628c3313f3677777fc227008930ddf0`; `build.log` `62ee1cdef211cfdc990eb93399475339151db6c2323f2b7677abacc2b19872a0`; manifest `baec469968274f1576edb0c081d14c43b1e0d9f65bdb895ca8226dffd709e6e7`.
+- Full unsigned simulator job `haval-ecotrip-git-902f3121bd998454-20261103T045937Z-27409`, archive `5162296b6dc5ea391c232188c86efd86a2c797d05847db1f696d0f0d5bf78c74`: `HavalEcoTrip` passed with `CODE_SIGNING_ALLOWED=NO`, rc 0.
+- Full-build artifacts: `HavalEcoTrip-iphonesimulator-Debug.zip` `d41284130d09d6c940fc71537cee6dadb0b8ca4529557874c289829c869b20a1`; `build.log` `f85c0b285f14da8707aa1c00d71acc8ef34f44a2ac60461abf39b461d98a7a14`; manifest `81dfff270dd816d3216ebff84ced813fdb5141608b9b6a299c878a7fa4a8afcc`.
+
+#### Commits and files
+
+```text
+fe54be3 test(camera): cover bounded cancellation and temp races
+07365c3 fix(camera): bound cancellation joins and temp cleanup
+902f312 test(camera): await temp stream outside assertions
+```
+
+Changed before this report-only commit:
+
+- `ios-app/HavalEcoTrip/CameraVideoStore.swift`
+- `ios-app/CameraVideoTests/CameraVideoStoreTests.swift`
+
+This append changes only `.superpowers/sdd/2026-11-02-camera-lan-routing/task-8-report.md`.
+
+### Security and lifecycle proof
+
+- Cancellation still calls the existing underlying URLSession task cancel or WebSocket close immediately. The 250 ms bound applies only to UI joining; it does not revoke ownership or permit a replacement transfer.
+- Defiant-adapter tests prove ownership and duplicate rejection persist after both cancellation entry points return, then clear only after the fake explicitly releases its receive continuation and the original worker terminates.
+- Deterministic handle tests model the exact post-move race: cancellation is committed before success acceptance and the owned file is absent afterward. The accepted-success case keeps bytes present, transfers them into the real file-backed LAN stream, reads them, and verifies stream cleanup restores the temp-file set.
+- No route, consent, credential, Range, digest, settings, bridge, Camera, Android, dependency, or controller-ledger behavior changed.
+
+### Residual hardware risks and limits
+
+- A malicious or broken adapter can remain a tracked zombie indefinitely; this intentionally blocks duplicate same-segment work and requires process/action recovery rather than risking mixed writes.
+- The simulator validates the 250 ms ownership behavior and deterministic filesystem race. Real-device scheduler latency, URLSession callback timing, temporary-volume removal failure, and socket-close latency remain hardware observations.
+- No archive, TestFlight, deploy, release, install, hardware, car access, or signing occurred.
