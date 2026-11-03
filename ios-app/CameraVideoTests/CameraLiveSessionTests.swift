@@ -155,16 +155,23 @@ final class CameraLiveSessionTests: XCTestCase {
         let delays = CameraLiveDelays(reconnect: { _ in }, stale: CameraLiveDelays.live.stale, renewal: CameraLiveDelays.live.renewal)
         let session = CameraLiveSession(transport: transport, renderer: renderer, bridgeURL: { "https://bridge.example" }, bridgeToken: { "owner" }, delays: delays)
         await startInternet(session)
+        await firstSocket.waitForReceiveCalls(1)
+        XCTAssertEqual(firstSocket.receiveCallCount, 1)
         firstSocket.yield(CameraVideoProtocolTests.config())
+        await firstSocket.waitForReceiveCalls(2)
+        XCTAssertEqual(firstSocket.receiveCallCount, 2)
         firstSocket.yield(CameraVideoProtocolTests.access())
         await renderer.waitForDisplayedFrames(1)
         XCTAssertEqual(session.state, .live)
 
         renderer.failAsynchronously()
         await fulfillment(of: [reconnected], timeout: 1)
+        await secondSocket.waitForReceiveCalls(1)
+        XCTAssertEqual(secondSocket.receiveCallCount, 1)
 
         secondSocket.yield(CameraVideoProtocolTests.access(sequence: 3, keyframe: false))
-        await Task.yield()
+        await secondSocket.waitForReceiveCalls(2)
+        XCTAssertEqual(secondSocket.receiveCallCount, 2)
         XCTAssertNotEqual(session.state, .live)
         secondSocket.yield(CameraVideoProtocolTests.access(sequence: 4, keyframe: true))
         await renderer.waitForDisplayedFrames(2)
@@ -655,6 +662,7 @@ private final class AsyncGate {
 private final class FakeCameraLiveSocket: CameraLiveSocket {
     private(set) var cancelled = false
     private(set) var maximumConcurrentReceives = 0
+    var receiveCallCount: Int { receiveCalls }
     private var activeReceives = 0
     private var receiveCalls = 0
     private var queued: [Result<Data, Error>] = []
