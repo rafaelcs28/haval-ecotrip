@@ -35,15 +35,24 @@ final class CarCamViewerSession: ObservableObject {
         self.stopRemote = stopRemote
     }
 
-    static func live(token: String) throws -> CarCamViewerSession {
-        let storedToken = try CarCamCredentialStore.synchronize(currentToken: token)
-        let configuration = try CarCamBridgeConfiguration.fixed(token: storedToken)
-        let transport = CarCamWHEPClient(configuration: configuration)
-        return CarCamViewerSession(
-            makePeer: { try CarCamPeerConnection.make() },
-            createRemote: { try await transport.createSession(offerSDP: $0) },
-            stopRemote: { try await transport.stopSession(at: $0) }
-        )
+    static func live(token: String) -> CarCamViewerSession {
+        do {
+            let storedToken = try CarCamCredentialStore.synchronize(currentToken: token)
+            let configuration = try CarCamBridgeConfiguration.fixed(token: storedToken)
+            let transport = CarCamWHEPClient(configuration: configuration)
+            return CarCamViewerSession(
+                makePeer: { try CarCamPeerConnection.make() },
+                createRemote: { try await transport.createSession(offerSDP: $0) },
+                stopRemote: { try await transport.stopSession(at: $0) }
+            )
+        } catch {
+            let failure = (error as? CarCamViewerError) ?? .credentialUnavailable
+            return CarCamViewerSession(
+                makePeer: { throw failure },
+                createRemote: { _ in throw failure },
+                stopRemote: { _ in }
+            )
+        }
     }
 
     func start() async {

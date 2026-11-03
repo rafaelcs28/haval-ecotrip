@@ -89,6 +89,7 @@ final class CarCamPeerConnection: NSObject, CarCamPeerConnectioning {
             receiver.track?.isEnabled = true
             if videoTrack == nil { videoTrack = receiver.track as? RTCVideoTrack }
         }
+        guard videoTrack != nil else { throw CarCamViewerError.mediaRequired }
     }
 
     func close() {

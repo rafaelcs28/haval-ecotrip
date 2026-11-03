@@ -19,10 +19,10 @@ Android, Gradle, Kotlin e Xcode executam exclusivamente no Mac Mini. O fluxo And
 
 - Bridge: 66 testes Node para contratos de catálogo, autenticação, relay, settings e transferência.
 - EcoTrip Android: 70 testes unitários; a fila `android-test-debug` executa a suíte e monta Debug no mesmo commit imutável.
-- iOS: 92 testes em `CameraVideoTests`; a fila também monta o scheme completo `HavalEcoTrip` para simulador com `CODE_SIGNING_ALLOWED=NO` no mesmo commit.
+- iOS: 105 testes em `CameraVideoTests`; a fila também monta o scheme completo `HavalEcoTrip` para simulador com `CODE_SIGNING_ALLOWED=NO` no mesmo commit.
 - Haval Camera: suíte JVM e `android-camera-verify` executam testes, Debug/nativo, release autorizado de verificação, lint vital, assinatura/alinhamento e integridade de ZIP. Isso verifica o pacote, não a câmera física.
 
-Permanecem gates exclusivamente físicos: captura/mux OEM no Android 9 do veículo, Binder/provider entre APKs instalados e assinados, descoberta e perda de Wi-Fi reais, retomada Range, reprodução H.264 e UI no iPhone, 4G, armazenamento após perda de energia, consumo de recursos e temperatura. Nenhum build de simulador, APK montado ou teste sintético deve ser descrito como aprovação desses gates.
+Permanecem gates exclusivamente físicos: captura/mux OEM no Android 9 do veículo, Binder/provider entre APKs instalados e assinados, descoberta e perda de Wi-Fi reais, retomada Range, reprodução H.264/WebRTC e UI no iPhone, SDP real, sincronismo A/V, Stop remoto, perdas de Wi-Fi/Tailscale, 4G, armazenamento após perda de energia, consumo de recursos e temperatura. Nenhum build de simulador, APK montado ou teste sintético deve ser descrito como aprovação desses gates.
 
 Um bug deve ter reprodução e, quando viável, teste de regressão que falhe antes da correção. Não use produção como ambiente de teste.
 

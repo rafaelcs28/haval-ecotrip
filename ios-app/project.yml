@@ -178,6 +178,7 @@ targets:
       - path: HavalEcoTrip/CarCamWHEPClient.swift
       - path: HavalEcoTrip/CarCamPeerConnection.swift
       - path: HavalEcoTrip/CarCamViewerSession.swift
+      - path: HavalEcoTrip/CameraSourceSelection.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: br.com.consorciolimpagyn.havalecotrip.CameraVideoTests

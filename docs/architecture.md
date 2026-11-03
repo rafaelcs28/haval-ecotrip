@@ -30,6 +30,7 @@ docs/        instalação, operação, arquitetura, qualidade e evidências
 5. O iPad/OBD pode receber dados do bridge ou BLE/ELM327 e enviar telemetria por MQTT/HTTP; a descoberta LAN reduz latência e possui fallback remoto.
 6. `TripVideoBridge` reconcilia a viagem automática com o APK Haval Camera pelo provider local. O Camera valida o pacote EcoTrip e o SHA-256 de seu certificado no UID Binder antes de encaminhar o comando ao serviço interno protegido por assinatura. Cada comando persistente só altera o estado confirmado do EcoTrip depois de um acknowledgement correlacionado por request/revision; a espera limitada ocorre no executor de câmera, nunca na main looper. O mesmo ID/start original permite reabrir no Camera uma viagem concluída que o EcoTrip retomou dentro da janela. O EcoTrip apenas encaminha catálogo com revisão persistida atomicamente, configurações confirmadas e telemetria CAN limitada; falhas da câmera não interrompem viagem nem telemetria do veículo.
 7. Para galeria iOS, `CameraVideoStore` mantém parciais separados por rota, verifica SHA-256 antes de promoção atômica e reinicia em offset zero quando encontra um parcial completo corrompido. `CameraVideoNetwork` reutiliza uma sessão LAN curta, conserva a identidade de limpeza até resposta terminal e aceita o `200` legado durante compatibilidade, além do contrato final `204/404`.
+8. Para Dashcam ao vivo no iOS, `CarCamViewerSession` cria um peer WebRTC somente receptor e negocia WHEP com o Galaxy pelo endereço Tailscale fixo. `CarCamWHEPClient` recusa redirects, valida MIME/Location, fixa o SPKI P-256 e apaga a sessão remotamente no Stop. `CameraVideoView` mantém Haval e Dashcam mutuamente exclusivos.
 
 ## Dados e runtime
 
@@ -55,7 +56,7 @@ Arquivos de estado, históricos, tokens, certificados e configurações reais do
 
 - Bridge: 66 testes Node cobrem contratos de vídeo, autenticação, catálogo, relay e limites de transferência.
 - EcoTrip Android: 70 testes unitários cobrem os componentes de câmera LAN/IPC e contratos relacionados; Android Debug e testes executam apenas na fila autorizada.
-- iOS: 92 testes no target `CameraVideoTests` cobrem protocolo HVC1/HVT1, sessão, roteamento, catálogo, downloads verificados, limpeza e configurações; o app completo compila como simulador sem assinatura.
+- iOS: 105 testes no target `CameraVideoTests` cobrem protocolo HVC1/HVT1, sessão, roteamento, WHEP/WebRTC, catálogo, downloads verificados, limpeza e configurações; o app completo compila como simulador sem assinatura.
 - Haval Camera: suíte JVM e gates de pacote cobrem reducer, catálogo, retenção, framing, relay, provider e lifecycle em dados sintéticos.
 - Nenhuma dessas suítes comprova captura OEM, IPC entre APKs reais, rede física, reprodução em dispositivo, 4G, durabilidade/armazenamento sob perda de energia ou limites térmicos; esses gates permanecem de hardware.
 - Há arquivos Kotlin e Swift grandes, aumentando o custo de revisão. Contratos distribuídos entre APK, bridge, PWA e apps Apple exigem revisão de consumidores antes de mudar nomes ou semântica.
