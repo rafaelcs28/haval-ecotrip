@@ -15,16 +15,18 @@ final class CameraVideoDecoder: CameraVideoRendering {
     let displayLayer = AVSampleBufferDisplayLayer()
     private var stream = CameraVideoStreamState()
     private var formatDescription: CMVideoFormatDescription?
-    private var failureHandler: (() -> Void)?
+    private let failureHandler = FailureHandlerStore()
     private var statusObservation: NSKeyValueObservation?
     private var failureReported = false
 
     init() {
         displayLayer.videoGravity = .resizeAspect
         displayLayer.backgroundColor = CGColor(gray: 0, alpha: 1)
+        let failureHandler = failureHandler
         statusObservation = displayLayer.observe(\.status, options: [.new]) { [weak self] layer, _ in
             guard layer.status == .failed else { return }
-            Task { @MainActor [weak self] in self?.handleDisplayFailure() }
+            let handler = failureHandler.snapshot()
+            Task { @MainActor [weak self] in self?.reportDisplayFailure(to: handler) }
         }
     }
 
@@ -53,14 +55,19 @@ final class CameraVideoDecoder: CameraVideoRendering {
     }
 
     func setFailureHandler(_ handler: @escaping () -> Void) {
-        failureHandler = handler
+        failureHandler.replace(with: handler)
     }
 
-    func handleDisplayFailure() {
+    var handleDisplayFailure: () -> Void {
+        let handler = failureHandler.snapshot()
+        return { [weak self] in self?.reportDisplayFailure(to: handler) }
+    }
+
+    private func reportDisplayFailure(to handler: (() -> Void)?) {
         guard !failureReported else { return }
         failureReported = true
         clear()
-        failureHandler?()
+        handler?()
     }
 
     static func makeFormatDescription(sps: Data, pps: Data) throws -> CMVideoFormatDescription {
@@ -135,5 +142,22 @@ final class CameraVideoDecoder: CameraVideoRendering {
             attachmentMode: kCMAttachmentMode_ShouldPropagate
         )
         return sample
+    }
+}
+
+private final class FailureHandlerStore: @unchecked Sendable {
+    private let lock = NSLock()
+    private var handler: (() -> Void)?
+
+    func replace(with handler: @escaping () -> Void) {
+        lock.lock()
+        self.handler = handler
+        lock.unlock()
+    }
+
+    func snapshot() -> (() -> Void)? {
+        lock.lock()
+        defer { lock.unlock() }
+        return handler
     }
 }
