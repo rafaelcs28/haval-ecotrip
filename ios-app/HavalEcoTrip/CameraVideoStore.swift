@@ -350,6 +350,8 @@ final class CameraVideoStore: ObservableObject {
     private var catalogContext: (CameraLanEndpoint?, URL, String)?
     private var activeDownloads: [String: Task<URL, Error>] = [:]
     private var settingsGeneration: UInt64 = 0
+    /// UI cancellation waits briefly for normal teardown, then returns while ownership remains tracked.
+    private static let cancellationJoinBound: Duration = .milliseconds(250)
 
     init(rootURL: URL? = nil, transport: CameraVideoTransport? = nil,
          availableCapacity: @escaping (URL) -> Int64? = CameraVideoStore.systemCapacity,
@@ -426,9 +428,10 @@ final class CameraVideoStore: ObservableObject {
     }
 
     func closeDownloadAction() async {
-        let tasks = Array(activeDownloads.values)
-        tasks.forEach { $0.cancel() }
-        for task in tasks { _ = await task.result }
+        let keys = Set(activeDownloads.keys)
+        activeDownloads.values.forEach { $0.cancel() }
+        if !keys.isEmpty { downloadState = .cancelled }
+        await waitForDownloadTermination(keys)
         downloadPolicy.stop()
         if downloadState == .askingInternet { downloadState = .idle }
     }
@@ -464,7 +467,8 @@ final class CameraVideoStore: ObservableObject {
         guard let key = try? downloadKey(tripID: tripID, segmentID: segmentID),
               let task = activeDownloads[key] else { return }
         task.cancel()
-        _ = await task.result
+        downloadState = .cancelled
+        await waitForDownloadTermination([key])
     }
 
     func isDownloading(tripID: String, segmentID: UInt32) -> Bool {
@@ -480,6 +484,16 @@ final class CameraVideoStore: ObservableObject {
         activeDownloads.removeValue(forKey: key)
         activeDownloadKeys.remove(key)
         if stopPolicy { downloadPolicy.stop() }
+    }
+
+    private func waitForDownloadTermination(_ keys: Set<String>) async {
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: Self.cancellationJoinBound)
+        while keys.contains(where: { activeDownloads[$0] != nil }) {
+            guard !Task.isCancelled, clock.now < deadline else { return }
+            let next = min(deadline, clock.now.advanced(by: .milliseconds(10)))
+            try? await clock.sleep(until: next)
+        }
     }
 
     private func performDownload(tripID: String, segment: CameraVideoSegment, route: CameraDownloadRoute,
@@ -780,7 +794,7 @@ private final class FileHandleCameraVideoSink: CameraVideoFileSink {
     func close() throws { try handle.close() }
 }
 
-private final class TemporaryFileLANStream: CameraLANStream {
+final class TemporaryFileLANStream: CameraLANStream {
     let statusCode: Int
     let contentRange: String?
     let contentLength: UInt64?
@@ -1122,7 +1136,7 @@ private final class URLSessionCameraTransferSocket: CameraTransferSocket {
     func close() { task.cancel(with: .goingAway, reason: nil) }
 }
 
-private final class URLSessionCameraHTTPDownload {
+final class URLSessionCameraHTTPDownload {
     private let lock = NSLock()
     private var task: URLSessionDownloadTask!
     private var continuation: CheckedContinuation<(URL, HTTPURLResponse), Error>?
@@ -1140,9 +1154,9 @@ private final class URLSessionCameraHTTPDownload {
                 .appendingPathComponent("haval-camera-http-\(UUID().uuidString).download")
             do {
                 try FileManager.default.moveItem(at: url, to: owned)
-                self.finish(.success((owned, response)))
+                self.acceptOwnedDownload(owned, response: response)
             } catch {
-                self.finish(.failure(error))
+                _ = self.finish(.failure(error))
             }
         }
     }
@@ -1161,17 +1175,25 @@ private final class URLSessionCameraHTTPDownload {
 
     func cancel() {
         task.cancel()
-        finish(.failure(CancellationError()))
+        _ = finish(.failure(CancellationError()))
     }
 
-    private func finish(_ value: Result<(URL, HTTPURLResponse), Error>) {
-        let pending = lock.withLock { () -> CheckedContinuation<(URL, HTTPURLResponse), Error>? in
-            guard result == nil else { return nil }
+    func acceptOwnedDownload(_ owned: URL, response: HTTPURLResponse) {
+        guard finish(.success((owned, response))) else {
+            try? FileManager.default.removeItem(at: owned)
+            return
+        }
+    }
+
+    @discardableResult private func finish(_ value: Result<(URL, HTTPURLResponse), Error>) -> Bool {
+        let decision = lock.withLock { () -> (Bool, CheckedContinuation<(URL, HTTPURLResponse), Error>?) in
+            guard result == nil else { return (false, nil) }
             result = value
             defer { continuation = nil }
-            return continuation
+            return (true, continuation)
         }
-        pending?.resume(with: value)
+        decision.1?.resume(with: value)
+        return decision.0
     }
 }
 
