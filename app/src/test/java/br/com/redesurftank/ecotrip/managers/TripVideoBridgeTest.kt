@@ -3,6 +3,8 @@ package br.com.redesurftank.ecotrip.managers
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class TripVideoBridgeTest {
@@ -156,6 +158,30 @@ class TripVideoBridgeTest {
         backend.fail = false
         assertEquals(8L, store.revisionFor("new"))
         assertEquals(2, backend.saveAttempts)
+    }
+
+    @Test fun mqttCatalogUsesExactlyTheSameSanitizedMetadataAsLan() {
+        val sha = "7692c3ad3540bb803c020b3aee66cd8887123234ea0c6e7143c0add73ff431ed"
+        val providerTrip = mapOf<String, Any>(
+            "tripId" to "42", "source" to "automatic", "startMs" to 1000L,
+            "endMs" to 2000L, "byteSize" to 3L, "segments" to 1L, "completed" to true,
+            "segmentMetadataJson" to
+                "[{\"segmentId\":1,\"byteSize\":3,\"sha256\":\"$sha\"}]",
+        )
+        val lan = LanTest.call(LanTest.create("CameraLanDownloads", { listOf(providerTrip) },
+            { _: String, _: String -> error("must not open") }), "catalog") as List<*>
+        val method = TripVideoBridge::class.java.methods.singleOrNull {
+            it.name == "canonicalCatalogTrip" && it.parameterCount == 1
+        }
+        assertNotNull("TripVideoBridge must publish the shared canonical catalog shape", method)
+        val mqtt = method!!.invoke(null, providerTrip)
+
+        assertEquals(lan.single(), mqtt)
+        val json = com.google.gson.Gson().toJson(mqtt)
+        assertEquals("{\"tripId\":\"42\",\"source\":\"automatic\",\"startMs\":1000," +
+            "\"endMs\":2000,\"byteSize\":3,\"segmentCount\":1,\"completed\":true," +
+            "\"segments\":[{\"segmentId\":1,\"byteSize\":3,\"sha256\":\"$sha\"}]}", json)
+        assertTrue(!json.contains("segmentMetadataJson") && !json.contains("path"))
     }
 
     @Test fun lanCommandsUseLoopbackAndNeverChangeRecorderIdentity() {

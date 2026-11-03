@@ -1,3 +1,4 @@
+import CryptoKit
 import XCTest
 
 final class CameraVideoProtocolTests: XCTestCase {
@@ -92,6 +93,28 @@ final class CameraVideoProtocolTests: XCTestCase {
         XCTAssertEqual(try CameraTransferProtocol.parse(maximum).payload.count, 262_144)
         XCTAssertThrowsError(try CameraTransferProtocol.data(ordinal: 1, offset: 0,
                                                               payload: Data(repeating: 0, count: 262_145)))
+    }
+
+    func testHVT1RejectsWrongIdentityTruncationInvalidACKAndMalformedError() throws {
+        let ack = Data(testHex: "4856543101030000000000010000000000000003000000000000000000000000000000000000000000000000000000000000000000000000")!
+        var wrongMagic = ack; wrongMagic[0] = 0
+        var wrongVersion = ack; wrongVersion[4] = 2
+        var invalidACKDigest = ack; invalidACKDigest[24] = 1
+        let truncated = Data(ack.dropLast())
+
+        let validError = try CameraTransferProtocol.error(ordinal: 1, message: "abc")
+        var malformedUTF8 = validError
+        malformedUTF8.replaceSubrange(56..<59, with: [0xe0, 0x80, 0x80])
+        let malformedDigest = Data(SHA256.hash(data: malformedUTF8[56..<59]))
+        malformedUTF8.replaceSubrange(24..<56, with: malformedDigest)
+        var oversizedError = Data(validError.prefix(56))
+        oversizedError.replaceSubrange(20..<24, with: [0, 0, 4, 1])
+        oversizedError.append(Data(repeating: 0x61, count: 1_025))
+        oversizedError.replaceSubrange(24..<56, with: Data(SHA256.hash(data: oversizedError[56...])))
+
+        for malformed in [wrongMagic, wrongVersion, invalidACKDigest, truncated, malformedUTF8, oversizedError] {
+            XCTAssertThrowsError(try CameraTransferProtocol.parse(malformed))
+        }
     }
 #else
     func testTask8HVT1ContractIsImplemented() {

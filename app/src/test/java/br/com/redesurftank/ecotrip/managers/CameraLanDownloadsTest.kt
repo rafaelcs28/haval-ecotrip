@@ -6,13 +6,20 @@ import java.io.ByteArrayInputStream
 import java.io.InputStream
 
 class CameraLanDownloadsTest {
+    private val shaOne = "7692c3ad3540bb803c020b3aee66cd8887123234ea0c6e7143c0add73ff431ed"
+    private val shaTwo = "3fc4ccfe745870e2c0d99f71f30ff0656c8dedd41cc1d7d3d376b0dbe685e2f3"
     private var closed = 0
     private var opened = 0
     private var requested = ""
     private val trips = listOf(
-        mapOf("tripId" to "1000", "endMs" to 2000L, "segments" to 2, "completed" to true),
-        mapOf("tripId" to "2000", "endMs" to 0L, "segments" to 1, "completed" to false))
-    private fun downloads(failRead: Boolean = false) = LanTest.create("CameraLanDownloads", { trips },
+        mapOf("tripId" to "1000", "source" to "automatic", "startMs" to 1000L,
+            "endMs" to 2000L, "byteSize" to 10L, "segments" to 2, "completed" to true,
+            "segmentMetadataJson" to "[{\"segmentId\":1,\"byteSize\":4,\"sha256\":\"$shaOne\"}," +
+                "{\"segmentId\":2,\"byteSize\":6,\"sha256\":\"$shaTwo\"}]"),
+        mapOf("tripId" to "2000", "endMs" to 0L, "byteSize" to 1L, "segments" to 1,
+            "completed" to false, "segmentMetadataJson" to "[]"))
+    private fun downloads(failRead: Boolean = false, values: List<Map<String, Any>> = trips) =
+        LanTest.create("CameraLanDownloads", { values },
         { trip: String, segment: String ->
             opened++; requested = "$trip/$segment"
             val input = object : ByteArrayInputStream("0123456789".toByteArray()) {
@@ -29,7 +36,39 @@ class CameraLanDownloadsTest {
     @Test fun catalogOnlyExposesCompletedProviderMetadata() {
         val catalog = LanTest.call(downloads(), "catalog") as List<*>
         assertEquals(1, catalog.size)
-        assertEquals("1000", (catalog.single() as Map<*, *>)["tripId"])
+        val trip = catalog.single() as Map<*, *>
+        assertEquals("1000", trip["tripId"])
+        assertEquals(2L, trip["segmentCount"])
+        assertEquals(listOf(
+            linkedMapOf("segmentId" to 1L, "byteSize" to 4L, "sha256" to shaOne),
+            linkedMapOf("segmentId" to 2L, "byteSize" to 6L, "sha256" to shaTwo),
+        ), trip["segments"])
+        assertFalse(trip.containsKey("segmentMetadataJson"))
+    }
+
+    @Test fun invalidProviderMetadataFailsClosedBeforeAnySegmentCanOpen() {
+        val badMetadata = listOf(
+            "not-json",
+            "[]",
+            "[{\"segmentId\":0,\"byteSize\":10,\"sha256\":\"$shaOne\"}]",
+            "[{\"segmentId\":2,\"byteSize\":10,\"sha256\":\"$shaOne\"}]",
+            "[{\"segmentId\":1,\"byteSize\":0,\"sha256\":\"$shaOne\"}]",
+            "[{\"segmentId\":1,\"byteSize\":9,\"sha256\":\"$shaOne\"}]",
+            "[{\"segmentId\":1,\"byteSize\":10,\"sha256\":\"00\"}]",
+            "[{\"segmentId\":1,\"byteSize\":10,\"sha256\":\"$shaOne\",\"path\":\"../secret\"}]",
+        )
+        for (metadata in badMetadata) {
+            val value = trips.first().toMutableMap().apply {
+                put("segments", 1)
+                put("segmentMetadataJson", metadata)
+            }
+            val d = downloads(values = listOf(value))
+            assertTrue(LanTest.call(d, "catalog") as List<*> == emptyList<Any>())
+            assertEquals(404, open(d)["status"])
+        }
+        val nonCanonical = trips.first().toMutableMap().apply { put("tripId", "../1000") }
+        assertTrue((LanTest.call(downloads(values = listOf(nonCanonical)), "catalog") as List<*>).isEmpty())
+        assertEquals(0, opened)
     }
     @Test fun strictIdsAndCompletedMembershipBeforeProviderOpen() {
         val d = downloads()
