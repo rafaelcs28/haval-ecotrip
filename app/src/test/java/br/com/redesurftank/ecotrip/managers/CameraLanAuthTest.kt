@@ -187,6 +187,52 @@ class CameraLanAuthTest {
         now = s["expiresAt"] as Long
         assertEquals(false, LanTest.call(a, "authorize", s["sessionId"], "download", s["downloadToken"]))
     }
+    @Test fun authenticatedDeleteIsIdempotentOnlyForTheOriginalControlTokenThroughExpiry() {
+        val a = auth(); val s = session(a, challenge(a), "download")!!
+        val id = s["sessionId"] as String
+        val control = s["controlToken"] as String
+        assertEquals(false, LanTest.call(a, "authorizeAndRevoke", id, "00".repeat(32)))
+        assertEquals(true, LanTest.call(a, "authorize", id, "download", s["downloadToken"]))
+        assertEquals(true, LanTest.call(a, "authorizeAndRevoke", id, control))
+        assertEquals(false, LanTest.call(a, "authorize", id, "download", s["downloadToken"]))
+        assertEquals(true, LanTest.call(a, "authorizeAndRevoke", id, control))
+        assertEquals(false, LanTest.call(a, "authorizeAndRevoke", id, "11".repeat(32)))
+        assertEquals(false, LanTest.call(a, "authorizeAndRevoke", "f".repeat(32), control))
+        now = s["expiresAt"] as Long
+        assertEquals(false, LanTest.call(a, "authorizeAndRevoke", id, control))
+    }
+    @Test fun deleteTombstonesAreBoundedPrunedAndZeroed() {
+        val a = auth()
+        repeat(140) {
+            val s = session(a, challenge(a), "download")!!
+            assertEquals(true, LanTest.call(a, "authorizeAndRevoke", s["sessionId"], s["controlToken"]))
+        }
+        val field = a.javaClass.getDeclaredField("tombstones").apply { isAccessible = true }
+        @Suppress("UNCHECKED_CAST")
+        val tombstones = field.get(a) as Map<String, Any>
+        assertTrue("revocation replay state must be bounded", tombstones.size <= 128)
+        val retained = tombstones.values.first()
+        val digestField = retained.javaClass.getDeclaredField("controlDigest").apply { isAccessible = true }
+        val retainedDigest = digestField.get(retained) as ByteArray
+        now += 300_000L
+        LanTest.call(a, "active", "missing")
+        assertTrue(retainedDigest.all { it == 0.toByte() })
+        assertTrue((field.get(a) as Map<*, *>).isEmpty())
+
+        val fresh = session(a, challenge(a), "download")!!
+        LanTest.call(a, "authorizeAndRevoke", fresh["sessionId"], fresh["controlToken"])
+        val clearDigest = digestField.get((field.get(a) as Map<*, *>).values.single()) as ByteArray
+        LanTest.call(a, "clear")
+        assertTrue(clearDigest.all { it == 0.toByte() })
+    }
+    @Test fun deleteRouteContractReturnsNoContentOnlyForAuthenticatedLiveOrTombstonedSession() {
+        val a = auth(); val s = session(a, challenge(a), "download")!!
+        val id = s["sessionId"] as String
+        val control = s["controlToken"] as String
+        assertEquals(401, LocalApiServer.deleteSessionStatus(a as CameraLanAuth, id, "00".repeat(32)))
+        assertEquals(204, LocalApiServer.deleteSessionStatus(a, id, control))
+        assertEquals(204, LocalApiServer.deleteSessionStatus(a, id, control))
+    }
     @Test fun handshakeAdmissionIsBoundToCapturedLiveSessionAfterReplacement() {
         val a = auth(); val old = session(a, challenge(a))!!
         LanTest.call(a, "revoke", old["sessionId"])

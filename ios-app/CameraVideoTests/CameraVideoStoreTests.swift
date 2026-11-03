@@ -214,7 +214,7 @@ final class CameraVideoStoreTests: XCTestCase {
             case ("DELETE", "/api/video/lan/session/\(sessionID)"):
                 XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer \(controlToken)")
                 deletes += 1
-                return (Data(), Self.response(request, 204))
+                return (Data(), Self.response(request, 200))
             default: throw CameraVideoError.invalidResponse
             }
         }, download: { request in
@@ -237,6 +237,76 @@ final class CameraVideoStoreTests: XCTestCase {
 
         XCTAssertEqual(sessionCreates, 1)
         XCTAssertEqual(deletes, 1)
+    }
+
+    func testLANSessionExpiryUsesResponseReceiptTimeAndSaturatesAtInt64Max() async throws {
+        for (initial, received, sessionExpiry) in [
+            (Int64(1_000), Int64(2_000), Int64(302_000)),
+            (Int64.max - 100, Int64.max - 50, Int64.max),
+        ] {
+            var now = initial
+            let bridgeToken = "paired"
+            let nonce = "000102030405060708090a0b0c0d0e0f"
+            let challengeExpiry = initial > Int64.max - 30_000 ? Int64.max : initial + 30_000
+            let proof = Data(HMAC<SHA256>.authenticationCode(
+                for: Data("haval-camera-lan-server-v1|car-1|\(nonce)|\(challengeExpiry)".utf8),
+                using: SymmetricKey(data: Data(bridgeToken.utf8)))).hex
+            let http = CameraVideoHTTPClient(data: { request in
+                switch (request.httpMethod ?? "GET", request.url?.path ?? "") {
+                case ("GET", "/api/capabilities"):
+                    return (Data("{\"cameraDownloadLan\":1,\"hvtVersion\":1}".utf8), Self.response(request, 200))
+                case ("POST", "/api/video/lan/challenge"):
+                    return (Data("{\"deviceId\":\"car-1\",\"nonce\":\"\(nonce)\",\"expiresAt\":\(challengeExpiry),\"serverProof\":\"\(proof)\"}".utf8), Self.response(request, 200))
+                case ("POST", "/api/video/lan/session"):
+                    now = received
+                    return (Data("{\"sessionId\":\"0123456789abcdef0123456789abcdef\",\"scope\":\"download\",\"downloadToken\":\"download-token-012345678901234567890123\",\"controlToken\":\"control-token-0123456789012345678901234\",\"expiresAt\":\(sessionExpiry)}".utf8), Self.response(request, 201))
+                case ("GET", "/api/video/lan/catalog"):
+                    return (Self.catalogJSON(), Self.response(request, 200))
+                default: throw CameraVideoError.invalidResponse
+                }
+            }, download: { _ in CameraHTTPDownload(value: { throw CameraVideoError.invalidResponse }, cancel: {}) },
+               webSocket: { _, _, _ in throw CameraVideoError.invalidResponse })
+            let network = CameraVideoNetwork(http: http, now: { now })
+            _ = try await network.fetchLANCatalog(endpoint: Self.lan, bridgeToken: bridgeToken)
+        }
+    }
+
+    func testLostDeleteResponseRetriesSameIdentityAndAcceptsFinalNoContent() async throws {
+        let sessionID = "0123456789abcdef0123456789abcdef"
+        let bridgeToken = "paired", nonce = "000102030405060708090a0b0c0d0e0f"
+        let expires: Int64 = 31_000
+        let proof = Data(HMAC<SHA256>.authenticationCode(
+            for: Data("haval-camera-lan-server-v1|car-1|\(nonce)|\(expires)".utf8),
+            using: SymmetricKey(data: Data(bridgeToken.utf8)))).hex
+        var deletes = 0, creates = 0, deleted = false
+        let http = CameraVideoHTTPClient(data: { request in
+            switch (request.httpMethod ?? "GET", request.url?.path ?? "") {
+            case ("GET", "/api/capabilities"):
+                return (Data("{\"cameraDownloadLan\":1,\"hvtVersion\":1}".utf8), Self.response(request, 200))
+            case ("POST", "/api/video/lan/challenge"):
+                return (Data("{\"deviceId\":\"car-1\",\"nonce\":\"\(nonce)\",\"expiresAt\":\(expires),\"serverProof\":\"\(proof)\"}".utf8), Self.response(request, 200))
+            case ("POST", "/api/video/lan/session"):
+                XCTAssertTrue(deletes == 0 || deleted, "cleanup retry must precede replacement allocation")
+                creates += 1; deleted = false
+                return (Data("{\"sessionId\":\"\(sessionID)\",\"scope\":\"download\",\"downloadToken\":\"download-token-012345678901234567890123\",\"controlToken\":\"control-token-0123456789012345678901234\",\"expiresAt\":301000}".utf8), Self.response(request, 201))
+            case ("GET", "/api/video/lan/catalog"):
+                return (Self.catalogJSON(), Self.response(request, 200))
+            case ("DELETE", "/api/video/lan/session/\(sessionID)"):
+                deletes += 1; deleted = true
+                if deletes == 1 { throw CameraVideoError.disconnected }
+                return (Data(), Self.response(request, 204))
+            default: throw CameraVideoError.invalidResponse
+            }
+        }, download: { _ in CameraHTTPDownload(value: { throw CameraVideoError.invalidResponse }, cancel: {}) },
+           webSocket: { _, _, _ in throw CameraVideoError.invalidResponse })
+        let network = CameraVideoNetwork(http: http, now: { 1_000 })
+
+        _ = try await network.fetchLANCatalog(endpoint: Self.lan, bridgeToken: bridgeToken)
+        await network.closeLANCatalogSession(endpoint: Self.lan)
+        _ = try await network.fetchLANCatalog(endpoint: Self.lan, bridgeToken: bridgeToken)
+
+        XCTAssertEqual(deletes, 2)
+        XCTAssertEqual(creates, 2)
     }
 
     func testRemoteHTTPAndWebSocketAdapterDeletesTerminalSessionAndDropsCachedID() async throws {
@@ -481,6 +551,34 @@ final class CameraVideoStoreTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: lanPartial.path))
     }
 
+    func testCorruptFullPartialRestartsAtZeroForLANAndRemote() async throws {
+        let bytes = Data("abc".utf8), segment = Self.segment(bytes)
+        for route in [CameraDownloadRoute.lan, .internet] {
+            let caseRoot = root.appendingPathComponent(route.rawValue, isDirectory: true)
+            var openedOffset: UInt64?
+            var transport = CameraVideoTransport.testing
+            transport.openLANSegment = { _, _, _, offset, _, _ in
+                openedOffset = offset
+                return FakeLANStream(statusCode: 200, contentRange: nil, contentLength: 3, chunks: [bytes])
+            }
+            transport.openRemoteTransfer = { _, _, offset, _, _ in
+                openedOffset = offset
+                return FakeTransferSocket(messages: [Self.hvtData(payload: bytes), Self.hvtEOF(bytes: bytes)])
+            }
+            let store = CameraVideoStore(rootURL: caseRoot, transport: transport, availableCapacity: { _ in 100 })
+            if route == .internet { authorizeRemoteDownload(store) }
+            let partial = try store.partialURL(tripID: "42", segmentID: 1, route: route)
+            try FileManager.default.createDirectory(at: partial.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data("xyz".utf8).write(to: partial)
+
+            let result = try await store.downloadSegment(tripID: "42", segment: segment, route: route,
+                lanEndpoint: Self.lan, bridgeURL: Self.bridge, bridgeToken: "paired")
+
+            XCTAssertEqual(openedOffset, 0, "\(route) must not resume after corrupt full bytes")
+            XCTAssertEqual(try Data(contentsOf: result), bytes)
+        }
+    }
+
     func testLANRequiresExactStatusRangeAndLengthForFreshAndResumedResponses() async throws {
         let bytes = Data("abc".utf8), segment = Self.segment(bytes)
         let invalid: [(UInt64, Int, String?, UInt64?)] = [
@@ -537,6 +635,9 @@ final class CameraVideoStoreTests: XCTestCase {
         }
         XCTAssertEqual(socket2.sent.count, 1, "DATA ACK is durable, but invalid EOF is never ACKed")
         XCTAssertFalse(FileManager.default.fileExists(atPath: try store.completedURL(tripID: "42", segmentID: 1).path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: try store.partialURL(
+            tripID: "42", segmentID: 1, route: .internet).path),
+            "terminal whole-file digest mismatch must remove corrupt full bytes")
     }
 
     func testRemoteACKFollowsDurableWriteAndRequiresExactOffset() async throws {
