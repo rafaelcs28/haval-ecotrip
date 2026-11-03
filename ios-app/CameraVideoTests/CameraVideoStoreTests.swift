@@ -35,6 +35,47 @@ final class CameraVideoStoreTests: XCTestCase {
         XCTAssertEqual(remoteCalls, 1, "A new gallery action must ask again")
     }
 
+    func testRemoteDownloadRequiresFreshActionScopedConfirmation() async throws {
+        let bytes = Data("abc".utf8), segment = Self.segment(bytes)
+        var remoteCalls = 0
+        var transport = CameraVideoTransport.testing
+        transport.openRemoteTransfer = { _, _, _, _, _ in
+            remoteCalls += 1
+            return FakeTransferSocket(messages: [Self.hvtData(payload: bytes), Self.hvtEOF(bytes: bytes)])
+        }
+        let store = makeStore(transport)
+
+        XCTAssertEqual(store.beginDownloadAction(lanAvailable: false), .askInternet)
+        await XCTAssertThrowsErrorAsync {
+            try await store.downloadSegment(tripID: "42", segment: segment, route: .internet,
+                lanEndpoint: nil, bridgeURL: Self.bridge, bridgeToken: "paired")
+        }
+        XCTAssertEqual(remoteCalls, 0)
+
+        store.confirmDownloadInternet()
+        _ = try await store.downloadSegment(tripID: "42", segment: segment, route: .internet,
+            lanEndpoint: nil, bridgeURL: Self.bridge, bridgeToken: "paired")
+        XCTAssertEqual(remoteCalls, 1)
+
+        try FileManager.default.removeItem(at: store.completedURL(tripID: "42", segmentID: 1))
+        XCTAssertEqual(store.beginDownloadAction(lanAvailable: false), .askInternet,
+                       "A new download must invalidate the previous consent")
+        await XCTAssertThrowsErrorAsync {
+            try await store.downloadSegment(tripID: "42", segment: segment, route: .internet,
+                lanEndpoint: nil, bridgeURL: Self.bridge, bridgeToken: "paired")
+        }
+        XCTAssertEqual(remoteCalls, 1)
+
+        store.confirmDownloadInternet()
+        XCTAssertEqual(store.beginDownloadAction(lanAvailable: true), .useLAN,
+                       "Returning to LAN must invalidate remote consent")
+        await XCTAssertThrowsErrorAsync {
+            try await store.downloadSegment(tripID: "42", segment: segment, route: .internet,
+                lanEndpoint: nil, bridgeURL: Self.bridge, bridgeToken: "paired")
+        }
+        XCTAssertEqual(remoteCalls, 1)
+    }
+
     func testCatalogPreservesStaleTripsOfflineAndOmitsActiveOrIncompleteTrips() async {
         var transport = CameraVideoTransport.testing
         transport.fetchLANCatalog = { _, _ in
