@@ -556,6 +556,8 @@ final class CameraLiveSessionTests: XCTestCase {
 
         await session.updateLANEndpoint(CameraLanEndpoint(host: "192.168.8.20", port: 8080))
         XCTAssertEqual(session.route, .lan)
+        await lanSocket.waitForReceiveCalls(1)
+        XCTAssertEqual(lanSocket.receiveCallCount, 1)
         lanSocket.fail(CameraLiveError.disconnected)
         await waitUntil { session.state == .askingInternet }
 
