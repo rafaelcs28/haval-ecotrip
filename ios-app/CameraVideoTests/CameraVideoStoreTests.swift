@@ -234,8 +234,9 @@ final class CameraVideoStoreTests: XCTestCase {
         let streamedCount = try await stream.nextChunk()?.count ?? 0
         XCTAssertLessThanOrEqual(streamedCount, 64 * 1_024)
         await network.closeLANCatalogSession(endpoint: Self.lan)
+        _ = try await network.fetchLANCatalog(endpoint: Self.lan, bridgeToken: bridgeToken)
 
-        XCTAssertEqual(sessionCreates, 1)
+        XCTAssertEqual(sessionCreates, 2)
         XCTAssertEqual(deletes, 1)
     }
 
