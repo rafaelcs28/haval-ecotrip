@@ -200,7 +200,7 @@ class MqttManager private constructor() {
     var paired:                     Boolean = false   // config veio por pareamento (esconde credenciais na UI)
     var prefix:                     String  = "haval/ecotrip"
     var bridgeUrl:                  String  = ""
-    var bridgeToken:                String  = ""
+    @Volatile var bridgeToken:      String  = ""
     var publishIntervalMs:          Int     = DEFAULT_PUBLISH_INTERVAL_MS      // legado — mantido para não quebrar código existente
     var publishIntervalWifiMs:      Int     = DEFAULT_PUBLISH_INTERVAL_WIFI_MS
     var publishIntervalCellularMs:  Int     = DEFAULT_PUBLISH_INTERVAL_CELLULAR_MS

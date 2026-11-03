@@ -108,7 +108,7 @@ class LocalApiServer(
                         val live = lanLive ?: return
                         val now = System.currentTimeMillis()
                         if (now >= live.expires || !CameraLanAuth.cameraAvailable(appCtx) ||
-                            live.sockets.any { it.writeStarted > 0 && now - it.writeStarted > 3_000 }) endLanLive(live)
+                            live.sockets.any { it.writeTimedOut() }) endLanLive(live)
                     }
                 }, 250L, 250L)
             }
@@ -331,8 +331,10 @@ class LocalApiServer(
         override fun getInputStream(): java.io.InputStream = bounded
     }) {
         private val rawInput = handshake.inputStream
-        @Volatile var writeStarted = 0L
+        private val frameWriter = CameraLanFrameWriter(System::currentTimeMillis) { super.sendFrame(it) }
         @Volatile private var ended = false
+        override fun sendFrame(frame: WebSocketFrame) = frameWriter.sendFrame(frame)
+        fun writeTimedOut(): Boolean = frameWriter.writeTimedOut()
         override fun onOpen() {
             synchronized(lanLock) {
                 if (lanLive !== live || !lanAuth.active(live.id) || !live.relay.join(role)) { abort(); return }
@@ -344,13 +346,11 @@ class LocalApiServer(
                         if (role == "viewer") {
                             val bytes = live.relay.poll()
                             if (bytes != null) {
-                                writeStarted = System.currentTimeMillis()
-                                try { send(bytes) } finally { writeStarted = 0 }
+                                send(bytes)
                                 live.relay.delivered()
                             }
                         } else if (live.relay.takeKeyframeRequest()) {
-                            writeStarted = System.currentTimeMillis()
-                            try { send("{\"type\":\"request_keyframe\"}") } finally { writeStarted = 0 }
+                            send("{\"type\":\"request_keyframe\"}")
                         }
                         Thread.sleep(10)
                     }
@@ -693,6 +693,27 @@ class LocalApiServer(
             // (porta usa payload-objeto e segue só por MQTT, fora da via LAN.)
             "vehicle/shade", "vehicle/skylight", "vehicle/window_all",
         )
+    }
+}
+
+/** All video frames, including NanoWSD's automatic replies, share this writer. */
+class CameraLanFrameWriter(
+    private val clock: () -> Long,
+    private val write: (NanoWSD.WebSocketFrame) -> Unit,
+) {
+    @Volatile private var writeStarted = 0L
+
+    @Synchronized fun sendFrame(frame: NanoWSD.WebSocketFrame) {
+        writeStarted = clock()
+        try { write(frame) } finally {
+            // Clear before releasing the writer monitor: an old completion cannot clear a new write.
+            writeStarted = 0L
+        }
+    }
+
+    fun writeTimedOut(): Boolean {
+        val started = writeStarted
+        return started > 0 && clock() - started > 3_000
     }
 }
 
