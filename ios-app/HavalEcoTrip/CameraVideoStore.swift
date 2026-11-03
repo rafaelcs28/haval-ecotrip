@@ -451,7 +451,7 @@ final class CameraVideoStore: ObservableObject {
         return base.appendingPathComponent("HavalCamera", isDirectory: true)
     }
 
-    static func systemCapacity(_ url: URL) -> Int64? {
+    nonisolated static func systemCapacity(_ url: URL) -> Int64? {
         try? url.deletingLastPathComponent().resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
             .volumeAvailableCapacityForImportantUsage
     }
@@ -605,7 +605,7 @@ private final class CameraVideoNetwork {
             }
             return CameraVideoTrip(id: trip.tripId, source: trip.source, start: Date(timeIntervalSince1970: Double(trip.startMs) / 1_000),
                                    end: trip.endMs.map { Date(timeIntervalSince1970: Double($0) / 1_000) },
-                                   byteSize: trip.byteSize, completed: trip.completed ?? trip.endMs != nil, segments: segments)
+                                   byteSize: trip.byteSize, completed: trip.completed ?? (trip.endMs != nil), segments: segments)
         }
         return CameraVideoCatalog(revision: value.catalogRevision ?? 0,
                                   updatedAt: Date(timeIntervalSince1970: Double(value.updatedAt ?? 0) / 1_000),
