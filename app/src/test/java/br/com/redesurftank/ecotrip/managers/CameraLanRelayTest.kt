@@ -102,7 +102,7 @@ class CameraLanRelayTest {
     }
 
     @Test fun changedConfigDuringInFlightWriteStillHonorsQueueByteCap() {
-        val r = relay(); ready(r); drain(r)
+        val r = relay(); ready(r); drain(r); LanTest.call(r, "takeKeyframeRequest")
         offer(r, frame(1_048_000))
         assertNotNull(poll(r))
         val payload = ByteBuffer.allocate(4 + 2 * 1000).putShort(1000).put(ByteArray(1000) { 0x67 })
@@ -110,9 +110,25 @@ class CameraLanRelayTest {
         val changed = ByteBuffer.allocate(24 + payload.size).putInt(0x48564331).put(1).put(1)
             .putShort(0).putInt(4).putLong(0).putInt(payload.size).put(payload).array()
         offer(r, changed)
+        assertEquals(true, LanTest.call(r, "takeKeyframeRequest"))
         assertTrue((LanTest.map(LanTest.call(r, "stats"))["bytes"] as Int) <= 1_048_576)
         delivered(r); offer(r, key)
         assertArrayEquals(changed, poll(r))
+    }
+
+    @Test fun videoInputSurvivesHttpIdleTimeoutUntilSessionOwnerClosesIt() {
+        val bytes = byteArrayOf(0x82.toByte(), 0x81.toByte(), 0, 0, 0, 0, 1)
+        val source = object : ByteArrayInputStream(bytes) {
+            var timeout = true
+            override fun read(): Int {
+                if (timeout) { timeout = false; throw java.net.SocketTimeoutException("synthetic HTTP timeout") }
+                return super.read()
+            }
+        }
+        val guard = LanTest.create("CameraLanFrameInput", source) as InputStream
+        val received = ByteArray(bytes.size)
+        for (i in bytes.indices) received[i] = guard.read().toByte()
+        assertArrayEquals(bytes, received)
     }
 
     private fun frame(payload: Int): ByteArray = ByteBuffer.allocate(24 + payload)
