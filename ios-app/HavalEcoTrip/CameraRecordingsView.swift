@@ -11,6 +11,7 @@ struct CameraRecordingsView: View {
     @State private var deletionTrip: CameraVideoTrip?
     @State private var shareItems: CameraShareItems?
     @State private var player: AVQueuePlayer?
+    @State private var errorMessage: String?
     private let discovery: LANDiscovery
 
     @MainActor
@@ -35,10 +36,13 @@ struct CameraRecordingsView: View {
             .refreshable { await store.reloadCatalog(); updatePrompt() }
         }
         .task { startDiscoveryAndLoad() }
-        .onDisappear { discovery.stop(); store.closeCatalogAction(); player?.pause() }
+        .onDisappear {
+            discovery.stop(); player?.pause()
+            Task { await store.closeCatalogAction() }
+        }
         .confirmationDialog("Usar internet para carregar as gravações?", isPresented: $showInternetConfirmation) {
             Button("Usar internet") { Task { await store.confirmCatalogInternet() } }
-            Button("Cancelar", role: .cancel) { store.closeCatalogAction() }
+            Button("Cancelar", role: .cancel) { Task { await store.closeCatalogAction() } }
         } message: {
             Text("A autorização vale somente enquanto esta galeria estiver aberta.")
         }
@@ -59,6 +63,9 @@ struct CameraRecordingsView: View {
         .sheet(isPresented: Binding(get: { player != nil }, set: { if !$0 { player?.pause(); player = nil } })) {
             if let player { VideoPlayer(player: player).ignoresSafeArea() }
         }
+        .alert("Não foi possível concluir a ação", isPresented: Binding(
+            get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } }
+        )) { Button("OK", role: .cancel) {} } message: { Text(errorMessage ?? "Erro desconhecido.") }
     }
 
     private var recordingsList: some View {
@@ -70,13 +77,21 @@ struct CameraRecordingsView: View {
                             Text("Segmento \(segment.id)")
                             Text(ByteCountFormatter.string(fromByteCount: Int64(segment.byteSize), countStyle: .file))
                                 .font(.caption).foregroundStyle(.secondary)
+                            Text(localStateLabel(trip, segment)).font(.caption2).foregroundStyle(.secondary)
                         }
                         Spacer()
-                        Button { Task { await download(trip, segment) } } label: {
-                            Image(systemName: "arrow.down.circle")
+                        if store.isDownloading(tripID: trip.id, segmentID: segment.id) {
+                            Button(role: .cancel) {
+                                Task { await store.cancelDownload(tripID: trip.id, segmentID: segment.id) }
+                            } label: { Label("Cancelar", systemImage: "xmark.circle") }
+                        } else {
+                            Button { Task { await download(trip, segment) } } label: {
+                                Image(systemName: downloadIcon(trip, segment))
+                            }
+                            .disabled(isVerified(trip, segment))
+                            .accessibilityLabel(isVerified(trip, segment) ?
+                                                "Segmento \(segment.id) verificado" : "Baixar segmento \(segment.id)")
                         }
-                        .disabled(endpoint != nil && trip.segments.isEmpty)
-                        .accessibilityLabel("Baixar segmento \(segment.id)")
                     }
                 }
                 if trip.segments.isEmpty {
@@ -85,8 +100,10 @@ struct CameraRecordingsView: View {
                 } else {
                     HStack {
                         Button("Reproduzir") { play(trip) }
+                            .disabled(!store.isTripReadyForPlayback(trip) || store.hasActiveDownload(for: trip))
                         Spacer()
                         Button("Compartilhar") { share(trip) }
+                            .disabled(!store.isTripReadyForPlayback(trip) || store.hasActiveDownload(for: trip))
                     }
                 }
             } header: {
@@ -94,6 +111,7 @@ struct CameraRecordingsView: View {
                     Text(trip.start.formatted(date: .abbreviated, time: .shortened))
                     Spacer()
                     Button(role: .destructive) { deletionTrip = trip } label: { Image(systemName: "trash") }
+                        .disabled(store.hasActiveDownload(for: trip))
                         .accessibilityLabel("Apagar gravação")
                 }
             }
@@ -154,7 +172,7 @@ struct CameraRecordingsView: View {
             pendingDownload = CameraPendingDownload(trip: trip, segment: segment)
             showDownloadInternetConfirmation = true
         case .offline:
-            store.closeDownloadAction()
+            await store.closeDownloadAction()
         }
     }
 
@@ -167,7 +185,7 @@ struct CameraRecordingsView: View {
 
     private func cancelRemoteDownload() {
         pendingDownload = nil
-        store.closeDownloadAction()
+        Task { await store.closeDownloadAction() }
     }
 
     private func performDownload(_ trip: CameraVideoTrip, _ segment: CameraVideoSegment,
@@ -176,38 +194,70 @@ struct CameraRecordingsView: View {
             _ = try await store.downloadSegment(tripID: trip.id, segment: segment, route: route,
                                                  lanEndpoint: endpoint, bridgeURL: bridgeURL,
                                                  bridgeToken: Settings.bridgeToken)
-            store.closeDownloadAction()
         } catch {
-            store.closeDownloadAction()
             if route == .lan, error is URLError || (error as? CameraVideoError) == .offline {
                 _ = store.beginDownloadAction(lanAvailable: false)
                 pendingDownload = CameraPendingDownload(trip: trip, segment: segment)
                 showDownloadInternetConfirmation = true
+            } else if !(error is CancellationError) {
+                errorMessage = actionError(error, operation: "baixar o segmento")
             }
         }
     }
 
     private func play(_ trip: CameraVideoTrip) {
-        guard let urls = try? store.playbackURLs(for: trip) else { return }
-        let queue = AVQueuePlayer(items: urls.map(AVPlayerItem.init(url:)))
-        player = queue; queue.play()
+        do {
+            let queue = AVQueuePlayer(items: try store.playbackURLs(for: trip).map(AVPlayerItem.init(url:)))
+            player = queue; queue.play()
+        } catch { errorMessage = actionError(error, operation: "reproduzir a gravação") }
     }
 
     private func share(_ trip: CameraVideoTrip) {
-        guard let urls = try? store.shareURLs(for: trip) else { return }
-        shareItems = CameraShareItems(urls: urls)
+        do { shareItems = CameraShareItems(urls: try store.shareURLs(for: trip)) }
+        catch { errorMessage = actionError(error, operation: "compartilhar a gravação") }
     }
 
     private func delete(_ trip: CameraVideoTrip) async {
-        try? await store.deleteRecordings([trip.id], confirmed: true, bridgeURL: bridgeURL,
-                                          bridgeToken: Settings.bridgeToken)
-        await store.reloadCatalog()
+        do {
+            try await store.deleteRecordings([trip.id], confirmed: true, bridgeURL: bridgeURL,
+                                             bridgeToken: Settings.bridgeToken)
+            await store.reloadCatalog()
+        } catch { errorMessage = actionError(error, operation: "apagar a gravação") }
     }
 
     private var bridgeURL: URL {
         URL(string: BridgeRouter.shared.currentURL) ?? URL(string: "https://invalid.invalid")!
     }
     private func routeLabel(_ route: CameraDownloadRoute) -> String { route == .lan ? "LAN" : "Internet" }
+
+    private func isVerified(_ trip: CameraVideoTrip, _ segment: CameraVideoSegment) -> Bool {
+        if case .verified = store.localState(tripID: trip.id, segment: segment) { return true }
+        return false
+    }
+
+    private func downloadIcon(_ trip: CameraVideoTrip, _ segment: CameraVideoSegment) -> String {
+        isVerified(trip, segment) ? "checkmark.circle.fill" : "arrow.down.circle"
+    }
+
+    private func localStateLabel(_ trip: CameraVideoTrip, _ segment: CameraVideoSegment) -> String {
+        switch store.localState(tripID: trip.id, segment: segment) {
+        case .missing: return "Não baixado"
+        case .partial(let route, let bytes): return "Parcial · \(routeLabel(route)) · \(bytes) bytes"
+        case .verified: return "Verificado"
+        case .invalid: return "Arquivo local inválido"
+        }
+    }
+
+    private func actionError(_ error: Error, operation: String) -> String {
+        switch error {
+        case CameraVideoError.insufficientStorage: return "Espaço insuficiente para \(operation). Libere armazenamento e tente novamente."
+        case CameraVideoError.incompleteFiles: return "Baixe e verifique todos os segmentos antes de \(operation)."
+        case CameraVideoError.duplicateDownload: return "Este segmento já está sendo baixado."
+        case CameraVideoError.offline, CameraVideoError.disconnected:
+            return "A câmera ou a ponte ficou offline ao tentar \(operation). Tente novamente."
+        default: return "Falha ao tentar \(operation). Tente novamente."
+        }
+    }
 }
 
 private struct CameraShareItems: Identifiable {

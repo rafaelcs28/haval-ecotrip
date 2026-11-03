@@ -26,8 +26,14 @@ struct CameraSettingsView: View {
                         .font(.caption).foregroundStyle(.orange)
                 }
             }
+            .disabled(store.settingsState == .saving)
             .navigationTitle("Configurações da câmera")
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("OK") { dismiss() } } }
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    if store.settingsState == .saving { ProgressView() }
+                    else { Button("OK") { dismiss() } }
+                }
+            }
         }
         .task { await store.loadSettings(bridgeURL: bridgeURL, bridgeToken: bridgeToken) }
     }

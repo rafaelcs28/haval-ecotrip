@@ -106,7 +106,7 @@ final class CameraVideoStoreTests: XCTestCase {
         var transport = CameraVideoTransport.testing
         transport.fetchLANCatalog = { _, _ in catalog }
         transport.openLANSegment = { _, _, _, _, _, _ in
-            FakeLANStream(statusCode: 200, contentRange: "bytes 0-2/3", contentLength: 3,
+            FakeLANStream(statusCode: 200, contentRange: nil, contentLength: 3,
                           chunks: [Data("abc".utf8)])
         }
         let store = makeStore(transport)
@@ -272,10 +272,10 @@ final class CameraVideoStoreTests: XCTestCase {
     func testLANRequiresExactStatusRangeAndLengthForFreshAndResumedResponses() async throws {
         let bytes = Data("abc".utf8), segment = Self.segment(bytes)
         let invalid: [(UInt64, Int, String?, UInt64?)] = [
-            (0, 206, "bytes 0-2/3", 3),
-            (0, 200, nil, 3),
-            (0, 200, "bytes 0-1/3", 2),
-            (0, 200, "bytes 0-2/3", nil),
+            (0, 206, nil, 3),
+            (0, 200, "bytes 0-2/3", 3),
+            (0, 200, nil, 2),
+            (0, 200, nil, nil),
             (1, 200, "bytes 1-2/3", 2),
             (1, 206, "bytes 0-2/3", 3),
             (1, 206, "bytes 1-2/3", 1),
@@ -423,7 +423,7 @@ final class CameraVideoStoreTests: XCTestCase {
         var downloads = 0
         transport.openLANSegment = { _, _, _, _, _, _ in
             downloads += 1
-            return FakeLANStream(statusCode: 200, contentRange: "bytes 0-2/3", contentLength: 3, chunks: [bytes])
+            return FakeLANStream(statusCode: 200, contentRange: nil, contentLength: 3, chunks: [bytes])
         }
         let store = makeStore(transport)
         let first = try await store.downloadSegment(tripID: "42", segment: segment, route: .lan,
@@ -434,7 +434,7 @@ final class CameraVideoStoreTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: try store.partialURL(tripID: "42", segmentID: 1, route: .lan).path))
 
         transport.openLANSegment = { _, _, _, _, _, _ in
-            FakeLANStream(statusCode: 200, contentRange: "bytes 0-2/3", contentLength: 3,
+            FakeLANStream(statusCode: 200, contentRange: nil, contentLength: 3,
                           chunks: [], delay: .seconds(10))
         }
         store.replaceTransportForTesting(transport)
@@ -453,7 +453,7 @@ final class CameraVideoStoreTests: XCTestCase {
 
     func testCloseActionCancelsAndJoinsStreamWithoutPromotingCorruptFile() async throws {
         let bytes = Data("abc".utf8), segment = Self.segment(bytes)
-        let stream = FakeLANStream(statusCode: 200, contentRange: "bytes 0-2/3", contentLength: 3,
+        let stream = FakeLANStream(statusCode: 200, contentRange: nil, contentLength: 3,
                                    chunks: [Data("a".utf8)], delayAfterChunks: .seconds(10))
         var transport = CameraVideoTransport.testing
         transport.openLANSegment = { _, _, _, _, _, _ in stream }
@@ -474,7 +474,7 @@ final class CameraVideoStoreTests: XCTestCase {
         let bytes = Data("abc".utf8), segment = Self.segment(bytes)
         var transport = CameraVideoTransport.testing
         transport.openLANSegment = { _, _, _, _, _, _ in
-            FakeLANStream(statusCode: 200, contentRange: "bytes 0-2/3", contentLength: 3, chunks: [bytes])
+            FakeLANStream(statusCode: 200, contentRange: nil, contentLength: 3, chunks: [bytes])
         }
         var sink: BlockingFileSink?
         let store = CameraVideoStore(rootURL: root, transport: transport, availableCapacity: { _ in 100 },
@@ -497,7 +497,7 @@ final class CameraVideoStoreTests: XCTestCase {
         var checks = 0
         var transport = CameraVideoTransport.testing
         transport.openLANSegment = { _, _, _, _, _, _ in
-            FakeLANStream(statusCode: 200, contentRange: "bytes 0-3/4", contentLength: 4,
+            FakeLANStream(statusCode: 200, contentRange: nil, contentLength: 4,
                           chunks: [Data("ab".utf8), Data("cd".utf8)])
         }
         let store = CameraVideoStore(rootURL: root, transport: transport, availableCapacity: { _ in
