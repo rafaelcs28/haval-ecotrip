@@ -17802,8 +17802,14 @@ function _handleAudioWs(ws, req) {
 const wssAudio = new WebSocketServer({ noServer: true });
 wssAudio.on('connection', _handleAudioWs);
 
-// Vídeo ao vivo: credenciais de sessão são curtas, escopadas e nunca logadas.
-// O bridge só encaminha HVC1 em memória; não transcodifica nem persiste frames.
+// HVC1/HVT1: somente metadados allowlisted entram em DATA_DIR, nunca bytes/tokens.
+const VIDEO_METADATA_FILE = path.join(DATA_DIR, 'video_metadata.json');
+let videoMetadata = {};
+try {
+  if (fs.statSync(VIDEO_METADATA_FILE).size <= 2 * 1024 * 1024) {
+    videoMetadata = JSON.parse(fs.readFileSync(VIDEO_METADATA_FILE, 'utf8'));
+  }
+} catch (_) {}
 const videoCommandBroker = new VideoCommandBroker({
   publish: (command, payload, callback) => {
     if (!mqttClient?.connected) {
@@ -17816,6 +17822,8 @@ const videoCommandBroker = new VideoCommandBroker({
   },
 });
 const videoRelay = new VideoRelay({
+  metadata: videoMetadata,
+  persistMetadata: metadata => atomicWriteFileSync(VIDEO_METADATA_FILE, JSON.stringify(metadata)),
   logger: (event, fields) => console.log(`[video] ${event}`, fields),
   sendCarCommand: (command, payload) => videoCommandBroker.send(command, payload),
   trustedProxyAddresses: String(process.env.VIDEO_TRUSTED_PROXY_IPS || '')
@@ -17838,7 +17846,7 @@ function _routeUpgrade(req, socket, head) {
   } else if (pathname === '/ws/audio') {
     wssAudio.handleUpgrade(req, socket, head, ws => wssAudio.emit('connection', ws, req));
   } else if (videoRelay.handleUpgrade(req, socket, head)) {
-    /* relay HVC1 autenticado por credencial curta da sessão */
+    /* relay HVC1/HVT1 autenticado por credencial curta da sessão */
   } else if (ocpp.lidaUpgrade(req, socket, head)) {
     /* carregador OCPP — o módulo já respondeu (aceitou ou devolveu 401) */
   } else {
@@ -18400,13 +18408,18 @@ mqttClient.on('message', (topic, payload, packet) => {
 
   // Resultado do comando de vídeo: resolve apenas a requisição correlacionada.
   // Consome antes de converter/logar payload para nunca expor credenciais.
-  {
-    const startResult = `${MQTT_PREFIX}/cmd/video_live_start/result`;
-    const stopResult = `${MQTT_PREFIX}/cmd/video_live_stop/result`;
-    if (topic === startResult || topic === stopResult) {
-      videoCommandBroker.acceptResult(topic === startResult ? 'video_live_start' : 'video_live_stop', payload);
-      return;
-    }
+  if (topic === `${MQTT_PREFIX}/video/catalog` || topic === `${MQTT_PREFIX}/video_catalog`) {
+    videoRelay.acceptCatalog(payload);
+    return;
+  }
+  if (topic === `${MQTT_PREFIX}/video/settings`) {
+    videoRelay.acceptSettings(payload);
+    return;
+  }
+  const videoResult = /\/cmd\/(video_live_start|video_live_stop|video_transfer|video_transfer_cancel|video_settings_get|video_settings_update|video_delete)\/result$/.exec(topic);
+  if (videoResult && topic === `${MQTT_PREFIX}/cmd/${videoResult[1]}/result`) {
+    videoCommandBroker.acceptResult(videoResult[1], payload);
+    return;
   }
 
   // Ciclo da chamada (carro→fone): {callId, state}. Relay como texto pros clientes

@@ -999,3 +999,161 @@ test('metadata persistence contains no video bytes, chunks, sockets, credentials
   assert.equal(state.pending, null);
   assert.equal(Object.values(state).some(Buffer.isBuffer), false);
 });
+
+test('catalog accepts exact Camera completed segment metadata and strips local-only fields', () => {
+  const { relay } = fixture(); const value = catalog();
+  Object.assign(value.trips[0].segments[0], { fileName: '000001.mp4', startMs: 1000, endMs: 2000,
+    durationUs: 1000000, codec: { mime: 'video/avc', width: 1280, height: 720, frameRate: 15, bitrate: 4000000 } });
+  assert.equal(relay.acceptCatalog(jsonBuffer(value)), true);
+  assert.deepEqual(relay.getCatalog().trips[0].segments, [{ segmentId: 1, byteSize: 3, sha256: SHA_ABC }]);
+});
+
+test('a long-running transfer reconnects after the original token deadline using fresh credentials', async () => {
+  const { relay, advance } = transferFixture(); const session = await transfer(relay);
+  transferSocket(relay, 'producer', session); const viewer = transferSocket(relay, 'viewer', session);
+  advance(2 * 60_000);
+  viewer.close(1000, 'network loss');
+  const resumed = await transfer(relay, { sessionId: session.sessionId });
+  assert.equal(resumed.sessionId, session.sessionId);
+  assert.equal(resumed.expiresAt, session.expiresAt);
+  assert.equal(transferSocket(relay, 'viewer', resumed).closed.length, 0);
+});
+
+test('live stop confirmation precedes transfer resume', async () => {
+  let confirmStop;
+  const { relay } = transferFixture({ sendCarCommand: command => command === 'video_live_stop'
+    ? new Promise(resolve => { confirmStop = resolve; }) : Promise.resolve() });
+  const session = await transfer(relay); const producer = transferSocket(relay, 'producer', session);
+  transferSocket(relay, 'viewer', session);
+  const live = await create(relay);
+  const pending = relay.closeSession(live.sessionId);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(JSON.parse(producer.sent.at(-1).data).type, 'pause');
+  confirmStop(); await pending;
+  assert.equal(JSON.parse(producer.sent.at(-1).data).type, 'resume');
+});
+
+test('new transfer remains paused while a live stop is still unconfirmed', async () => {
+  let confirmStop;
+  const { relay } = transferFixture({ sendCarCommand: command => command === 'video_live_stop'
+    ? new Promise(resolve => { confirmStop = resolve; }) : Promise.resolve() });
+  const live = await create(relay);
+  const stopping = relay.closeSession(live.sessionId);
+  const session = await transfer(relay); const producer = transferSocket(relay, 'producer', session);
+  assert.deepEqual(JSON.parse(producer.sent.at(-1).data), { type: 'pause', reason: 'live' });
+  confirmStop(); await stopping;
+  assert.equal(JSON.parse(producer.sent.at(-1).data).type, 'resume');
+});
+
+test('broker ignores malformed JSON result values without settling a pending settings request', async () => {
+  const broker = new VideoCommandBroker({ publish: (_command, _payload, callback) => callback(null) });
+  for (const value of [null, [], 'string', 7, true]) {
+    assert.equal(broker.acceptResult('video_settings_update', jsonBuffer(value)), false);
+  }
+  const pending = broker.send('video_settings_update', { requestId: 'settings-1' });
+  assert.equal(broker.acceptResult('video_transfer', jsonBuffer({ ok: true, requestId: 'settings-1' })), false);
+  broker.acceptResult('video_settings_update', jsonBuffer({ ok: true, requestId: 'settings-1' }));
+  await pending;
+});
+
+test('real transfer WebSockets accept the full 1024-byte ERROR payload from either role', async t => {
+  const { once } = require('node:events');
+  const { relay } = transferFixture({ trustedProxyAddresses: ['127.0.0.1'] });
+  const server = http.createServer();
+  server.on('upgrade', (req, socket, head) => relay.handleUpgrade(req, socket, head));
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => { server.close(); clearInterval(relay.timer); });
+  const session = await transfer(relay);
+  const viewer = new WebSocket(`ws://127.0.0.1:${server.address().port}/ws/video/transfer/viewer?session=${session.sessionId}`, {
+    headers: { authorization: `Bearer ${session.viewerToken}`, 'x-forwarded-proto': 'https' },
+  });
+  t.after(() => viewer.terminate()); await once(viewer, 'open');
+  const ended = once(viewer, 'close');
+  viewer.send(hvtFrame(4, Buffer.alloc(1024, 97)));
+  assert.equal((await ended)[0], 4000);
+});
+
+test('transfer start timeout, cancel failure, and late start confirmation clean all session state', async t => {
+  let confirm;
+  const { relay } = transferFixture({ commandTimeoutMs: 15, sendCarCommand: command => command === 'video_transfer'
+    ? new Promise(resolve => { confirm = resolve; }) : Promise.resolve() });
+  // Keep the process alive while the deliberately unref'ed command timeout runs.
+  const keepAlive = setInterval(() => {}, 1000); t.after(() => clearInterval(keepAlive));
+  await assert.rejects(transfer(relay), error => error.code === 'camera_command_timeout');
+  assert.equal(relay.transfers.size, 0); confirm();
+  await new Promise(resolve => setImmediate(resolve)); assert.equal(relay.transfers.size, 0);
+  const failure = transferFixture({ sendCarCommand: async command => {
+    if (command === 'video_transfer_cancel') throw Object.assign(new Error('offline'), { code: 'mqtt_offline' });
+  } });
+  const session = await transfer(failure.relay); const producer = transferSocket(failure.relay, 'producer', session);
+  const request = await api(t, failure.relay);
+  assert.equal((await request(`/api/video/transfer/session/${session.sessionId}`, 'DELETE')).status, 503);
+  assert.equal(producer.readyState, WebSocket.CLOSED); assert.equal(failure.relay.transfers.size, 0);
+});
+
+test('multi-segment completion and fresh resume preserve completed ordinals separately from byte offsets', async () => {
+  const { relay, commands } = fixture(); const value = catalog();
+  value.trips[0].byteSize = 6;
+  value.trips[0].segments.push({ segmentId: 2, byteSize: 3, sha256: SHA_ABC });
+  relay.acceptCatalog(jsonBuffer(value));
+  const session = await transfer(relay, { segmentIds: ['1', '2'] });
+  const producer = transferSocket(relay, 'producer', session); const viewer = transferSocket(relay, 'viewer', session);
+  for (const hex of [HVT.data, HVT.eof]) {
+    producer.emit('message', Buffer.from(hex, 'hex'), true);
+    viewer.emit('message', Buffer.from(HVT.ack, 'hex'), true);
+  }
+  assert.equal(relay.transfers.size, 1);
+  viewer.close(1000, 'lost');
+  const resumed = await transfer(relay, { sessionId: session.sessionId, segmentIds: ['1', '2'] });
+  assert.deepEqual(commands.filter(entry => entry.command === 'video_transfer').at(-1).payload.completedSegmentIds, ['1']);
+  const car = transferSocket(relay, 'producer', resumed); const phone = transferSocket(relay, 'viewer', resumed);
+  const ack = Buffer.from(HVT.ack, 'hex'); ack.writeUInt32BE(2, 8);
+  for (const hex of [HVT.data, HVT.eof]) {
+    const frame = Buffer.from(hex, 'hex'); frame.writeUInt32BE(2, 8);
+    car.emit('message', frame, true); phone.emit('message', ack, true);
+  }
+  assert.equal(relay.transfers.size, 0);
+});
+
+test('late ACK send failure from a disconnected attempt cannot close newly authorized sockets', async () => {
+  const { relay } = transferFixture(); const session = await transfer(relay);
+  const producer = transferSocket(relay, 'producer', session); const viewer = transferSocket(relay, 'viewer', session);
+  let failOldSend;
+  producer.send = (_data, _options, callback) => { failOldSend = callback; };
+  producer.emit('message', Buffer.from(HVT.data, 'hex'), true);
+  viewer.emit('message', Buffer.from(HVT.ack, 'hex'), true);
+  viewer.close(1000, 'lost');
+  const resumed = await transfer(relay, { sessionId: session.sessionId });
+  const car = transferSocket(relay, 'producer', resumed); const phone = transferSocket(relay, 'viewer', resumed);
+  failOldSend(new Error('old attempt failed'));
+  assert.equal(car.readyState, WebSocket.OPEN); assert.equal(phone.readyState, WebSocket.OPEN);
+});
+
+test('settings PATCH timeout and rejected deletion preserve authoritative metadata', async t => {
+  const { relay } = transferFixture({ commandTimeoutMs: 15, sendCarCommand: command => {
+    if (command === 'video_settings_update') return new Promise(() => {});
+    throw Object.assign(new Error('rejected'), { code: 'camera_rejected' });
+  } });
+  relay.acceptSettings(jsonBuffer({ ok: true, revision: 1, settings: SETTINGS }));
+  const request = await api(t, relay);
+  assert.equal((await request('/api/video/settings', 'PATCH', { expectedRevision: 1, patch: { reserveGb: 5 } })).status, 503);
+  assert.equal(relay.getSettings().settings.reserveGb, 1);
+  assert.equal((await request('/api/video/recordings', 'DELETE', { tripIds: ['42'], confirmation: 'DELETE_COMPLETED' })).status, 503);
+  assert.equal(relay.getCatalog().trips.length, 1); assert.equal(relay.deletingTrips.size, 0);
+});
+
+test('consumer rejects full-u64 ACK skips without rounding and mismatched resumed selection', async () => {
+  const { relay } = transferFixture(); const session = await transfer(relay);
+  const producer = transferSocket(relay, 'producer', session); const viewer = transferSocket(relay, 'viewer', session);
+  producer.emit('message', Buffer.from(HVT.data, 'hex'), true);
+  viewer.emit('message', Buffer.from(HVT.maxAck, 'hex'), true);
+  assert.equal(viewer.closed.at(-1).code, 4004);
+  await assert.rejects(transfer(relay, { sessionId: session.sessionId, tripId: '43' }), error => error.statusCode === 400);
+  assert.equal(relay.transfers.size, 1);
+});
+
+test('a corrupt null metadata file cannot prevent relay startup', () => {
+  const { relay } = fixture({ metadata: null });
+  assert.deepEqual(relay.getCatalog().trips, []);
+  assert.equal(relay.getSettings(), null);
+});

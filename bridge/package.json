@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
+    "test": "node --test test/*.test.js",
     "test:video": "node --test test/video-relay.test.js"
   },
   "dependencies": {
