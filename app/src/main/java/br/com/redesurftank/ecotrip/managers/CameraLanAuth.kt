@@ -2,7 +2,6 @@ package br.com.redesurftank.ecotrip.managers
 
 import android.content.Context
 import android.content.ComponentName
-import android.content.pm.PackageManager
 import java.security.MessageDigest
 import java.security.SecureRandom
 import javax.crypto.Mac
@@ -156,10 +155,7 @@ class CameraLanAuth(
                 service.permission == CameraVideoContract.CONTROL_PERMISSION &&
                 provider != null && provider.enabled && provider.exported &&
                 provider.packageName == CameraVideoContract.PACKAGE &&
-                provider.readPermission == CameraVideoContract.READ_PERMISSION &&
-                pm.checkSignatures(context.packageName, CameraVideoContract.PACKAGE) == PackageManager.SIGNATURE_MATCH &&
-                context.checkSelfPermission(CameraVideoContract.CONTROL_PERMISSION) == PackageManager.PERMISSION_GRANTED &&
-                context.checkSelfPermission(CameraVideoContract.READ_PERMISSION) == PackageManager.PERMISSION_GRANTED
+                provider.readPermission == null && provider.writePermission == null
         }.getOrDefault(false)
     }
 }

@@ -1,9 +1,8 @@
 package br.com.redesurftank.ecotrip.managers
 
-import android.content.ComponentName
 import android.content.Context
-import android.content.Intent
-import android.os.Build
+import android.net.Uri
+import android.os.Bundle
 import android.os.SystemClock
 import br.com.redesurftank.ecotrip.models.CarConstants
 import java.util.concurrent.Executors
@@ -72,17 +71,19 @@ class CameraTelemetryPublisher(
     private class AndroidSink(private val context: Context) : Sink {
         override fun send(sample: Sample): Boolean {
             context.packageManager.getPackageInfo(CameraVideoContract.PACKAGE, 0)
-            val intent = Intent(CameraVideoContract.ACTION_TELEMETRY_SAMPLE).apply {
-                component = ComponentName(CameraVideoContract.PACKAGE, CameraVideoContract.SERVICE)
-                putExtra(CameraVideoContract.EXTRA_MONOTONIC_MS, sample.monotonicMs)
-                putExtra(CameraVideoContract.EXTRA_WALL_CLOCK_MS, sample.wallClockMs)
-                putExtra(CameraVideoContract.EXTRA_SPEED_KMH, sample.speedKmh)
-                putExtra(CameraVideoContract.EXTRA_MOTOR_POWER_KW, sample.motorPowerKw)
-                putExtra(CameraVideoContract.EXTRA_VALIDITY_FLAGS, sample.validityFlags)
+            val extras = Bundle().apply {
+                putLong(CameraVideoContract.EXTRA_MONOTONIC_MS, sample.monotonicMs)
+                putLong(CameraVideoContract.EXTRA_WALL_CLOCK_MS, sample.wallClockMs)
+                putFloat(CameraVideoContract.EXTRA_SPEED_KMH, sample.speedKmh)
+                putFloat(CameraVideoContract.EXTRA_MOTOR_POWER_KW, sample.motorPowerKw)
+                putInt(CameraVideoContract.EXTRA_VALIDITY_FLAGS, sample.validityFlags)
             }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent)
-            else context.startService(intent)
-            return true
+            val result = context.contentResolver.call(
+                Uri.parse("content://${CameraVideoContract.AUTHORITY}"),
+                "command", CameraVideoContract.ACTION_TELEMETRY_SAMPLE, extras,
+            )
+            return result?.getString(CameraVideoContract.EXTRA_COMMAND_STATUS) ==
+                CameraVideoContract.STATUS_APPLIED
         }
     }
 

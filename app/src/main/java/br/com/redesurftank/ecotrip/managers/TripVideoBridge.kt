@@ -1,11 +1,10 @@
 package br.com.redesurftank.ecotrip.managers
 
 import android.content.BroadcastReceiver
-import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import android.os.Build
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import org.json.JSONArray
@@ -181,19 +180,28 @@ class TripVideoBridge(
         override fun send(command: CameraCommand): CommandResult {
             context.packageManager.getPackageInfo(CameraVideoContract.PACKAGE, 0)
             val envelope = CameraCommandCodec.encode(command)
-            val intent = Intent(envelope.action).apply {
-                component = ComponentName(CameraVideoContract.PACKAGE, CameraVideoContract.SERVICE)
+            val extras = Bundle().apply {
                 for ((key, value) in envelope.extras) when (value) {
-                    is Int -> putExtra(key, value)
-                    is Long -> putExtra(key, value)
-                    is String -> putExtra(key, value)
-                    is List<*> -> putStringArrayListExtra(key, ArrayList(value.filterIsInstance<String>()))
+                    is Int -> putInt(key, value)
+                    is Long -> putLong(key, value)
+                    is String -> putString(key, value)
+                    is List<*> -> putStringArrayList(key, ArrayList(value.filterIsInstance<String>()))
                     else -> throw IllegalArgumentException("extra não suportado: $key")
                 }
             }
-            return CameraAcknowledgements.broker.dispatchAndAwait(command.requestId, command.revision) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent)
-                else context.startService(intent)
+            val result = context.contentResolver.call(
+                Uri.parse("content://${CameraVideoContract.AUTHORITY}"),
+                "command", envelope.action, extras,
+            ) ?: return CommandResult.unavailable()
+            return when (result.getString(CameraVideoContract.EXTRA_COMMAND_STATUS)) {
+                CameraVideoContract.STATUS_APPLIED -> CommandResult.applied()
+                CameraVideoContract.STATUS_NO_OP -> CommandResult.noOp()
+                CameraVideoContract.STATUS_STALE -> CommandResult.stale(
+                    result.getLong(CameraVideoContract.EXTRA_CAMERA_REVISION, -1),
+                )
+                CameraVideoContract.STATUS_REJECTED -> CommandResult.rejected()
+                CameraVideoContract.STATUS_ERROR -> CommandResult.error()
+                else -> CommandResult.unavailable()
             }
         }
     }

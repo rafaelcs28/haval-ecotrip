@@ -28,7 +28,7 @@ docs/        instalação, operação, arquitetura, qualidade e evidências
 3. MQTT e o bridge sincronizam estado, históricos e comandos. O bridge serve REST, WebSocket e a PWA.
 4. No iOS, `CarStore`, `BridgeRouter`, stores especializados e views SwiftUI consomem o bridge e gerenciam estado local, notificações e Live Activities.
 5. O iPad/OBD pode receber dados do bridge ou BLE/ELM327 e enviar telemetria por MQTT/HTTP; a descoberta LAN reduz latência e possui fallback remoto.
-6. `TripVideoBridge` reconcilia a viagem automática com o APK Haval Camera por IPC explícito protegido por assinatura. Cada comando persistente só altera o estado confirmado do EcoTrip depois de um acknowledgement correlacionado por request/revision; a espera limitada ocorre no executor de câmera, nunca na main looper. O mesmo ID/start original permite reabrir no Camera uma viagem concluída que o EcoTrip retomou dentro da janela. O EcoTrip apenas encaminha catálogo com revisão persistida atomicamente, configurações confirmadas e telemetria CAN limitada; falhas da câmera não interrompem viagem nem telemetria do veículo.
+6. `TripVideoBridge` reconcilia a viagem automática com o APK Haval Camera pelo provider local. O Camera valida o pacote EcoTrip e o SHA-256 de seu certificado no UID Binder antes de encaminhar o comando ao serviço interno protegido por assinatura. Cada comando persistente só altera o estado confirmado do EcoTrip depois de um acknowledgement correlacionado por request/revision; a espera limitada ocorre no executor de câmera, nunca na main looper. O mesmo ID/start original permite reabrir no Camera uma viagem concluída que o EcoTrip retomou dentro da janela. O EcoTrip apenas encaminha catálogo com revisão persistida atomicamente, configurações confirmadas e telemetria CAN limitada; falhas da câmera não interrompem viagem nem telemetria do veículo.
 7. Para galeria iOS, `CameraVideoStore` mantém parciais separados por rota, verifica SHA-256 antes de promoção atômica e reinicia em offset zero quando encontra um parcial completo corrompido. `CameraVideoNetwork` reutiliza uma sessão LAN curta, conserva a identidade de limpeza até resposta terminal e aceita o `200` legado durante compatibilidade, além do contrato final `204/404`.
 
 ## Dados e runtime
@@ -42,7 +42,7 @@ Arquivos de estado, históricos, tokens, certificados e configurações reais do
 - Autenticação do bridge, pareamento e armazenamento seguro de credenciais.
 - Confirmação do estado do veículo antes de comandos ou instalação de atualização.
 - Assinaturas Android/Apple e identificadores de bundle/application ID.
-- Haval Camera usa permissões Android `signature`, ações IPC versão 1 e o provider `br.com.redesurftank.havalcamera.video`; os dois APKs precisam da mesma assinatura de produção.
+- Haval Camera mantém seu serviço em permissão Android `signature` e expõe somente o provider `br.com.redesurftank.havalcamera.video`. O provider aceita o EcoTrip separadamente assinado apenas quando pacote e certificado fixados coincidem; catálogo, arquivos, configurações, telemetria e comandos passam por essa verificação.
 - O DELETE LAN de sessão é autenticado e atômico: a primeira chamada remove a sessão e demais credenciais, preservando somente digest do controle e validade original em tombstone limitado; repetição autenticada retorna `204` até a validade, inclusive após perda da primeira resposta.
 
 ## Decisões
