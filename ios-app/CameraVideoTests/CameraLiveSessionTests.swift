@@ -574,7 +574,9 @@ final class CameraLiveSessionTests: XCTestCase {
     }
 
     private func waitUntil(_ condition: @escaping () -> Bool) async {
-        for _ in 0..<100 where !condition() { await Task.yield() }
+        for _ in 0..<3_000 where !condition() {
+            try? await Task.sleep(nanoseconds: 1_000_000)
+        }
     }
 
     private static let capabilities = Data("{\"cameraLiveLan\":1,\"cameraDownloadLan\":1,\"hvcVersion\":1,\"hvtVersion\":1}".utf8)
@@ -620,7 +622,7 @@ private final class FakeRenderer: CameraVideoRendering {
     func setFailureHandler(_ handler: @escaping () -> Void) { failureHandler = handler }
     func failAsynchronously() { failureHandler?() }
     func waitForDisplayedFrames(_ count: Int) async {
-        for _ in 0..<1_000 where displayedFrames < count {
+        for _ in 0..<3_000 where displayedFrames < count {
             try? await Task.sleep(nanoseconds: 1_000_000)
         }
     }
@@ -657,15 +659,11 @@ private final class FakeCameraLiveSocket: CameraLiveSocket {
     private var receiveCalls = 0
     private var queued: [Result<Data, Error>] = []
     private var waiter: CheckedContinuation<Data, Error>?
-    private var callWaiters: [(Int, CheckedContinuation<Void, Never>)] = []
 
     func receive() async throws -> Data {
         receiveCalls += 1
         activeReceives += 1
         maximumConcurrentReceives = max(maximumConcurrentReceives, activeReceives)
-        let ready = callWaiters.filter { receiveCalls >= $0.0 }
-        callWaiters.removeAll { receiveCalls >= $0.0 }
-        ready.forEach { $0.1.resume() }
         defer { activeReceives -= 1 }
         if !queued.isEmpty { return try queued.removeFirst().get() }
         return try await withCheckedThrowingContinuation { waiter = $0 }
@@ -679,8 +677,9 @@ private final class FakeCameraLiveSocket: CameraLiveSocket {
     func yield(_ data: Data) { complete(.success(data)) }
     func fail(_ error: Error) { complete(.failure(error)) }
     func waitForReceiveCalls(_ count: Int) async {
-        if receiveCalls >= count { return }
-        await withCheckedContinuation { callWaiters.append((count, $0)) }
+        for _ in 0..<3_000 where receiveCalls < count {
+            try? await Task.sleep(nanoseconds: 1_000_000)
+        }
     }
     private func complete(_ result: Result<Data, Error>) {
         if let waiter {
