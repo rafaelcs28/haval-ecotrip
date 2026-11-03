@@ -11,6 +11,7 @@ const {
   VideoRelay,
   VideoCommandBroker,
   parseHvc1,
+  parseHvt1,
   MAX_BUFFERED_BYTES,
 } = require('../video-relay');
 
@@ -23,8 +24,9 @@ class FakeSocket extends EventEmitter {
     this.closed = [];
   }
 
-  send(data, options) {
+  send(data, options, callback) {
     this.sent.push({ data, options });
+    callback?.();
   }
 
   close(code, reason) {
@@ -543,4 +545,457 @@ test('incomplete session is removed when the 60-second connection window expires
   assert.equal(relay.hasSession(session.sessionId), false);
   assert.equal(producer.closed.at(-1).code, 4000);
   assert.equal(commands.at(-1).command, 'video_live_stop');
+});
+
+// Verbatim Camera VIDEO_PROTOCOL.md at e1d0d7fc268bd9a1e0de6838e4b86f2b640ac008.
+const HVT = {
+  data: '485654310101000000000001000000000000000000000003ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad616263',
+  eof: '485654310102000000000001000000000000000300000000ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad',
+  ack: '4856543101030000000000010000000000000003000000000000000000000000000000000000000000000000000000000000000000000000',
+  error: '485654310104000000000001000000000000000000000003ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad616263',
+  highAck: '4856543101030000000000018000000000000000000000000000000000000000000000000000000000000000000000000000000000000000',
+  maxAck: '485654310103000000000001ffffffffffffffff000000000000000000000000000000000000000000000000000000000000000000000000',
+};
+const SHA_ABC = 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad';
+const SETTINGS = {
+  automaticRecording: true, recordParkedLive: false, remoteLive: true, remoteDownloads: true,
+  automaticDeletion: true, overlayMaster: true, overlayDateTime: true, overlaySpeed: true,
+  overlayAcceleration: true, overlayDriveState: true, overlayDecelerationRegen: true,
+  quality: 'standard', reserveGb: 1, overlayPosition: 'bottom_left',
+};
+const jsonBuffer = value => Buffer.from(JSON.stringify(value));
+function catalog(revision = 1, trips) {
+  return { ok: true, catalogRevision: revision, updatedAt: 1_700_000_000_000 + revision,
+    trips: trips || [{ tripId: '42', source: 'automatic', startMs: 1000, endMs: 2000,
+      byteSize: 3, completed: true, segments: [{ segmentId: 1, byteSize: 3, sha256: SHA_ABC }] }] };
+}
+function transferFixture(options = {}) {
+  const f = fixture(options);
+  assert.equal(f.relay.acceptCatalog(jsonBuffer(catalog())), true);
+  return f;
+}
+async function transfer(relay, extra = {}) {
+  return relay.createTransfer({ publicUrl: 'https://bridge.example', tripId: '42', segmentIds: ['1'], ...extra });
+}
+function transferSocket(relay, role, session, socket = new FakeSocket()) {
+  relay.attach(role, {
+    url: `/ws/video/transfer/${role === 'producer' ? 'car' : 'viewer'}?session=${session.sessionId}`,
+    headers: { authorization: `Bearer ${session[`${role}Token`]}` },
+  }, socket);
+  return socket;
+}
+async function api(t, relay) {
+  const app = express();
+  app.use(express.json());
+  relay.installRoutes(app, {
+    requireAuth: (req, res, next) => req.headers.authorization === 'Bearer owner'
+      ? next() : res.status(401).json({ error: 'unauthorized' }),
+    publicUrl: () => 'https://bridge.example',
+  });
+  const server = http.createServer(app);
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => { server.closeAllConnections(); server.close(); clearInterval(relay.timer); });
+  return async (path, method = 'GET', body, authorized = true) => fetch(
+    `http://127.0.0.1:${server.address().port}${path}`, {
+      method, headers: { 'content-type': 'application/json', ...(authorized ? { authorization: 'Bearer owner' } : {}) },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    },
+  );
+}
+function hvtFrame(type, payload = Buffer.alloc(0), offset = 0n, ordinal = 1) {
+  const frame = Buffer.alloc(56 + payload.length);
+  frame.write('HVT1'); frame[4] = 1; frame[5] = type;
+  frame.writeUInt32BE(ordinal, 8); frame.writeBigUInt64BE(offset, 12);
+  frame.writeUInt32BE(payload.length, 20);
+  if (type === 1 || type === 4) require('node:crypto').createHash('sha256').update(payload).digest().copy(frame, 24);
+  payload.copy(frame, 56);
+  return frame;
+}
+
+test('HVT1 matches all six canonical fixtures and preserves full unsigned u64 offsets', () => {
+  for (const [name, hex] of Object.entries(HVT)) {
+    const parsed = parseHvt1(Buffer.from(hex, 'hex'));
+    assert.equal(parsed.type, { data: 1, eof: 2, ack: 3, error: 4, highAck: 3, maxAck: 3 }[name]);
+    assert.equal(parsed.ordinal, 1);
+    assert.equal(parsed.offset, { data: 0n, eof: 3n, ack: 3n, error: 0n,
+      highAck: 9223372036854775808n, maxAck: 18446744073709551615n }[name]);
+  }
+  const maxOrdinal = hvtFrame(3, Buffer.alloc(0), 0n, 4294967295);
+  assert.equal(parseHvt1(maxOrdinal).ordinal, 4294967295);
+});
+
+test('HVT1 accepts the 262144 byte cap and signed-boundary crossing, rejects unsigned overflow', () => {
+  assert.equal(parseHvt1(hvtFrame(1, Buffer.alloc(262144))).type, 1);
+  assert.throws(() => parseHvt1(hvtFrame(1, Buffer.alloc(262145))));
+  assert.equal(parseHvt1(hvtFrame(1, Buffer.from('abc'), 9223372036854775807n)).offset, 9223372036854775807n);
+  assert.equal(parseHvt1(hvtFrame(1, Buffer.from('abc'), 18446744073709551612n)).offset, 18446744073709551612n);
+  for (const offset of [18446744073709551613n, 18446744073709551614n, 18446744073709551615n]) {
+    assert.throws(() => parseHvt1(hvtFrame(1, Buffer.from('abc'), offset)));
+  }
+});
+
+test('HVT1 rejects malformed headers, lengths, hashes, flags, ACK digest, ERROR offset and UTF-8', () => {
+  const data = Buffer.from(HVT.data, 'hex');
+  const mutations = [[0, 0], [4, 2], [5, 5], [6, 1], [7, 1], [23, 2], [24, 0]];
+  for (const [index, value] of mutations) {
+    const bad = Buffer.from(data); bad[index] = value;
+    assert.throws(() => parseHvt1(bad));
+  }
+  for (const bad of [data.subarray(0, 55), data.subarray(0, 58), Buffer.concat([data, Buffer.from([0])]),
+    hvtFrame(1), hvtFrame(4), hvtFrame(4, Buffer.alloc(1025)),
+    hvtFrame(4, Buffer.from([0xc0, 0x80])), hvtFrame(4, Buffer.from([0xed, 0xa0, 0x80])),
+    hvtFrame(4, Buffer.from([0xe2, 0x82])), hvtFrame(4, Buffer.from('abc'), 1n),
+    hvtFrame(2, Buffer.from('x')), hvtFrame(3, Buffer.from('x'))]) assert.throws(() => parseHvt1(bad));
+  const ack = Buffer.from(HVT.ack, 'hex'); ack[55] = 1;
+  assert.throws(() => parseHvt1(ack));
+  assert.equal(parseHvt1(hvtFrame(4, Buffer.from('é'.repeat(512)))).type, 4);
+});
+
+test('catalog atomically replaces complete revisions, propagates retention and rejects stale or mixed revisions', () => {
+  const writes = [];
+  const { relay } = fixture({ persistMetadata: value => writes.push(JSON.stringify(value)) });
+  assert.equal(relay.acceptCatalog(jsonBuffer(catalog())), true);
+  const before = relay.getCatalog();
+  const invalid = catalog(2); invalid.trips.push({ ...invalid.trips[0], tripId: '../active' });
+  assert.equal(relay.acceptCatalog(jsonBuffer(invalid)), false);
+  assert.deepEqual(relay.getCatalog(), before);
+  assert.equal(writes.length, 1);
+  assert.equal(relay.acceptCatalog(jsonBuffer({ ...catalog(), updatedAt: 1_700_000_000_000 })), false);
+  assert.equal(relay.acceptCatalog(jsonBuffer(catalog(0))), false);
+  assert.equal(relay.acceptCatalog(jsonBuffer(catalog(1, []))), false);
+  assert.equal(relay.acceptCatalog(jsonBuffer(catalog(2, []))), true);
+  assert.deepEqual(relay.getCatalog().trips, []);
+});
+
+test('catalog preserves legacy completed summaries, excludes active trips and marks stale metadata', () => {
+  const { relay, advance } = fixture();
+  const summary = { tripId: '43', source: 'manual', startMs: 1000, endMs: 2000, byteSize: 3, segments: 1 };
+  const active = { ...summary, tripId: '44', endMs: null, completed: false };
+  assert.equal(relay.acceptCatalog(jsonBuffer(catalog(1, [summary, active]))), true);
+  assert.equal(relay.getCatalog().trips.length, 1);
+  assert.equal(relay.getCatalog().trips[0].tripId, '43');
+  assert.equal(relay.getCatalog().stale, false);
+  advance(5 * 60_000 + 2);
+  assert.equal(relay.getCatalog().stale, true);
+});
+
+test('catalog rejects invalid paths, sizes, digests, duplicate ordinals and unknown captured fields', () => {
+  const { relay } = fixture();
+  const invalid = [
+    value => { value.trips[0].segments[0].fileName = '../secret.mp4'; },
+    value => { value.trips[0].byteSize = -1; },
+    value => { value.trips[0].segments[0].byteSize = Number.MAX_SAFE_INTEGER + 1; },
+    value => { value.trips[0].segments[0].sha256 = 'invalid'; },
+    value => { value.trips[0].segments.push(value.trips[0].segments[0]); },
+    value => { value.trips[0].segments[0].body = 'captured-video'; },
+    value => { value.payload = 'captured-video'; },
+  ];
+  for (const mutate of invalid) { const value = catalog(); mutate(value); assert.equal(relay.acceptCatalog(jsonBuffer(value)), false); }
+  assert.equal(relay.acceptCatalog(Buffer.alloc(1024 * 1024 + 1)), false);
+});
+
+test('metadata persistence failure leaves the previous revision and restored metadata is validated', () => {
+  let fail = false;
+  const f = fixture({ persistMetadata: () => { if (fail) throw new Error('disk full'); } });
+  assert.equal(f.relay.acceptCatalog(jsonBuffer(catalog())), true);
+  fail = true;
+  assert.equal(f.relay.acceptCatalog(jsonBuffer(catalog(2, []))), false);
+  assert.equal(f.relay.getCatalog().catalogRevision, 1);
+  const restored = fixture({ metadata: { catalog: catalog(), settings: null } }).relay;
+  assert.equal(restored.getCatalog().trips.length, 1);
+  const unsafe = catalog(); unsafe.trips[0].segments[0].payload = 'secret';
+  assert.equal(fixture({ metadata: { catalog: unsafe } }).relay.getCatalog().trips.length, 0);
+});
+
+test('all new REST routes enforce owner authentication before accessing metadata or commands', async t => {
+  const { relay, commands } = fixture();
+  const request = await api(t, relay);
+  for (const [path, method] of [['/api/video/catalog', 'GET'], ['/api/video/settings', 'GET'],
+    ['/api/video/settings', 'PATCH'], ['/api/video/recordings', 'DELETE'],
+    ['/api/video/transfer/session', 'POST'], ['/api/video/transfer/session/nope', 'DELETE']]) {
+    assert.equal((await request(path, method, method === 'GET' ? undefined : {}, false)).status, 401);
+  }
+  assert.equal(commands.length, 0);
+});
+
+test('settings GET returns last confirmed snapshot and PATCH awaits the correlated authoritative result', async t => {
+  let confirm;
+  const { relay, commands } = fixture({ sendCarCommand: (command, payload) => {
+    commands.push({ command, payload }); return new Promise(resolve => { confirm = resolve; });
+  } });
+  assert.equal(relay.acceptSettings(jsonBuffer({ ok: true, revision: 1, settings: SETTINGS })), true);
+  const request = await api(t, relay);
+  assert.equal((await (await request('/api/video/settings')).json()).revision, 1);
+  let settled = false;
+  const pending = request('/api/video/settings', 'PATCH', { expectedRevision: 1, patch: { reserveGb: 5 } })
+    .finally(() => { settled = true; });
+  while (!confirm) await new Promise(resolve => setImmediate(resolve));
+  assert.equal(settled, false);
+  assert.equal(relay.getSettings().settings.reserveGb, 1);
+  assert.equal(commands[0].command, 'video_settings_update');
+  confirm({ ok: true, revision: 2, applied: true, settings: { ...SETTINGS, reserveGb: 5 } });
+  assert.equal((await pending).status, 200);
+  assert.equal(relay.getSettings().settings.reserveGb, 5);
+});
+
+test('settings validates patch and conflicts return the unchanged latest confirmed snapshot', async t => {
+  const { relay, commands } = fixture();
+  relay.acceptSettings(jsonBuffer({ ok: true, revision: 3, settings: SETTINGS }));
+  const request = await api(t, relay);
+  for (const patch of [{}, { unknown: true }, { reserveGb: 2 }, { reserveGb: 1.5 }, { remoteLive: 'true' }, { quality: 'ultra' }]) {
+    assert.equal((await request('/api/video/settings', 'PATCH', { expectedRevision: 3, patch })).status, 400);
+  }
+  const conflict = await request('/api/video/settings', 'PATCH', { expectedRevision: 2, patch: { reserveGb: 5 } });
+  assert.equal(conflict.status, 409);
+  assert.equal((await conflict.json()).revision, 3);
+  assert.equal(commands.length, 0);
+  assert.equal(relay.acceptSettings(jsonBuffer({ ok: true, revision: 2, settings: SETTINGS })), false);
+  assert.equal(relay.acceptSettings(jsonBuffer({ ok: true, revision: 3, settings: { ...SETTINGS, reserveGb: 20 } })), false);
+});
+
+test('settings camera-side conflict reconciles metadata and offline/timeout never applies the requested patch', async t => {
+  let response = { ok: true, applied: false, conflict: true, revision: 4, settings: SETTINGS };
+  const { relay } = fixture({ sendCarCommand: async () => { if (response instanceof Error) throw response; return response; } });
+  relay.acceptSettings(jsonBuffer({ ok: true, revision: 3, settings: SETTINGS }));
+  const request = await api(t, relay);
+  assert.equal((await request('/api/video/settings', 'PATCH', { expectedRevision: 3, patch: { reserveGb: 5 } })).status, 409);
+  assert.equal(relay.getSettings().revision, 4);
+  response = Object.assign(new Error('offline'), { code: 'mqtt_offline' });
+  assert.equal((await request('/api/video/settings', 'PATCH', { expectedRevision: 4, patch: { reserveGb: 5 } })).status, 503);
+  assert.equal(relay.getSettings().settings.reserveGb, 1);
+});
+
+test('recording deletion requires explicit confirmation and completed unleased trip membership', async t => {
+  const { relay, commands } = transferFixture();
+  const request = await api(t, relay);
+  assert.equal((await request('/api/video/recordings', 'DELETE', { tripIds: ['42'] })).status, 400);
+  assert.equal((await request('/api/video/recordings', 'DELETE', { tripIds: ['active'], confirmation: 'DELETE_COMPLETED' })).status, 400);
+  await transfer(relay);
+  assert.equal((await request('/api/video/recordings', 'DELETE', { tripIds: ['42'], confirmation: 'DELETE_COMPLETED' })).status, 409);
+  assert.equal(commands.filter(entry => entry.command === 'video_delete').length, 0);
+});
+
+test('confirmed deletion waits for car and only authoritative catalog removes metadata', async t => {
+  let confirm;
+  const { relay, commands } = transferFixture({ sendCarCommand: (command, payload) => {
+    commands.push({ command, payload }); return new Promise(resolve => { confirm = resolve; });
+  } });
+  const request = await api(t, relay);
+  const pending = request('/api/video/recordings', 'DELETE', { tripIds: ['42'], confirmation: 'DELETE_COMPLETED' });
+  while (!confirm) await new Promise(resolve => setImmediate(resolve));
+  assert.equal(relay.getCatalog().trips.length, 1);
+  assert.equal(commands[0].command, 'video_delete');
+  confirm({ ok: true });
+  assert.equal((await pending).status, 204);
+  assert.equal(relay.getCatalog().trips.length, 1);
+  relay.acceptCatalog(jsonBuffer(catalog(2, [])));
+  assert.deepEqual(relay.getCatalog().trips, []);
+});
+
+test('transfer REST returns only viewer credential, validates selection and enforces one transfer', async t => {
+  const { relay, commands } = transferFixture();
+  const request = await api(t, relay);
+  for (const body of [{ tripId: '../42', segmentIds: ['1'] }, { tripId: '42', segmentIds: ['2'] },
+    { tripId: '42', segmentIds: ['1', '1'] }, { tripId: '42', segmentIds: [] }]) {
+    assert.equal((await request('/api/video/transfer/session', 'POST', body)).status, 400);
+  }
+  const accepted = await request('/api/video/transfer/session', 'POST', { tripId: '42', segmentIds: ['1'] });
+  assert.equal(accepted.status, 201);
+  const body = await accepted.json();
+  assert.equal(body.producerToken, undefined);
+  assert.match(body.viewerUrl, /^wss:\/\/bridge.example\/ws\/video\/transfer\/viewer\?/);
+  assert.equal(commands[0].command, 'video_transfer');
+  assert.equal(commands[0].payload.viewerSession, body.sessionId);
+  assert.notEqual(commands[0].payload.producerToken, body.viewerToken);
+  assert.equal(JSON.stringify(commands).includes(body.viewerToken), false);
+  assert.equal((await request('/api/video/transfer/session', 'POST', { tripId: '42', segmentIds: ['1'] })).status, 409);
+});
+
+test('transfer credentials are role/protocol scoped, single use, TLS-only and expire at 60 seconds', async () => {
+  const { relay, advance } = transferFixture();
+  const session = await transfer(relay);
+  const wrong = transferSocket(relay, 'producer', { ...session, producerToken: session.viewerToken });
+  assert.equal(wrong.closed[0].code, 4003);
+  const cross = attach(relay, 'viewer', session.sessionId, session.viewerToken);
+  assert.equal(cross.closed[0].code, 4003);
+  transferSocket(relay, 'producer', session);
+  const duplicate = transferSocket(relay, 'producer', session);
+  assert.equal(duplicate.closed[0].code, 4005);
+  const raw = { output: '', write(value) { this.output += value; }, destroy() {} };
+  relay.handleUpgrade({ url: `/ws/video/transfer/viewer?session=${session.sessionId}`,
+    headers: { authorization: `Bearer ${session.viewerToken}` }, socket: {} }, raw, Buffer.alloc(0));
+  assert.match(raw.output, /^HTTP\/1.1 426/);
+  advance(60_000);
+  assert.equal(transferSocket(relay, 'viewer', session).closed[0].code, 4002);
+});
+
+test('transfer forwards DATA and viewer durable ACK only after successful viewer send, EOF completes', async () => {
+  const { relay } = transferFixture();
+  const session = await transfer(relay);
+  const producer = transferSocket(relay, 'producer', session);
+  const viewer = new FakeSocket();
+  let finishSend;
+  viewer.send = (data, options, callback) => { viewer.sent.push({ data, options }); finishSend = callback; };
+  transferSocket(relay, 'viewer', session, viewer);
+  const data = Buffer.from(HVT.data, 'hex');
+  producer.emit('message', data, true);
+  assert.equal(viewer.sent[0].data, data);
+  assert.equal(producer.sent.filter(entry => Buffer.isBuffer(entry.data)).length, 0);
+  finishSend();
+  viewer.emit('message', Buffer.from(HVT.ack, 'hex'), true);
+  assert.equal(producer.sent.at(-1).data.toString('hex'), HVT.ack);
+  producer.emit('message', Buffer.from(HVT.eof, 'hex'), true);
+  finishSend();
+  assert.equal(producer.readyState, WebSocket.OPEN);
+  viewer.emit('message', Buffer.from(HVT.ack, 'hex'), true);
+  assert.equal(producer.closed.at(-1).code, 4000);
+  assert.equal(viewer.closed.at(-1).code, 4000);
+  assert.equal(relay.transfers.size, 0);
+});
+
+test('early ACK cannot advance or be relayed before the viewer send callback', async () => {
+  const { relay } = transferFixture();
+  const session = await transfer(relay);
+  const producer = transferSocket(relay, 'producer', session);
+  const viewer = new FakeSocket();
+  viewer.send = () => {};
+  transferSocket(relay, 'viewer', session, viewer);
+  producer.emit('message', Buffer.from(HVT.data, 'hex'), true);
+  viewer.emit('message', Buffer.from(HVT.ack, 'hex'), true);
+  assert.equal(viewer.closed.at(-1).code, 4004);
+  assert.equal(producer.sent.filter(entry => Buffer.isBuffer(entry.data)).length, 0);
+});
+
+test('transfer rejects unknown ordinal, offset gaps, out-of-bounds EOF and wrong whole-file digest', async () => {
+  for (const bad of [hvtFrame(1, Buffer.from('abc'), 0n, 2), hvtFrame(1, Buffer.from('abc'), 1n),
+    hvtFrame(1, Buffer.from('abcd')), Buffer.from(HVT.eof, 'hex'), Buffer.from('not-hvt')]) {
+    const { relay } = transferFixture();
+    const session = await transfer(relay);
+    const producer = transferSocket(relay, 'producer', session);
+    const viewer = transferSocket(relay, 'viewer', session);
+    producer.emit('message', bad, true);
+    assert.equal(producer.closed.at(-1).code, 4004);
+    assert.equal(viewer.sent.length, 0);
+  }
+  const { relay } = transferFixture(); const session = await transfer(relay);
+  const producer = transferSocket(relay, 'producer', session); const viewer = transferSocket(relay, 'viewer', session);
+  producer.emit('message', Buffer.from(HVT.data, 'hex'), true);
+  viewer.emit('message', Buffer.from(HVT.ack, 'hex'), true);
+  producer.emit('message', hvtFrame(2, Buffer.alloc(0), 3n), true);
+  assert.equal(producer.closed.at(-1).code, 4004);
+});
+
+test('viewer cannot ACK skipped bytes or send DATA, and producer cannot send ACK', async () => {
+  for (const [role, data] of [['viewer', hvtFrame(3, Buffer.alloc(0), 2n)],
+    ['viewer', Buffer.from(HVT.data, 'hex')], ['producer', Buffer.from(HVT.ack, 'hex')]]) {
+    const { relay } = transferFixture(); const session = await transfer(relay);
+    const producer = transferSocket(relay, 'producer', session); const viewer = transferSocket(relay, 'viewer', session);
+    producer.emit('message', Buffer.from(HVT.data, 'hex'), true);
+    (role === 'viewer' ? viewer : producer).emit('message', data, true);
+    assert.equal((role === 'viewer' ? viewer : producer).closed.at(-1).code, 4004);
+  }
+});
+
+test('disconnect retains only ACKed progress and reconnect rotates credentials on the same transfer', async () => {
+  const { relay, commands } = transferFixture(); const session = await transfer(relay);
+  const producer = transferSocket(relay, 'producer', session); const viewer = transferSocket(relay, 'viewer', session);
+  producer.emit('message', Buffer.from(HVT.data, 'hex'), true);
+  viewer.emit('message', Buffer.from(HVT.ack, 'hex'), true);
+  viewer.close(1000, 'network loss');
+  const resumed = await transfer(relay, { sessionId: session.sessionId });
+  assert.equal(resumed.sessionId, session.sessionId);
+  assert.notEqual(resumed.viewerToken, session.viewerToken);
+  assert.equal(transferSocket(relay, 'viewer', session).closed[0].code, 4001);
+  assert.deepEqual(commands.filter(entry => entry.command === 'video_transfer').at(-1).payload.offsets, { '1': '3' });
+  assert.equal(transferSocket(relay, 'producer', resumed).closed.length, 0);
+});
+
+test('unacknowledged chunks and late send callbacks never advance reconnect offsets', async () => {
+  const { relay, commands } = transferFixture(); const session = await transfer(relay);
+  const producer = transferSocket(relay, 'producer', session); const viewer = new FakeSocket();
+  let callback; viewer.send = (_data, _options, done) => { callback = done; };
+  transferSocket(relay, 'viewer', session, viewer);
+  producer.emit('message', Buffer.from(HVT.data, 'hex'), true);
+  viewer.close(1000, 'lost');
+  await transfer(relay, { sessionId: session.sessionId }); callback();
+  assert.deepEqual(commands.filter(entry => entry.command === 'video_transfer').at(-1).payload.offsets, { '1': '0' });
+});
+
+test('live has priority and pauses existing or newly connected transfer without retaining chunks', async () => {
+  const { relay } = transferFixture(); const session = await transfer(relay);
+  const producer = transferSocket(relay, 'producer', session); const viewer = transferSocket(relay, 'viewer', session);
+  const live = await create(relay);
+  assert.deepEqual(JSON.parse(producer.sent.at(-1).data), { type: 'pause', reason: 'live' });
+  producer.emit('message', Buffer.from(HVT.data, 'hex'), true);
+  assert.equal(viewer.sent.length, 0);
+  await relay.closeSession(live.sessionId);
+  assert.deepEqual(JSON.parse(producer.sent.at(-1).data), { type: 'resume', offsets: { '1': '0' } });
+  producer.emit('message', Buffer.from(HVT.data, 'hex'), true);
+  assert.equal(viewer.sent.length, 1);
+});
+
+test('transfer backpressure and send errors close sockets without ACK or queued chunks', async () => {
+  for (const mode of ['buffer', 'callback', 'throw']) {
+    const { relay } = transferFixture(); const session = await transfer(relay);
+    const producer = transferSocket(relay, 'producer', session); const viewer = transferSocket(relay, 'viewer', session);
+    if (mode === 'buffer') viewer.bufferedAmount = MAX_BUFFERED_BYTES;
+    if (mode === 'callback') viewer.send = (_data, _options, done) => done(new Error('failed'));
+    if (mode === 'throw') viewer.send = () => { throw new Error('failed'); };
+    producer.emit('message', Buffer.from(HVT.data, 'hex'), true);
+    assert.equal(producer.sent.filter(entry => Buffer.isBuffer(entry.data)).length, 0);
+    assert.equal(viewer.closed.at(-1).code, mode === 'buffer' ? 4007 : 4000);
+  }
+});
+
+test('valid ERROR ends attempt normally and never logs its text or acknowledges bytes', async () => {
+  const { relay, logs } = transferFixture(); const session = await transfer(relay);
+  const producer = transferSocket(relay, 'producer', session); transferSocket(relay, 'viewer', session);
+  producer.emit('message', Buffer.from(HVT.error, 'hex'), true);
+  assert.equal(producer.closed.at(-1).code, 4000);
+  assert.equal(JSON.stringify(logs).includes('abc'), false);
+  assert.equal(producer.sent.filter(entry => Buffer.isBuffer(entry.data)).length, 0);
+});
+
+test('transfer cancellation, expired sessions, and retention invalidate credentials and clean sockets', async t => {
+  const { relay, advance, commands } = transferFixture(); const session = await transfer(relay);
+  const producer = transferSocket(relay, 'producer', session); transferSocket(relay, 'viewer', session);
+  const request = await api(t, relay);
+  assert.equal((await request(`/api/video/transfer/session/${session.sessionId}`, 'DELETE')).status, 204);
+  assert.equal(producer.closed.at(-1).code, 4000);
+  assert.equal(relay.transfers.size, 0);
+  assert.equal(commands.at(-1).command, 'video_transfer_cancel');
+  const next = await transfer(relay); transferSocket(relay, 'producer', next);
+  advance(60_001); relay.sweep();
+  assert.equal(relay.transfers.size, 0);
+  const last = await transfer(relay); transferSocket(relay, 'producer', last); transferSocket(relay, 'viewer', last);
+  advance(30 * 60_000 + 1); relay.sweep();
+  assert.equal(relay.transfers.size, 0);
+  const retained = await transfer(relay); const car = transferSocket(relay, 'producer', retained);
+  relay.acceptCatalog(jsonBuffer(catalog(2, [])));
+  assert.equal(car.closed.at(-1).code, 4000);
+  assert.equal(relay.transfers.size, 0);
+});
+
+test('metadata persistence contains no video bytes, chunks, sockets, credentials or session progress', async t => {
+  const fs = require('node:fs'); const path = require('node:path');
+  const directory = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'video-metadata-test-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const file = path.join(directory, 'video_metadata.json');
+  const { relay, logs } = transferFixture({ persistMetadata: metadata => {
+    fs.writeFileSync(`${file}.tmp`, JSON.stringify(metadata)); fs.renameSync(`${file}.tmp`, file);
+  } });
+  const before = fs.readFileSync(file);
+  const session = await transfer(relay); const producer = transferSocket(relay, 'producer', session);
+  const viewer = transferSocket(relay, 'viewer', session);
+  producer.emit('message', Buffer.from(HVT.data, 'hex'), true);
+  viewer.emit('message', Buffer.from(HVT.ack, 'hex'), true);
+  assert.deepEqual(fs.readdirSync(directory), ['video_metadata.json']);
+  assert.deepEqual(fs.readFileSync(file), before);
+  const serialized = JSON.stringify([JSON.parse(before), logs]);
+  for (const forbidden of ['abc', HVT.data, session.producerToken, session.viewerToken, 'Buffer', 'pending']) {
+    assert.equal(serialized.includes(forbidden), false);
+  }
+  const state = relay.transfers.get(session.sessionId);
+  assert.equal(state.pending, null);
+  assert.equal(Object.values(state).some(Buffer.isBuffer), false);
 });
