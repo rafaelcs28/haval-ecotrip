@@ -1127,6 +1127,7 @@ test('transfer start timeout, cancel failure, and late start confirmation clean 
 test('multi-segment completion and fresh resume preserve completed ordinals separately from byte offsets', async () => {
   const { relay, commands } = fixture(); const value = catalog();
   value.trips[0].byteSize = 6;
+  value.trips[0].segmentCount = 2;
   value.trips[0].segments.push({ segmentId: 2, byteSize: 3, sha256: SHA_ABC });
   relay.acceptCatalog(jsonBuffer(value));
   const session = await transfer(relay, { segmentIds: ['1', '2'] });
