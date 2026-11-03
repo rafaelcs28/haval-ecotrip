@@ -352,6 +352,120 @@ final class CameraLiveSessionTests: XCTestCase {
         await session.stop()
     }
 
+    func testDelayedRendererFailureFromLostLANCannotStartInternet() async {
+        let lanSocket = FakeCameraLiveSocket()
+        var remoteCreates = 0
+        let transport = CameraLiveTransport(
+            createSession: { _ in remoteCreates += 1; return Self.credentials() },
+            openSocket: { _ in lanSocket },
+            stopSession: { _ in }
+        )
+        let delays = CameraLiveDelays(
+            reconnect: { _ in },
+            stale: CameraLiveDelays.live.stale,
+            renewal: CameraLiveDelays.live.renewal
+        )
+        let renderer = FakeRenderer()
+        let session = CameraLiveSession(
+            transport: transport,
+            renderer: renderer,
+            bridgeURL: { "https://bridge.example" },
+            bridgeToken: { "synthetic-paired-secret" },
+            delays: delays,
+            lanClient: Self.lanClient(),
+            discovery: nil
+        )
+        await session.updateLANEndpoint(CameraLanEndpoint(host: "192.168.8.20", port: 8080))
+        await session.start()
+
+        lanSocket.fail(CameraLiveError.disconnected)
+        await waitUntil { session.state == .askingInternet }
+        renderer.failAsynchronously()
+        await waitUntil { remoteCreates > 0 }
+
+        XCTAssertEqual(session.state, .askingInternet)
+        XCTAssertEqual(remoteCreates, 0)
+        XCTAssertNil(session.route)
+        await session.cancelInternet()
+    }
+
+    func testLANLossInvalidatesReceiveBeforeClearSoOldFrameCannotRepaint() async {
+        let lanSocket = FakeCameraLiveSocket()
+        var renderer: FakeRenderer!
+        renderer = FakeRenderer(onClear: {
+            lanSocket.yield(CameraVideoProtocolTests.config())
+            lanSocket.yield(CameraVideoProtocolTests.access())
+        })
+        let transport = CameraLiveTransport(
+            createSession: { _ in XCTFail("Internet must require confirmation"); return Self.credentials() },
+            openSocket: { _ in lanSocket },
+            stopSession: { _ in }
+        )
+        let session = CameraLiveSession(
+            transport: transport,
+            renderer: renderer,
+            bridgeURL: { "https://bridge.example" },
+            bridgeToken: { "synthetic-paired-secret" },
+            lanClient: Self.lanClient(),
+            discovery: nil
+        )
+        await session.updateLANEndpoint(CameraLanEndpoint(host: "192.168.8.20", port: 8080))
+        await session.start()
+        await lanSocket.waitForReceiveCalls(1)
+
+        await session.updateLANEndpoint(nil)
+        for _ in 0..<100 { await Task.yield() }
+
+        XCTAssertEqual(session.state, .askingInternet)
+        XCTAssertEqual(renderer.displayedFrameCount, 0)
+        await session.cancelInternet()
+    }
+
+    func testStopCancelsLANSetupBeforeSessionPost() async {
+        let gate = AsyncGate()
+        var requests: [URLRequest] = []
+        var requestWaiters: [(Int, CheckedContinuation<Void, Never>)] = []
+        let lanClient = CameraLanClient(http: { request in
+            requests.append(request)
+            let ready = requestWaiters.filter { requests.count >= $0.0 }
+            requestWaiters.removeAll { requests.count >= $0.0 }
+            ready.forEach { $0.1.resume() }
+            switch request.url?.path {
+            case "/api/capabilities":
+                return Self.httpResponse(request, 200, Self.capabilities)
+            case "/api/video/lan/challenge":
+                await gate.wait()
+                return Self.httpResponse(request, 200, Data("{\"deviceId\":\"car-1\",\"nonce\":\"000102030405060708090a0b0c0d0e0f\",\"expiresAt\":31000,\"serverProof\":\"74827a55d7d59155958cbf202ea29b7a9ea99213953e6831f1ee9a8ff46dd8de\"}".utf8))
+            default:
+                return Self.httpResponse(request, 201, Data("{\"sessionId\":\"session-1\",\"expiresAt\":9999999999000,\"scope\":\"live\",\"viewerToken\":\"viewer-short-token\",\"controlToken\":\"control-short-token\",\"viewerPath\":\"/ws/video/lan/viewer?session=session-1\"}".utf8))
+            }
+        }, nowMilliseconds: { 1_000 })
+        let session = CameraLiveSession(
+            transport: CameraLiveTransport(
+                createSession: { _ in XCTFail("Internet must not start"); return Self.credentials() },
+                openSocket: { _ in XCTFail("LAN socket must not open"); return FakeCameraLiveSocket() },
+                stopSession: { _ in }
+            ),
+            renderer: FakeRenderer(),
+            bridgeURL: { "https://bridge.example" },
+            bridgeToken: { "synthetic-paired-secret" },
+            lanClient: lanClient,
+            discovery: nil
+        )
+        await session.updateLANEndpoint(CameraLanEndpoint(host: "192.168.8.20", port: 8080))
+
+        let start = Task { await session.start() }
+        if requests.count < 2 {
+            await withCheckedContinuation { requestWaiters.append((2, $0)) }
+        }
+        await session.stop()
+        gate.open()
+        await start.value
+
+        XCTAssertEqual(requests.map(\.url?.path), ["/api/capabilities", "/api/video/lan/challenge"])
+        XCTAssertEqual(session.state, .idle)
+    }
+
     func testReturningToLANReplacesInternetAndOldConsentIsNotReusedAfterLoss() async {
         let lanSocket = FakeCameraLiveSocket()
         let remoteSocket = FakeCameraLiveSocket()
@@ -431,6 +545,7 @@ private final class FakeRenderer: CameraVideoRendering {
     private var failureHandler: (() -> Void)?
     private var requiresKeyframe = false
     private var displayedFrames = 0
+    var displayedFrameCount: Int { displayedFrames }
     private var displayWaiters: [(Int, CheckedContinuation<Void, Never>)] = []
     init(onClear: @escaping () -> Void = {}) { self.onClear = onClear }
     func consume(_ packet: CameraVideoPacket) throws -> Bool {
@@ -457,6 +572,23 @@ private final class FakeRenderer: CameraVideoRendering {
         let callback = onClear
         onClear = nil
         callback?()
+    }
+}
+
+@MainActor
+private final class AsyncGate {
+    private var continuation: CheckedContinuation<Void, Never>?
+    private var isOpen = false
+
+    func wait() async {
+        if isOpen { return }
+        await withCheckedContinuation { continuation = $0 }
+    }
+
+    func open() {
+        isOpen = true
+        continuation?.resume()
+        continuation = nil
     }
 }
 
