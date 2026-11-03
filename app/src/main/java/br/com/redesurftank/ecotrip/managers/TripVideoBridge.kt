@@ -336,14 +336,19 @@ class TripVideoBridge(
                     val end = column("end_ms")
                     val bytes = column("byte_size")
                     val segments = column("segments")
+                    val segmentMetadata = column("segment_metadata_json")
                     while (cursor.moveToNext()) {
-                        trips.put(JSONObject()
-                            .put("tripId", cursor.getLong(id).toString())
-                            .put("source", cursor.getString(source))
-                            .put("startMs", cursor.getLong(start))
-                            .put("endMs", cursor.getLong(end))
-                            .put("byteSize", cursor.getLong(bytes))
-                            .put("segments", cursor.getInt(segments)))
+                        val canonical = canonicalCatalogTrip(linkedMapOf(
+                            "tripId" to cursor.getLong(id).toString(),
+                            "source" to cursor.getString(source),
+                            "startMs" to cursor.getLong(start),
+                            "endMs" to cursor.getLong(end),
+                            "byteSize" to cursor.getLong(bytes),
+                            "segments" to cursor.getLong(segments),
+                            "segmentMetadataJson" to cursor.getString(segmentMetadata),
+                            "completed" to true,
+                        )) ?: continue
+                        trips.put(JSONObject(canonical))
                     }
                 } ?: throw IllegalStateException("provider ausente")
                 val revision = catalogRevision(context, trips.toString())
@@ -359,6 +364,9 @@ class TripVideoBridge(
                 result.put("erro", failure.message ?: failure.javaClass.simpleName)
             }
         }
+
+        @JvmStatic fun canonicalCatalogTrip(raw: Map<String, Any>): Map<String, Any>? =
+            CameraLanDownloads.canonicalCatalogTrip(raw)
 
         fun requestCatalogPublish(context: Context) {
             val app = context.applicationContext
