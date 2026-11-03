@@ -79,7 +79,7 @@ final class CarCamPeerConnection: NSObject, CarCamPeerConnectioning {
     func applyAnswer(_ sdp: String) async throws {
         guard !closed, !sdp.isEmpty else { throw CarCamViewerError.invalidSDP }
         let answer = RTCSessionDescription(type: .answer, sdp: sdp)
-        try await withCheckedThrowingContinuation { continuation in
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             connection.setRemoteDescription(answer) { error in
                 if let error { continuation.resume(throwing: error) }
                 else { continuation.resume() }
@@ -100,7 +100,7 @@ final class CarCamPeerConnection: NSObject, CarCamPeerConnectioning {
     }
 
     private func setLocalDescription(_ description: RTCSessionDescription) async throws {
-        try await withCheckedThrowingContinuation { continuation in
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             connection.setLocalDescription(description) { error in
                 if let error { continuation.resume(throwing: error) }
                 else { continuation.resume() }
