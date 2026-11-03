@@ -153,6 +153,7 @@ struct CameraSettingsSnapshot: Equatable, Sendable {
 enum CameraVideoError: Error, Equatable {
     case offline, disconnected, invalidResponse, invalidSelection, invalidOffset
     case digestMismatch, insufficientStorage, duplicateSegment, deletionNotConfirmed, unsupportedCatalog
+    case internetConfirmationRequired
 }
 
 struct CameraVideoTransport {
@@ -209,6 +210,7 @@ final class CameraVideoStore: ObservableObject {
     private var transport: CameraVideoTransport
     private let availableCapacity: (URL) -> Int64?
     private let catalogPolicy = CameraRoutePolicy()
+    private let downloadPolicy = CameraRoutePolicy()
     private var catalogContext: (CameraLanEndpoint?, URL, String)?
 
     init(rootURL: URL? = nil, transport: CameraVideoTransport = .live,
@@ -262,8 +264,30 @@ final class CameraVideoStore: ObservableObject {
         catalogState = .loaded(route: route, stale: catalog.stale)
     }
 
+    @discardableResult
+    func beginDownloadAction(lanAvailable: Bool) -> CameraRoutePolicy.Decision {
+        let decision = downloadPolicy.beginAction(lanAvailable: lanAvailable)
+        downloadState = decision == .askInternet ? .askingInternet : .idle
+        return decision
+    }
+
+    func confirmDownloadInternet() {
+        guard downloadState == .askingInternet else { return }
+        downloadPolicy.confirmInternet()
+        downloadState = .idle
+    }
+
+    func closeDownloadAction() {
+        downloadPolicy.stop()
+        if downloadState == .askingInternet { downloadState = .idle }
+    }
+
     func downloadSegment(tripID: String, segment: CameraVideoSegment, route: CameraDownloadRoute,
                          lanEndpoint: CameraLanEndpoint?, bridgeURL: URL, bridgeToken: String) async throws -> URL {
+        if route == .internet, !downloadPolicy.internetAllowed {
+            downloadState = .askingInternet
+            throw CameraVideoError.internetConfirmationRequired
+        }
         guard !tripID.isEmpty, segment.id > 0, segment.byteSize > 0, segment.sha256.count == 32 else {
             throw CameraVideoError.invalidSelection
         }

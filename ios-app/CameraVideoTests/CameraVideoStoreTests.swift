@@ -124,6 +124,7 @@ final class CameraVideoStoreTests: XCTestCase {
         var transport = CameraVideoTransport.testing
         transport.openRemoteTransfer = { _, _, _, _, _ in socket }
         let store = makeStore(transport)
+        authorizeRemoteDownload(store)
         await XCTAssertThrowsErrorAsync {
             try await store.downloadSegment(tripID: "42", segment: segment, route: .internet,
                 lanEndpoint: nil, bridgeURL: Self.bridge, bridgeToken: "paired")
@@ -134,6 +135,7 @@ final class CameraVideoStoreTests: XCTestCase {
         let socket2 = FakeTransferSocket(messages: [Self.hvtData(payload: bytes), Self.hvtEOF(bytes: bytes)])
         transport.openRemoteTransfer = { _, _, _, _, _ in socket2 }
         store.replaceTransportForTesting(transport)
+        authorizeRemoteDownload(store)
         await XCTAssertThrowsErrorAsync {
             try await store.downloadSegment(tripID: "42", segment: wrongWhole, route: .internet,
                 lanEndpoint: nil, bridgeURL: Self.bridge, bridgeToken: "paired")
@@ -148,6 +150,7 @@ final class CameraVideoStoreTests: XCTestCase {
         var transport = CameraVideoTransport.testing
         transport.openRemoteTransfer = { _, _, _, _, _ in socket }
         let store = makeStore(transport)
+        authorizeRemoteDownload(store)
         socket.onSend = { frame in
             let ack = try CameraTransferProtocol.parse(frame)
             let partial = store.partialURL(tripID: "42", segmentID: 1, route: .internet)
@@ -161,6 +164,7 @@ final class CameraVideoStoreTests: XCTestCase {
         transport.openRemoteTransfer = { _, _, _, _, _ in skipped }
         store.replaceTransportForTesting(transport)
         try? FileManager.default.removeItem(at: store.completedURL(tripID: "42", segmentID: 1))
+        authorizeRemoteDownload(store)
         await XCTAssertThrowsErrorAsync {
             try await store.downloadSegment(tripID: "42", segment: segment, route: .internet,
                 lanEndpoint: nil, bridgeURL: Self.bridge, bridgeToken: "paired")
@@ -251,6 +255,11 @@ final class CameraVideoStoreTests: XCTestCase {
 
     private func makeStore(_ transport: CameraVideoTransport) -> CameraVideoStore {
         CameraVideoStore(rootURL: root, transport: transport, availableCapacity: { _ in 1_000_000 })
+    }
+
+    private func authorizeRemoteDownload(_ store: CameraVideoStore) {
+        XCTAssertEqual(store.beginDownloadAction(lanAvailable: false), .askInternet)
+        store.confirmDownloadInternet()
     }
 
     private static let bridge = URL(string: "https://bridge.example")!

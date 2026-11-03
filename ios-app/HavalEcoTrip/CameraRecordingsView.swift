@@ -5,6 +5,8 @@ struct CameraRecordingsView: View {
     @StateObject private var store: CameraVideoStore
     @State private var endpoint: CameraLanEndpoint?
     @State private var showInternetConfirmation = false
+    @State private var showDownloadInternetConfirmation = false
+    @State private var pendingDownload: CameraPendingDownload?
     @State private var showSettings = false
     @State private var deletionTrip: CameraVideoTrip?
     @State private var shareItems: CameraShareItems?
@@ -39,6 +41,12 @@ struct CameraRecordingsView: View {
             Button("Cancelar", role: .cancel) { store.closeCatalogAction() }
         } message: {
             Text("A autorização vale somente enquanto esta galeria estiver aberta.")
+        }
+        .confirmationDialog("Usar internet para baixar este vídeo?", isPresented: $showDownloadInternetConfirmation) {
+            Button("Usar internet") { confirmRemoteDownload() }
+            Button("Cancelar", role: .cancel) { cancelRemoteDownload() }
+        } message: {
+            Text("A autorização vale somente para este download. Outro vídeo pedirá confirmação novamente.")
         }
         .confirmationDialog("Apagar esta gravação concluída?", item: $deletionTrip) { trip in
             Button("Apagar gravação", role: .destructive) { Task { await delete(trip) } }
@@ -139,13 +147,44 @@ struct CameraRecordingsView: View {
     private func updatePrompt() { showInternetConfirmation = store.catalogState == .askingInternet }
 
     private func download(_ trip: CameraVideoTrip, _ segment: CameraVideoSegment) async {
-        let route: CameraDownloadRoute = endpoint == nil ? .internet : .lan
-        if route == .internet && store.catalogState != .loaded(route: .internet, stale: false) {
-            showInternetConfirmation = true; return
+        switch store.beginDownloadAction(lanAvailable: endpoint != nil) {
+        case .useLAN:
+            await performDownload(trip, segment, route: .lan)
+        case .askInternet:
+            pendingDownload = CameraPendingDownload(trip: trip, segment: segment)
+            showDownloadInternetConfirmation = true
+        case .offline:
+            store.closeDownloadAction()
         }
-        _ = try? await store.downloadSegment(tripID: trip.id, segment: segment, route: route,
-                                              lanEndpoint: endpoint, bridgeURL: bridgeURL,
-                                              bridgeToken: Settings.bridgeToken)
+    }
+
+    private func confirmRemoteDownload() {
+        guard let pendingDownload else { return }
+        self.pendingDownload = nil
+        store.confirmDownloadInternet()
+        Task { await performDownload(pendingDownload.trip, pendingDownload.segment, route: .internet) }
+    }
+
+    private func cancelRemoteDownload() {
+        pendingDownload = nil
+        store.closeDownloadAction()
+    }
+
+    private func performDownload(_ trip: CameraVideoTrip, _ segment: CameraVideoSegment,
+                                 route: CameraDownloadRoute) async {
+        do {
+            _ = try await store.downloadSegment(tripID: trip.id, segment: segment, route: route,
+                                                 lanEndpoint: endpoint, bridgeURL: bridgeURL,
+                                                 bridgeToken: Settings.bridgeToken)
+            store.closeDownloadAction()
+        } catch {
+            store.closeDownloadAction()
+            if route == .lan, error is URLError || (error as? CameraVideoError) == .offline {
+                _ = store.beginDownloadAction(lanAvailable: false)
+                pendingDownload = CameraPendingDownload(trip: trip, segment: segment)
+                showDownloadInternetConfirmation = true
+            }
+        }
     }
 
     private func play(_ trip: CameraVideoTrip) {
@@ -174,6 +213,11 @@ struct CameraRecordingsView: View {
 private struct CameraShareItems: Identifiable {
     let id = UUID()
     let urls: [URL]
+}
+
+private struct CameraPendingDownload {
+    let trip: CameraVideoTrip
+    let segment: CameraVideoSegment
 }
 
 private extension View {
