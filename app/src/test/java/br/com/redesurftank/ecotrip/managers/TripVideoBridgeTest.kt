@@ -158,6 +158,34 @@ class TripVideoBridgeTest {
         assertEquals(2, backend.saveAttempts)
     }
 
+    @Test fun lanCommandsUseLoopbackAndNeverChangeRecorderIdentity() {
+        val state = MemoryState(lastTripId = 1000L)
+        val sink = FakeSink()
+        val bridge = bridge(state, sink)
+        org.junit.Assert.assertEquals(true, LanTest.call(bridge, "startLanLive", "session_1", 8088,
+            "synthetic-producer-token-0123456789", 20_000L))
+        val start = sink.commands.single()
+        assertEquals(TripVideoBridge.Action.START_LIVE, start.action)
+        assertEquals("ws://127.0.0.1:8088/ws/video/lan/car?session=session_1", start.sessionUrl)
+        assertEquals("session_1", start.sessionId)
+        assertNull(start.tripId)
+        org.junit.Assert.assertEquals(true, LanTest.call(bridge, "stopLanLive", "session_1"))
+        assertEquals(TripVideoBridge.Action.STOP_LIVE, sink.commands.last().action)
+        assertEquals(1000L, state.lastTripId)
+        assertFalse(sink.commands.any { it.action == TripVideoBridge.Action.STOP_TRIP })
+    }
+
+    @Test fun lanCommandRejectsInvalidSessionPortAndExpiryBeforeDispatch() {
+        val sink = FakeSink(); val bridge = bridge(sink = sink)
+        for ((id, port, expiry) in listOf(Triple("a?token=x", 8088, 20_000L),
+                Triple("a", 80, 20_000L), Triple("a", 0, 20_000L),
+                Triple("a", 8088, 10_000L), Triple("a", 8088, 1_810_001L))) {
+            LanTest.rejects { LanTest.call(bridge, "startLanLive", id, port,
+                "synthetic-producer-token-0123456789", expiry) }
+        }
+        assertEquals(0, sink.commands.size)
+    }
+
     private class FakeCatalogRevisionBackend(
         override var body: String?,
         override var revision: Long,
