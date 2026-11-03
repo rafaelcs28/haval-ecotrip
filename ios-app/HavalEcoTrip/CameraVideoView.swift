@@ -135,13 +135,13 @@ struct CameraVideoView: View {
             }
         }
         switch havalSession.state {
-        case .idle: "Pronto para conectar"
-        case .connecting: "Conectando…"
-        case .askingInternet: "Aguardando confirmação"
-        case .live: "Ao vivo"
-        case .degraded: "Sinal interrompido — reconectando"
-        case .offline: "Carro offline"
-        case .error(let message): message
+        case .idle: return "Pronto para conectar"
+        case .connecting: return "Conectando…"
+        case .askingInternet: return "Aguardando confirmação"
+        case .live: return "Ao vivo"
+        case .degraded: return "Sinal interrompido — reconectando"
+        case .offline: return "Carro offline"
+        case .error(let message): return message
         }
     }
 
@@ -155,12 +155,12 @@ struct CameraVideoView: View {
             }
         }
         switch havalSession.state {
-        case .live: "video.fill"
-        case .connecting, .degraded: "arrow.triangle.2.circlepath"
-        case .askingInternet: "wifi.exclamationmark"
-        case .offline: "car.fill"
-        case .error: "exclamationmark.triangle.fill"
-        case .idle: "video"
+        case .live: return "video.fill"
+        case .connecting, .degraded: return "arrow.triangle.2.circlepath"
+        case .askingInternet: return "wifi.exclamationmark"
+        case .offline: return "car.fill"
+        case .error: return "exclamationmark.triangle.fill"
+        case .idle: return "video"
         }
     }
 
@@ -174,10 +174,10 @@ struct CameraVideoView: View {
             }
         }
         switch havalSession.state {
-        case .live: DS.green
-        case .connecting, .askingInternet, .degraded: DS.yellow
-        case .error: DS.red
-        case .idle, .offline: DS.muted
+        case .live: return DS.green
+        case .connecting, .askingInternet, .degraded: return DS.yellow
+        case .error: return DS.red
+        case .idle, .offline: return DS.muted
         }
     }
 
