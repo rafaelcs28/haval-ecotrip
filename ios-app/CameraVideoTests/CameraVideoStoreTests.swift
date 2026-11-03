@@ -217,9 +217,10 @@ final class CameraVideoStoreTests: XCTestCase {
         .init(id: id, byteSize: UInt64(bytes.count), sha256: Data(SHA256.hash(data: bytes)))
     }
     private static func trip(id: String = "42", completed: Bool = true, end: Date? = Date(),
-                             segments: [CameraVideoSegment] = [segment(Data("abc".utf8))]) -> CameraVideoTrip {
-        .init(id: id, source: .automatic, start: Date(timeIntervalSince1970: 1), end: end,
-              byteSize: segments.reduce(0) { $0 + $1.byteSize }, completed: completed, segments: segments)
+                             segments: [CameraVideoSegment]? = nil) -> CameraVideoTrip {
+        let segments = segments ?? [segment(Data("abc".utf8))]
+        return .init(id: id, source: .automatic, start: Date(timeIntervalSince1970: 1), end: end,
+                     byteSize: segments.reduce(0) { $0 + $1.byteSize }, completed: completed, segments: segments)
     }
     private static func catalog(route: CameraDownloadRoute) -> CameraVideoCatalog {
         .init(revision: 1, updatedAt: Date(), stale: false, route: route, trips: [trip()])
