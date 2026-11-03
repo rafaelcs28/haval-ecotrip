@@ -17,7 +17,7 @@ final class CameraVideoDecoder: CameraVideoRendering {
     private var formatDescription: CMVideoFormatDescription?
     private let failureHandler = FailureHandlerStore()
     private var statusObservation: NSKeyValueObservation?
-    private var failureReported = false
+    private var failureReportedGeneration: UInt64?
 
     init() {
         displayLayer.videoGravity = .resizeAspect
@@ -25,8 +25,8 @@ final class CameraVideoDecoder: CameraVideoRendering {
         let failureHandler = failureHandler
         statusObservation = displayLayer.observe(\.status, options: [.new]) { [weak self] layer, _ in
             guard layer.status == .failed else { return }
-            let handler = failureHandler.snapshot()
-            Task { @MainActor [weak self] in self?.reportDisplayFailure(to: handler) }
+            let event = failureHandler.snapshot()
+            Task { @MainActor [weak self] in self?.reportDisplayFailure(event) }
         }
     }
 
@@ -36,14 +36,14 @@ final class CameraVideoDecoder: CameraVideoRendering {
         case .configuration(let sps, let pps):
             if case .configuration(let reset) = decision, reset { displayLayer.flushAndRemoveImage() }
             formatDescription = try Self.makeFormatDescription(sps: sps, pps: pps)
-            failureReported = false
+            failureReportedGeneration = nil
             return false
 
         case .accessUnit(let avcc, _):
             guard case .accessUnit(let reset) = decision else { return false }
             guard let formatDescription else { throw DecoderError.invalidConfiguration }
             if reset { displayLayer.flushAndRemoveImage() }
-            failureReported = false
+            failureReportedGeneration = nil
             displayLayer.enqueue(try Self.makeSample(avcc: avcc, pts: packet.presentationTimeUs, format: formatDescription))
             return true
         }
@@ -59,15 +59,16 @@ final class CameraVideoDecoder: CameraVideoRendering {
     }
 
     var handleDisplayFailure: () -> Void {
-        let handler = failureHandler.snapshot()
-        return { [weak self] in self?.reportDisplayFailure(to: handler) }
+        let event = failureHandler.snapshot()
+        return { [weak self] in self?.reportDisplayFailure(event) }
     }
 
-    private func reportDisplayFailure(to handler: (() -> Void)?) {
-        guard !failureReported else { return }
-        failureReported = true
+    private func reportDisplayFailure(_ event: FailureHandlerStore.Event) {
+        guard failureHandler.isCurrent(event) else { return }
+        guard failureReportedGeneration != event.generation else { return }
+        failureReportedGeneration = event.generation
         clear()
-        handler?()
+        event.handler?()
     }
 
     static func makeFormatDescription(sps: Data, pps: Data) throws -> CMVideoFormatDescription {
@@ -146,18 +147,31 @@ final class CameraVideoDecoder: CameraVideoRendering {
 }
 
 private final class FailureHandlerStore: @unchecked Sendable {
+    struct Event: @unchecked Sendable {
+        let generation: UInt64
+        let handler: (() -> Void)?
+    }
+
     private let lock = NSLock()
+    private var generation: UInt64 = 0
     private var handler: (() -> Void)?
 
     func replace(with handler: @escaping () -> Void) {
         lock.lock()
+        generation &+= 1
         self.handler = handler
         lock.unlock()
     }
 
-    func snapshot() -> (() -> Void)? {
+    func snapshot() -> Event {
         lock.lock()
         defer { lock.unlock() }
-        return handler
+        return Event(generation: generation, handler: handler)
+    }
+
+    func isCurrent(_ event: Event) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return generation == event.generation
     }
 }
