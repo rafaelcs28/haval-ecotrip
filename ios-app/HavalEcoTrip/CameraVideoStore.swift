@@ -340,11 +340,11 @@ final class CameraVideoStore: ObservableObject {
     private var activeDownloads: [String: Task<URL, Error>] = [:]
     private var settingsGeneration: UInt64 = 0
 
-    init(rootURL: URL? = nil, transport: CameraVideoTransport = .live,
+    init(rootURL: URL? = nil, transport: CameraVideoTransport? = nil,
          availableCapacity: @escaping (URL) -> Int64? = CameraVideoStore.systemCapacity,
          fileSinkFactory: @escaping (URL) throws -> CameraVideoFileSink = { try FileHandleCameraVideoSink(url: $0) }) {
         self.rootURL = rootURL ?? Self.applicationSupportRoot()
-        self.transport = transport
+        self.transport = transport ?? .live
         self.availableCapacity = availableCapacity
         self.fileSinkFactory = fileSinkFactory
     }
