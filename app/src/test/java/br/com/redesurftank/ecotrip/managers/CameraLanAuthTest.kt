@@ -203,16 +203,21 @@ class CameraLanAuthTest {
     }
     @Test fun deleteTombstonesAreBoundedPrunedAndZeroed() {
         val a = auth()
-        repeat(140) {
+        val first = session(a, challenge(a), "download")!!
+        assertEquals(true, LanTest.call(a, "authorizeAndRevoke", first["sessionId"], first["controlToken"]))
+        val field = a.javaClass.getDeclaredField("tombstones").apply { isAccessible = true }
+        val firstTombstone = (field.get(a) as Map<*, *>).values.single()!!
+        val digestField = firstTombstone.javaClass.getDeclaredField("controlDigest").apply { isAccessible = true }
+        val evictedDigest = digestField.get(firstTombstone) as ByteArray
+        repeat(128) {
             val s = session(a, challenge(a), "download")!!
             assertEquals(true, LanTest.call(a, "authorizeAndRevoke", s["sessionId"], s["controlToken"]))
         }
-        val field = a.javaClass.getDeclaredField("tombstones").apply { isAccessible = true }
         @Suppress("UNCHECKED_CAST")
         val tombstones = field.get(a) as Map<String, Any>
-        assertTrue("revocation replay state must be bounded", tombstones.size <= 128)
+        assertEquals("revocation replay state must be bounded", 128, tombstones.size)
+        assertTrue(evictedDigest.all { it == 0.toByte() })
         val retained = tombstones.values.first()
-        val digestField = retained.javaClass.getDeclaredField("controlDigest").apply { isAccessible = true }
         val retainedDigest = digestField.get(retained) as ByteArray
         now += 300_000L
         LanTest.call(a, "active", "missing")

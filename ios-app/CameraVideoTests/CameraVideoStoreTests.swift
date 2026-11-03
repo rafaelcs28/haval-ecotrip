@@ -579,6 +579,25 @@ final class CameraVideoStoreTests: XCTestCase {
         }
     }
 
+    func testValidFullPartialPromotesWithoutOpeningANetworkTransfer() async throws {
+        let bytes = Data("abc".utf8), segment = Self.segment(bytes)
+        var transport = CameraVideoTransport.testing
+        transport.openLANSegment = { _, _, _, _, _, _ in
+            XCTFail("verified full partial must not open the network")
+            throw CameraVideoError.invalidResponse
+        }
+        let store = makeStore(transport)
+        let partial = try store.partialURL(tripID: "42", segmentID: 1, route: .lan)
+        try FileManager.default.createDirectory(at: partial.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try bytes.write(to: partial)
+
+        let result = try await store.downloadSegment(tripID: "42", segment: segment, route: .lan,
+            lanEndpoint: Self.lan, bridgeURL: Self.bridge, bridgeToken: "paired")
+
+        XCTAssertEqual(try Data(contentsOf: result), bytes)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: partial.path))
+    }
+
     func testLANRequiresExactStatusRangeAndLengthForFreshAndResumedResponses() async throws {
         let bytes = Data("abc".utf8), segment = Self.segment(bytes)
         let invalid: [(UInt64, Int, String?, UInt64?)] = [
