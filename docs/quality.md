@@ -6,23 +6,23 @@
 bash -n scripts/build-on-mac-mini.sh
 node --check bridge/server.js
 node --check bridge/gateway.js
+cd bridge && npm test
 ```
 
-Os checks Node validam sintaxe, não integração, rotas, autenticação ou runtime. Android e Apple compilam somente na fila autorizada.
+Os checks `node --check` validam somente sintaxe. `npm test` executa 66 testes do bridge com dados sintéticos; não conecta produção. Android e Apple compilam somente na fila autorizada.
 
 ## Builds
 
 Android, Gradle, Kotlin e Xcode executam exclusivamente no Mac Mini. O fluxo Android exige commit Git imutável, auditoria de conteúdo e digest allowlisted. Consulte [BUILD_ANDROID_ON_MAC_MINI.md](BUILD_ANDROID_ON_MAC_MINI.md).
 
-## Estratégia de testes
+## Estratégia e cobertura de testes
 
-Não foram encontrados testes em `test`, `androidTest` ou targets Swift de teste, nem script de teste no bridge. A evolução recomendada é incremental:
+- Bridge: 66 testes Node para contratos de catálogo, autenticação, relay, settings e transferência.
+- EcoTrip Android: 70 testes unitários; a fila `android-test-debug` executa a suíte e monta Debug no mesmo commit imutável.
+- iOS: 92 testes em `CameraVideoTests`; a fila também monta o scheme completo `HavalEcoTrip` para simulador com `CODE_SIGNING_ALLOWED=NO` no mesmo commit.
+- Haval Camera: suíte JVM e `android-camera-verify` executam testes, Debug/nativo, release autorizado de verificação, lint vital, assinatura/alinhamento e integridade de ZIP. Isso verifica o pacote, não a câmera física.
 
-1. regras puras de viagem, recarga, energia e automação;
-2. serialização e compatibilidade de payloads HTTP/MQTT;
-3. sincronização offline, retenção e idempotência;
-4. integração LAN/bridge com dados sintéticos;
-5. UI e hardware somente nos hosts/dispositivos autorizados.
+Permanecem gates exclusivamente físicos: captura/mux OEM no Android 9 do veículo, Binder/provider entre APKs instalados e assinados, descoberta e perda de Wi-Fi reais, retomada Range, reprodução H.264 e UI no iPhone, 4G, armazenamento após perda de energia, consumo de recursos e temperatura. Nenhum build de simulador, APK montado ou teste sintético deve ser descrito como aprovação desses gates.
 
 Um bug deve ter reprodução e, quando viável, teste de regressão que falhe antes da correção. Não use produção como ambiente de teste.
 

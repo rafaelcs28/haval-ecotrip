@@ -21,6 +21,7 @@ Este é um produto pessoal. Não há evidência de um SaaS público ou de requis
 5. Automações são configuradas pelos clientes e executadas pelo carro.
 6. Widgets e Live Activities mantêm estados relevantes visíveis no iPhone.
 7. O iPad/OBD coleta ou consome telemetria e oferece cluster, navegação e controles.
+8. O Haval Camera grava viagens em processo separado; EcoTrip encaminha catálogo e mídia por sessão LAN autenticada, e o iPhone prefere LAN com fallback remoto somente após confirmação explícita.
 
 ## Escopo
 
@@ -45,9 +46,12 @@ Este é um produto pessoal. Não há evidência de um SaaS público ou de requis
 - Builds Android/Kotlin/Gradle e Xcode usam o Mac Mini autorizado, nunca o coordenador.
 - Assinaturas e segredos permanecem fora do repositório e do arquivo enviado à fila.
 
-## Pendências conhecidas
+## Cobertura atual e pendências conhecidas
 
-- Não foi encontrada uma suíte de testes automatizados para os clientes ou um script de teste no pacote do bridge.
+- O bridge possui 66 testes Node para contratos de catálogo, autenticação, relay e transferência de vídeo.
+- O EcoTrip Android possui 70 testes unitários, incluindo autenticação/relay/download LAN da câmera; o target iOS `CameraVideoTests` possui 92 testes de protocolo, sessão, rota, download, persistência e limpeza.
+- O Haval Camera possui suíte JVM e verificação de pacote no Mac Mini para catálogo, retenção, lifecycle, protocolo e relay. Essa evidência automatizada não valida o sensor físico.
+- Continuam exclusivamente dependentes de hardware: captura e mux no Android 9 do veículo, Binder/provider entre APKs assinados, Bonjour/Wi-Fi real, interrupção de Range, reprodução H.264 no iPhone, latência/consumo em 4G, durabilidade após perda de energia e comportamento térmico.
 - Arquivos grandes indicam dívida de organização, mas refatorações devem ser incrementais e guiadas por comportamento reproduzível.
 
 ## Critérios de aceitação
@@ -60,7 +64,7 @@ Este é um produto pessoal. Não há evidência de um SaaS público ou de requis
 
 ## Próxima entrega
 
-Criar a primeira suíte de testes de domínio para regras de viagem, recarga, automação e serialização, sem depender de hardware ou credenciais.
+Executar os gates físicos pendentes em veículo estacionado e dispositivos autorizados, sem transformar builds de simulador ou testes sintéticos em alegação de compatibilidade de hardware.
 
 ## Manutenção
 

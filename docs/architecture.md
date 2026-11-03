@@ -29,6 +29,7 @@ docs/        instalação, operação, arquitetura, qualidade e evidências
 4. No iOS, `CarStore`, `BridgeRouter`, stores especializados e views SwiftUI consomem o bridge e gerenciam estado local, notificações e Live Activities.
 5. O iPad/OBD pode receber dados do bridge ou BLE/ELM327 e enviar telemetria por MQTT/HTTP; a descoberta LAN reduz latência e possui fallback remoto.
 6. `TripVideoBridge` reconcilia a viagem automática com o APK Haval Camera por IPC explícito protegido por assinatura. Cada comando persistente só altera o estado confirmado do EcoTrip depois de um acknowledgement correlacionado por request/revision; a espera limitada ocorre no executor de câmera, nunca na main looper. O mesmo ID/start original permite reabrir no Camera uma viagem concluída que o EcoTrip retomou dentro da janela. O EcoTrip apenas encaminha catálogo com revisão persistida atomicamente, configurações confirmadas e telemetria CAN limitada; falhas da câmera não interrompem viagem nem telemetria do veículo.
+7. Para galeria iOS, `CameraVideoStore` mantém parciais separados por rota, verifica SHA-256 antes de promoção atômica e reinicia em offset zero quando encontra um parcial completo corrompido. `CameraVideoNetwork` reutiliza uma sessão LAN curta, conserva a identidade de limpeza até resposta terminal e aceita o `200` legado durante compatibilidade, além do contrato final `204/404`.
 
 ## Dados e runtime
 
@@ -42,6 +43,7 @@ Arquivos de estado, históricos, tokens, certificados e configurações reais do
 - Confirmação do estado do veículo antes de comandos ou instalação de atualização.
 - Assinaturas Android/Apple e identificadores de bundle/application ID.
 - Haval Camera usa permissões Android `signature`, ações IPC versão 1 e o provider `br.com.redesurftank.havalcamera.video`; os dois APKs precisam da mesma assinatura de produção.
+- O DELETE LAN de sessão é autenticado e atômico: a primeira chamada remove a sessão e demais credenciais, preservando somente digest do controle e validade original em tombstone limitado; repetição autenticada retorna `204` até a validade, inclusive após perda da primeira resposta.
 
 ## Decisões
 
@@ -49,11 +51,14 @@ Arquivos de estado, históricos, tokens, certificados e configurações reais do
 - Não impor limite rígido de 350 linhas ao legado. Arquivos grandes devem ser decompostos por responsabilidade quando houver testes e uma mudança relacionada.
 - Manter builds fora do coordenador e submeter somente commits auditados.
 
-## Riscos observados
+## Cobertura automatizada e riscos observados
 
-- Não foi encontrada suíte automatizada de clientes nem script de teste no `bridge/package.json`.
-- Há arquivos Kotlin e Swift grandes, aumentando o custo de revisão.
-- Contratos distribuídos entre APK, bridge, PWA e apps Apple exigem revisão de consumidores antes de mudar nomes ou semântica.
+- Bridge: 66 testes Node cobrem contratos de vídeo, autenticação, catálogo, relay e limites de transferência.
+- EcoTrip Android: 70 testes unitários cobrem os componentes de câmera LAN/IPC e contratos relacionados; Android Debug e testes executam apenas na fila autorizada.
+- iOS: 92 testes no target `CameraVideoTests` cobrem protocolo HVC1/HVT1, sessão, roteamento, catálogo, downloads verificados, limpeza e configurações; o app completo compila como simulador sem assinatura.
+- Haval Camera: suíte JVM e gates de pacote cobrem reducer, catálogo, retenção, framing, relay, provider e lifecycle em dados sintéticos.
+- Nenhuma dessas suítes comprova captura OEM, IPC entre APKs reais, rede física, reprodução em dispositivo, 4G, durabilidade/armazenamento sob perda de energia ou limites térmicos; esses gates permanecem de hardware.
+- Há arquivos Kotlin e Swift grandes, aumentando o custo de revisão. Contratos distribuídos entre APK, bridge, PWA e apps Apple exigem revisão de consumidores antes de mudar nomes ou semântica.
 
 ## Manutenção
 
@@ -68,7 +73,7 @@ Atualize este mapa quando módulos, contratos, dependências ou destinos de buil
 | `GET /api/capabilities` | `cameraLiveLan`, `cameraDownloadLan`, `hvcVersion`, `hvtVersion`, todos inteiros. Versões = 1; ambas as capacidades de câmera = 0 se pacote, serviço/provider ou permissões de assinatura não estiverem disponíveis. |
 | `POST /api/video/lan/challenge` | Sem segredo no request. Retorna exatamente `deviceId`, `nonce` hexadecimal de 128 bits, `expiresAt` em ms com validade de 30 s e `serverProof` hexadecimal minúsculo. `serverProof = HMAC-SHA256(bridgeToken, UTF8("haval-camera-lan-server-v1|deviceId|nonce|expiresAt"))`; o cliente verifica em tempo constante antes de enviar sua prova. |
 | `POST /api/video/lan/session` | JSON `deviceId`, `nonce`, `expiresAt`, `hmac` hexadecimal minúsculo e `scope` (`live` ou `download`). HMAC-SHA256 exato de `haval-camera-lan-v1|deviceId|nonce|expiresAt`, chave obtida do `MqttManager.bridgeToken` atual. Cada desafio é consumido na primeira tentativa. |
-| `DELETE /api/video/lan/session/:id` | `Authorization: Bearer <controlToken>` encerra somente essa sessão. |
+| `DELETE /api/video/lan/session/:id` | `Authorization: Bearer <controlToken>` encerra somente essa sessão e retorna `204`; a mesma autoridade pode repetir idempotentemente até a validade original. |
 | `/ws/video/lan/car?session=ID` | Produtor exclusivo, origem loopback literal, bearer `producerToken` de uso único, enviado ao Camera somente por IPC assinado. |
 | `/ws/video/lan/viewer?session=ID` | Viewer exclusivo, bearer `viewerToken` de uso único. |
 | `GET /api/video/lan/catalog?session=ID` | Bearer `downloadToken`; somente viagens concluídas do provider. |
