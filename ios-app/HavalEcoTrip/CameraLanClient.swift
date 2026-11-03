@@ -42,14 +42,18 @@ struct CameraLanClient {
 
     func createLiveSession(endpoint: CameraLanEndpoint, bridgeToken: String) async throws -> CameraLanSession {
         guard !bridgeToken.isEmpty else { throw CameraLanError.invalidServerProof }
+        try Task.checkCancellation()
         let capabilitiesRequest = try request(endpoint: endpoint, path: "/api/capabilities", method: "GET")
         let (capabilitiesData, capabilitiesResponse) = try await http(capabilitiesRequest)
+        try Task.checkCancellation()
         try requireStatus(capabilitiesResponse, 200)
         let capabilities = try JSONDecoder().decode(Capabilities.self, from: capabilitiesData)
         guard capabilities.cameraLiveLan == 1, capabilities.hvcVersion == 1 else { throw CameraLanError.unsupported }
 
+        try Task.checkCancellation()
         let challengeRequest = try request(endpoint: endpoint, path: "/api/video/lan/challenge", method: "POST")
         let (challengeData, challengeResponse) = try await http(challengeRequest)
+        try Task.checkCancellation()
         try requireStatus(challengeResponse, 200)
         let challenge = try decodeChallenge(challengeData)
         let input = "haval-camera-lan-server-v1|\(challenge.deviceId)|\(challenge.nonce)|\(challenge.expiresAt)"
@@ -59,6 +63,7 @@ struct CameraLanClient {
             throw CameraLanError.invalidServerProof
         }
 
+        try Task.checkCancellation()
         let clientInput = "haval-camera-lan-v1|\(challenge.deviceId)|\(challenge.nonce)|\(challenge.expiresAt)"
         let clientProof = Data(HMAC<SHA256>.authenticationCode(for: Data(clientInput.utf8), using: key)).lowercaseHex
         let sessionBody = SessionRequest(
@@ -71,6 +76,7 @@ struct CameraLanClient {
         var sessionRequest = try request(endpoint: endpoint, path: "/api/video/lan/session", method: "POST")
         sessionRequest.httpBody = try JSONEncoder().encode(sessionBody)
         sessionRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        try Task.checkCancellation()
         let (sessionData, sessionResponse) = try await http(sessionRequest)
         try requireStatus(sessionResponse, 201)
         let session = try JSONDecoder().decode(SessionResponse.self, from: sessionData)
@@ -81,12 +87,17 @@ struct CameraLanClient {
         let viewerURL = try validatedViewerURL(path: session.viewerPath, sessionId: session.sessionId, endpoint: endpoint)
         var viewerRequest = URLRequest(url: viewerURL, timeoutInterval: 15)
         viewerRequest.setValue("Bearer " + session.viewerToken, forHTTPHeaderField: "Authorization")
-        return CameraLanSession(
+        let result = CameraLanSession(
             sessionId: session.sessionId,
             viewerRequest: viewerRequest,
             controlToken: session.controlToken,
             expiresAt: Date(timeIntervalSince1970: Double(session.expiresAt) / 1_000)
         )
+        if Task.isCancelled {
+            await revokeAfterCancellation(result, endpoint: endpoint)
+            throw CancellationError()
+        }
+        return result
     }
 
     func stopLiveSession(_ session: CameraLanSession, endpoint: CameraLanEndpoint) async throws {
@@ -110,8 +121,11 @@ struct CameraLanClient {
               challenge.serverProof.count == 64, challenge.serverProof.allSatisfy(\.isLowercaseHexDigit) else {
             throw CameraLanError.invalidResponse
         }
-        let remaining = challenge.expiresAt - nowMilliseconds()
-        guard remaining > 0, remaining <= 30_000 else { throw CameraLanError.expiredChallenge }
+        let now = nowMilliseconds()
+        let (latest, overflow) = now.addingReportingOverflow(30_000)
+        guard !overflow, challenge.expiresAt > now, challenge.expiresAt <= latest else {
+            throw CameraLanError.expiredChallenge
+        }
         return challenge
     }
 
@@ -124,21 +138,46 @@ struct CameraLanClient {
     }
 
     private func endpointURL(_ endpoint: CameraLanEndpoint, scheme: String, path: String) throws -> URL {
-        let host = endpoint.host.trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
-        guard !host.isEmpty, (1...65_535).contains(endpoint.port),
+        let host = try normalizedHost(endpoint.host)
+        guard (1...65_535).contains(endpoint.port), path.hasPrefix("/") else {
+            throw CameraLanError.invalidEndpoint
+        }
+        let encodedHost = host.address.replacingOccurrences(of: "%", with: "%25")
+        let authority = host.isIPv6 ? "[\(encodedHost)]" : encodedHost
+        guard let url = URL(string: "\(scheme)://\(authority):\(endpoint.port)\(path)"),
+              url.scheme == scheme, url.user == nil, url.password == nil, url.fragment == nil,
+              url.port == endpoint.port,
+              try normalizedHost(urlHost(url)) == host else { throw CameraLanError.invalidEndpoint }
+        return url
+    }
+
+    private func normalizedHost(_ value: String) throws -> NormalizedHost {
+        var host = value
+        if host.hasPrefix("[") || host.hasSuffix("]") {
+            guard host.hasPrefix("["), host.hasSuffix("]"), host.count > 2 else { throw CameraLanError.invalidEndpoint }
+            host.removeFirst(); host.removeLast()
+        }
+        guard !host.isEmpty, host == host.trimmingCharacters(in: .whitespacesAndNewlines),
               !host.contains("@"), !host.contains("/"), !host.contains("?"), !host.contains("#") else {
             throw CameraLanError.invalidEndpoint
         }
-        var components = URLComponents()
-        components.scheme = scheme
-        components.host = host
-        components.port = endpoint.port
-        components.percentEncodedPath = path
-        guard let url = components.url, url.user == nil, url.password == nil, url.fragment == nil,
-              url.host?.caseInsensitiveCompare(host) == .orderedSame, url.port == endpoint.port else {
+        let isIPv6 = host.contains(":")
+        if let marker = host.firstIndex(of: "%") {
+            guard isIPv6, host[host.index(after: marker)...].allSatisfy({ $0.isLetter || $0.isNumber || "._-".contains($0) }),
+                  !host[host.index(after: marker)...].isEmpty,
+                  host[host.index(after: marker)...].firstIndex(of: "%") == nil else {
+                throw CameraLanError.invalidEndpoint
+            }
+        }
+        return NormalizedHost(address: host, isIPv6: isIPv6)
+    }
+
+    private func urlHost(_ url: URL) throws -> String {
+        guard var encoded = URLComponents(url: url, resolvingAgainstBaseURL: false)?.percentEncodedHost else {
             throw CameraLanError.invalidEndpoint
         }
-        return url
+        if encoded.hasPrefix("[") && encoded.hasSuffix("]") { encoded.removeFirst(); encoded.removeLast() }
+        return encoded.replacingOccurrences(of: "%25", with: "%")
     }
 
     private func validatedViewerURL(path: String, sessionId: String, endpoint: CameraLanEndpoint) throws -> URL {
@@ -156,6 +195,23 @@ struct CameraLanClient {
 
     private func requireStatus(_ response: HTTPURLResponse, _ expected: Int) throws {
         guard response.statusCode == expected else { throw CameraLanError.rejected(response.statusCode) }
+    }
+
+    private func revokeAfterCancellation(_ session: CameraLanSession, endpoint: CameraLanEndpoint) async {
+        await Task { try? await stopLiveSession(session, endpoint: endpoint) }.value
+    }
+
+    private struct NormalizedHost: Equatable {
+        let address: String
+        let isIPv6: Bool
+
+        static func == (lhs: Self, rhs: Self) -> Bool {
+            let left = lhs.address.split(separator: "%", maxSplits: 1, omittingEmptySubsequences: false)
+            let right = rhs.address.split(separator: "%", maxSplits: 1, omittingEmptySubsequences: false)
+            return lhs.isIPv6 == rhs.isIPv6
+                && String(left[0]).caseInsensitiveCompare(String(right[0])) == .orderedSame
+                && left.dropFirst().first == right.dropFirst().first
+        }
     }
 
     private struct Capabilities: Decodable {
@@ -212,9 +268,13 @@ private extension Data {
     var lowercaseHex: String { map { String(format: "%02x", $0) }.joined() }
 }
 
-private final class CameraLanNoRedirectSession: NSObject, URLSessionTaskDelegate {
+final class CameraLanNoRedirectSession: NSObject, URLSessionTaskDelegate {
     static let delegate = CameraLanNoRedirectSession()
     static let shared = URLSession(configuration: .ephemeral, delegate: delegate, delegateQueue: nil)
+
+    static func webSocket(request: URLRequest) -> CameraLiveSocket {
+        URLSessionCameraLiveSocket(request: request, session: shared)
+    }
 
     func urlSession(
         _ session: URLSession,

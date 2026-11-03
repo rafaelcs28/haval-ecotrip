@@ -51,14 +51,7 @@ final class LANDiscovery {
             switch state {
             case .ready:
                 if let r = conn.currentPath?.remoteEndpoint, case let .hostPort(host, port) = r {
-                    let hostStr: String = {
-                        switch host {
-                        case .ipv4(let a): let raw = "\(a)"; return raw.split(separator: "%").first.map(String.init) ?? raw
-                        case .ipv6(let a): let raw = "\(a)"; let c = raw.split(separator: "%").first.map(String.init) ?? raw; return "[\(c)]"
-                        case .name(let n, _): return n
-                        @unknown default: return ""
-                        }
-                    }()
+                    let hostStr = Self.resolvedHost(host)
                     let p = Int(port.rawValue)
                     if !hostStr.isEmpty {
                         Task { @MainActor in
@@ -76,5 +69,14 @@ final class LANDiscovery {
             }
         }
         conn.start(queue: .main)
+    }
+
+    static func resolvedHost(_ host: NWEndpoint.Host) -> String {
+        switch host {
+        case .ipv4(let address): return "\(address)"
+        case .ipv6(let address): return "\(address)"
+        case .name(let name, _): return name
+        @unknown default: return ""
+        }
     }
 }

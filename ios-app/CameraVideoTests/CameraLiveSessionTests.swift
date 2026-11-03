@@ -138,24 +138,35 @@ final class CameraLiveSessionTests: XCTestCase {
     }
 
     func testRendererFailureBlanksAndWaitsForKeyframe() async {
-        let socket = FakeCameraLiveSocket()
+        let firstSocket = FakeCameraLiveSocket()
+        let secondSocket = FakeCameraLiveSocket()
+        var creates = 0
+        let reconnected = expectation(description: "renderer failure reconnects")
         let renderer = FakeRenderer()
-        let transport = CameraLiveTransport(createSession: { _ in Self.credentials() }, openSocket: { _ in socket }, stopSession: { _ in })
-        let session = CameraLiveSession(transport: transport, renderer: renderer, bridgeURL: { "https://bridge.example" }, bridgeToken: { "owner" })
+        let transport = CameraLiveTransport(
+            createSession: { _ in creates += 1; return Self.credentials(session: "session-\(creates)") },
+            openSocket: { _ in
+                if creates == 1 { return firstSocket }
+                reconnected.fulfill()
+                return secondSocket
+            },
+            stopSession: { _ in }
+        )
+        let delays = CameraLiveDelays(reconnect: { _ in }, stale: CameraLiveDelays.live.stale, renewal: CameraLiveDelays.live.renewal)
+        let session = CameraLiveSession(transport: transport, renderer: renderer, bridgeURL: { "https://bridge.example" }, bridgeToken: { "owner" }, delays: delays)
         await startInternet(session)
-        socket.yield(CameraVideoProtocolTests.config())
-        socket.yield(CameraVideoProtocolTests.access())
+        firstSocket.yield(CameraVideoProtocolTests.config())
+        firstSocket.yield(CameraVideoProtocolTests.access())
         await renderer.waitForDisplayedFrames(1)
         XCTAssertEqual(session.state, .live)
 
         renderer.failAsynchronously()
-        await Task.yield()
-        XCTAssertEqual(session.state, .degraded)
+        await fulfillment(of: [reconnected], timeout: 1)
 
-        socket.yield(CameraVideoProtocolTests.access(sequence: 3, keyframe: false))
+        secondSocket.yield(CameraVideoProtocolTests.access(sequence: 3, keyframe: false))
         await Task.yield()
-        XCTAssertEqual(session.state, .degraded)
-        socket.yield(CameraVideoProtocolTests.access(sequence: 4, keyframe: true))
+        XCTAssertNotEqual(session.state, .live)
+        secondSocket.yield(CameraVideoProtocolTests.access(sequence: 4, keyframe: true))
         await renderer.waitForDisplayedFrames(2)
         XCTAssertEqual(session.state, .live)
         await session.stop()

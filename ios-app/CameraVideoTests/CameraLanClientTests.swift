@@ -1,4 +1,5 @@
 import Foundation
+import Network
 import XCTest
 
 #if TASK7_IMPLEMENTED
@@ -139,11 +140,32 @@ final class CameraLanClientTests: XCTestCase {
     }
 
     func testLANWebSocketRedirectCallbackRejectsRedirect() {
-        XCTFail("LAN WebSocket handshake still uses the redirect-following shared session")
+        let delegate = CameraLanNoRedirectSession()
+        let session = URLSession(configuration: .ephemeral, delegate: delegate, delegateQueue: nil)
+        let original = URLRequest(url: URL(string: "ws://192.168.8.20:8080/ws/video/lan/viewer?session=session-1")!)
+        let redirected = URLRequest(url: URL(string: "ws://192.168.8.21:8081/ws/video/lan/viewer?session=session-1")!)
+        let response = HTTPURLResponse(
+            url: original.url!,
+            statusCode: 302,
+            httpVersion: nil,
+            headerFields: ["Location": redirected.url!.absoluteString]
+        )!
+        let task = session.webSocketTask(with: original)
+        let rejected = expectation(description: "WebSocket redirect rejected")
+
+        delegate.urlSession(session, task: task, willPerformHTTPRedirection: response, newRequest: redirected) { request in
+            XCTAssertNil(request)
+            rejected.fulfill()
+        }
+
+        wait(for: [rejected], timeout: 1)
+        task.cancel()
+        session.invalidateAndCancel()
     }
 
     func testDiscoveryPreservesScopedLinkLocalIPv6Host() {
-        XCTFail("LAN discovery currently strips the IPv6 scope identifier")
+        XCTAssertEqual(LANDiscovery.resolvedHost(NWEndpoint.Host("2001:db8::1")), "2001:db8::1")
+        XCTAssertEqual(LANDiscovery.resolvedHost(NWEndpoint.Host("fe80::1%en0")), "fe80::1%en0")
     }
 
     func testChallengeInt64ExtremesFailWithoutTrapOrSessionRequest() async {
