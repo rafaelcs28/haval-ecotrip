@@ -13,12 +13,14 @@ struct KnownPlace: Identifiable {
     var lat: Double
     var lng: Double
     var radiusM: Double
+    var chargeMeter: ChargeMeterConfig?
     init(_ r: [String: Any]) {
         if let i = r["id"] as? String { id = i } else if let n = r["id"] as? NSNumber { id = n.stringValue } else { id = UUID().uuidString }
         name = (r["name"] as? String) ?? "Local"
         lat = (r["lat"] as? Double) ?? (r["lat"] as? NSNumber)?.doubleValue ?? 0
         lng = (r["lng"] as? Double) ?? (r["lng"] as? NSNumber)?.doubleValue ?? 0
         radiusM = (r["radius_m"] as? Double) ?? (r["radius_m"] as? NSNumber)?.doubleValue ?? 200
+        chargeMeter = (r["charge_meter"] as? [String: Any]).flatMap(ChargeMeterConfig.init)
     }
 }
 

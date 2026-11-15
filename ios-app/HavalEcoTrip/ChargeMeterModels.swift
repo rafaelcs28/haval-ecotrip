@@ -1,0 +1,129 @@
+import Foundation
+
+struct ChargeMeterTariff: Equatable {
+    let effectiveFromMs: Int64
+    let pricePerKwh: Double
+
+    init(effectiveFromMs: Int64, pricePerKwh: Double) {
+        self.effectiveFromMs = effectiveFromMs
+        self.pricePerKwh = pricePerKwh
+    }
+
+    init?(_ raw: [String: Any]) {
+        guard let effectiveFromMs = Self.int64(raw["effective_from_ms"]),
+              let pricePerKwh = Self.double(raw["price_per_kwh"]),
+              pricePerKwh.isFinite, pricePerKwh >= 0 else { return nil }
+        self.init(effectiveFromMs: effectiveFromMs, pricePerKwh: pricePerKwh)
+    }
+
+    var json: [String: Any] {
+        ["effective_from_ms": effectiveFromMs, "price_per_kwh": pricePerKwh]
+    }
+
+    private static func int64(_ value: Any?) -> Int64? {
+        if let value = value as? Int64 { return value }
+        if let value = value as? NSNumber { return value.int64Value }
+        if let value = value as? String { return Int64(value) }
+        return nil
+    }
+
+    private static func double(_ value: Any?) -> Double? {
+        if let value = value as? Double { return value }
+        if let value = value as? NSNumber { return value.doubleValue }
+        if let value = value as? String { return Double(value.replacingOccurrences(of: ",", with: ".")) }
+        return nil
+    }
+}
+
+enum ChargeMeterConfigError: LocalizedError {
+    case missingProvider
+    case missingCharger
+    case invalidTariff
+
+    var errorDescription: String? {
+        switch self {
+        case .missingProvider: return "Escolha o provedor."
+        case .missingCharger: return "Escolha o carregador."
+        case .invalidTariff: return "Informe uma tarifa válida."
+        }
+    }
+}
+
+struct ChargeMeterConfig: Equatable {
+    var enabled: Bool
+    var provider: String
+    var chargerId: String
+    var chargerName: String
+    var tariffs: [ChargeMeterTariff]
+
+    init(
+        enabled: Bool = false,
+        provider: String = "",
+        chargerId: String = "",
+        chargerName: String = "",
+        tariffs: [ChargeMeterTariff] = []
+    ) {
+        self.enabled = enabled
+        self.provider = provider
+        self.chargerId = chargerId
+        self.chargerName = chargerName
+        self.tariffs = tariffs.sorted { $0.effectiveFromMs < $1.effectiveFromMs }
+    }
+
+    init?(_ raw: [String: Any]) {
+        guard let provider = raw["provider"] as? String,
+              let chargerId = raw["charger_id"] as? String else { return nil }
+        self.init(
+            enabled: (raw["enabled"] as? Bool) ?? false,
+            provider: provider,
+            chargerId: chargerId,
+            chargerName: (raw["charger_name"] as? String) ?? chargerId,
+            tariffs: (raw["tariffs"] as? [[String: Any]] ?? []).compactMap(ChargeMeterTariff.init)
+        )
+    }
+
+    var currentPricePerKwh: Double? { tariffs.last?.pricePerKwh }
+
+    var json: [String: Any] {
+        [
+            "enabled": enabled,
+            "provider": provider,
+            "charger_id": chargerId,
+            "charger_name": chargerName,
+            "tariffs": tariffs.map(\.json)
+        ]
+    }
+
+    func updating(
+        enabled: Bool,
+        provider: String,
+        chargerId: String,
+        chargerName: String,
+        priceText: String,
+        effectiveFromMs: Int64
+    ) throws -> ChargeMeterConfig {
+        let provider = provider.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let chargerId = chargerId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !provider.isEmpty else { throw ChargeMeterConfigError.missingProvider }
+        guard !chargerId.isEmpty else { throw ChargeMeterConfigError.missingCharger }
+
+        var tariffs: [ChargeMeterTariff] = provider == "zeeda" ? self.tariffs : []
+        if provider == "zeeda" {
+            let normalized = priceText.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: ",", with: ".")
+            guard let price = Double(normalized), price.isFinite, price >= 0 else {
+                throw ChargeMeterConfigError.invalidTariff
+            }
+            if tariffs.last?.pricePerKwh != price {
+                tariffs.append(ChargeMeterTariff(effectiveFromMs: effectiveFromMs, pricePerKwh: price))
+            }
+        }
+
+        return ChargeMeterConfig(
+            enabled: enabled,
+            provider: provider,
+            chargerId: chargerId,
+            chargerName: chargerName.trimmingCharacters(in: .whitespacesAndNewlines),
+            tariffs: tariffs
+        )
+    }
+}
