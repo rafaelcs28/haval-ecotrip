@@ -189,3 +189,24 @@ Expected: zero falhas.
 - [ ] **Step 3: Revisão final**
 
 Confirmar que nenhum nome controla vínculo, nenhuma criação ocorre sem confirmação e nenhum valor manual de recarga é alterado.
+
+### Task 5: Publicação TestFlight
+
+**Files:**
+- Verify and publish only.
+
+**Interfaces:**
+- Consumes: branch revisada e checks verdes da Task 4.
+- Produces: novo build Haval Hub disponível no TestFlight.
+
+- [ ] **Step 1: Criar checkout limpo no Mac Mini**
+
+Usar o HEAD imutável da branch publicada no GitHub. Não usar working tree suja nem copiar credenciais.
+
+- [ ] **Step 2: Arquivar e inspecionar**
+
+Executar archive Release pelo Terminal gráfico. Confirmar versão, build, `NSCameraUsageDescription` e assinatura dentro do `.xcarchive`.
+
+- [ ] **Step 3: Enviar e validar na Apple**
+
+Enviar com `ios-app/ExportOptions.plist` e aguardar o build específico ficar `VALID` no App Store Connect.

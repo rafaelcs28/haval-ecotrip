@@ -6,6 +6,7 @@
 bash -n scripts/build-on-mac-mini.sh
 node --check bridge/server.js
 node --check bridge/gateway.js
+node --test bridge/test/charge-location-links.test.js
 ```
 
 Os checks Node validam sintaxe, não integração, rotas, autenticação ou runtime. Android e Apple compilam somente na fila autorizada.

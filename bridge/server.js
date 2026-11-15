@@ -24,6 +24,12 @@ const bluettiCloud = require('./bluetti-cloud');
 const starlink     = require('./starlink-sitio');
 const sajCloud     = require('./saj-cloud');   // nuvem SAJ direta (Catalão), sem o HA no caminho
 const ocpp         = require('./ocpp-server'); // central system do carregador (OCPP 1.6J)
+const {
+  discoverChargeLocations,
+  hasChargeLocationCoordinates,
+  resolveChargeLocationLinks,
+  setChargeLocationLink,
+} = require('./charge-location-links');
 
 // Sem isto, uma rejection/exception fora de rota (timer, callback MQTT, fetch em
 // background) derrubava o processo inteiro. Loga e segue — pm2 só reinicia em crash real.
@@ -3635,6 +3641,17 @@ try {
 
 function saveKnownPlaces() {
   try { fs.writeFileSync(KNOWN_PLACES_FILE, JSON.stringify(knownPlaces, null, 2)); } catch (_) {}
+}
+
+function syncChargeLocationsFromHistory() {
+  let sequence = 0;
+  const seed = Date.now();
+  const discovered = discoverChargeLocations(chargeLocations, chargesArr, () => seed + sequence++);
+  const resolved = resolveChargeLocationLinks(discovered.locations, knownPlaces);
+  if (discovered.changed || resolved.changed) {
+    chargeLocations = resolved.locations;
+    saveChargeLocations();
+  }
 }
 
 // ── Manutenções — intervalos por km + histórico ─────────────────────────────
@@ -11474,26 +11491,64 @@ app.post('/api/charges/merge', (req, res) => {
 });
 
 // ── Locais de recarga ─────────────────────────────────────────────────────────
-app.get('/api/charge-locations', (_req, res) => res.json(chargeLocations));
+app.get('/api/charge-locations', (_req, res) => {
+  syncChargeLocationsFromHistory();
+  res.json(chargeLocations);
+});
 
 app.post('/api/charge-locations', (req, res) => {
   const { name, lat, lng } = req.body || {};
   if (!name?.trim()) return res.status(400).json({ error: 'nome obrigatório' });
-  // Evita duplicatas: mesmo nome ou GPS a < 100 m
+  // Com GPS, só proximidade identifica o ponto. Nome igual em outro endereço é válido.
   const dup = chargeLocations.find(l =>
-    l.name === name.trim() ||
-    (l.lat && l.lng && lat && lng && haversineM(l.lat, l.lng, lat, lng) < 100)
+    (l.lat != null && l.lng != null && lat != null && lng != null && haversineM(l.lat, l.lng, lat, lng) < 100) ||
+    (l.lat == null && l.lng == null && lat == null && lng == null && l.name.trim().toLowerCase() === name.trim().toLowerCase())
   );
   if (dup) return res.json(dup);
-  const loc = { id: Date.now(), name: name.trim(), lat: lat ?? null, lng: lng ?? null };
+  const loc = { id: Date.now(), name: name.trim(), lat: lat ?? null, lng: lng ?? null, known_place_id: null };
   chargeLocations.push(loc);
   saveChargeLocations();
   res.json(loc);
 });
 
+app.post('/api/charge-locations/:id/link', (req, res) => {
+  const knownPlaceId = req.body?.known_place_id;
+  if (knownPlaceId == null) return res.status(400).json({ error: 'known_place_id obrigatório' });
+  if (!setChargeLocationLink(chargeLocations, req.params.id, knownPlaces, knownPlaceId)) {
+    return res.status(404).json({ error: 'local de recarga ou local conhecido não encontrado' });
+  }
+  saveChargeLocations();
+  const location = chargeLocations.find(item => String(item.id) === String(req.params.id));
+  res.json(location);
+});
+
+app.post('/api/charge-locations/:id/create-known-place', (req, res) => {
+  const location = chargeLocations.find(item => String(item.id) === String(req.params.id));
+  if (!location) return res.status(404).json({ error: 'local de recarga não encontrado' });
+  if (!hasChargeLocationCoordinates(location)) {
+    return res.status(400).json({ error: 'local de recarga sem coordenadas' });
+  }
+  const lat = Number(location.lat), lng = Number(location.lng);
+
+  const name = String(req.body?.name || location.name || '').trim();
+  if (!name) return res.status(400).json({ error: 'nome obrigatório' });
+  const duplicate = knownPlaces.find(place =>
+    place.name.trim().toLowerCase() === name.toLowerCase() ||
+    (place.lat != null && place.lng != null && haversineM(place.lat, place.lng, lat, lng) < 50)
+  );
+  if (duplicate) return res.status(409).json({ error: 'duplicate', existing: duplicate });
+
+  const radius = Math.max(50, Math.min(2000, parseInt(req.body?.radius_m, 10) || 200));
+  const place = { id: Date.now(), name, lat, lng, radius_m: radius };
+  knownPlaces.push(place);
+  location.known_place_id = place.id;
+  saveKnownPlaces();
+  saveChargeLocations();
+  res.status(201).json({ known_place_id: place.id, place, location });
+});
+
 app.delete('/api/charge-locations/:id', (req, res) => {
-  const id = parseInt(req.params.id);
-  const idx = chargeLocations.findIndex(l => l.id === id);
+  const idx = chargeLocations.findIndex(l => String(l.id) === String(req.params.id));
   if (idx === -1) return res.status(404).json({ error: 'não encontrado' });
   chargeLocations.splice(idx, 1);
   saveChargeLocations();
@@ -12196,6 +12251,11 @@ app.delete('/api/known-places/:id', (req, res) => {
   if (idx < 0) return res.status(404).json({ error: 'not found' });
   knownPlaces.splice(idx, 1);
   saveKnownPlaces();
+  const resolved = resolveChargeLocationLinks(chargeLocations, knownPlaces);
+  if (resolved.changed) {
+    chargeLocations = resolved.locations;
+    saveChargeLocations();
+  }
   res.json({ ok: true });
 });
 
