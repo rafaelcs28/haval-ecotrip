@@ -73,7 +73,7 @@ final class ActivityManager: ObservableObject {
 
     // Atualiza a Live Activity ativa diretamente de um payload (sem fetch).
     // Chamado pelo UNUserNotificationCenterDelegate quando chega charge_live.
-    static func updateFromPayload(soc: Double, pwr: Double, rem: Double, kwh: Double) async {
+    static func updateFromPayload(soc: Double, pwr: Double, chargerPwr: Double?, rem: Double, kwh: Double) async {
         let activities = await MainActor.run {
             Activity<ChargeActivityAttributes>.activities.filter { $0.activityState == .active }
         }
@@ -81,7 +81,7 @@ final class ActivityManager: ObservableObject {
         // Push charge_live não traz o alvo — preserva o que a LA já mostra (pode ser alvo custom 97%).
         let prevTarget = activity.content.state.targetPct
         let state = ChargeActivityAttributes.ContentState(
-            soc: soc, powerKw: pwr, sessionKwh: kwh,
+            soc: soc, powerKw: pwr, chargerPowerKw: chargerPwr, sessionKwh: kwh,
             remainingMin: Int(rem.rounded()), charging: true,
             targetPct: prevTarget,
             updatedAtMs: Date().timeIntervalSince1970 * 1000
@@ -145,12 +145,14 @@ final class ActivityManager: ObservableObject {
             let charging = (json["charging_state"] as? String) == "Carregando"
             let soc      = (json["soc_pct"]              as? Double) ?? 0
             let pwr      = (json["charge_power_kw"]      as? Double) ?? 0
+            let chargerPwr = json["charge_charger_power_kw"] as? Double
             let kwh      = (json["charge_session_kwh"]   as? Double) ?? 0
             let rem      = (json["charge_remaining_min"] as? Double) ?? 0
 
             let state = ChargeActivityAttributes.ContentState(
                 soc: soc,
                 powerKw: pwr,
+                chargerPowerKw: chargerPwr,
                 sessionKwh: kwh,
                 remainingMin: Int(rem.rounded()),
                 charging: charging,
