@@ -79,4 +79,22 @@ final class ChargeMeterModelsTests: XCTestCase {
         XCTAssertTrue(config.tariffs.isEmpty)
         XCTAssertNil(config.currentPricePerKwh)
     }
+
+    func testProviderCatalogDecodesTariffCapability() {
+        let zeeda = ChargeMeterProvider(["id": "zeeda", "name": "Zeeda", "requires_tariff": true])
+        let yellot = ChargeMeterProvider(["id": "yellotmob", "name": "YellotMob", "requires_tariff": false])
+
+        XCTAssertEqual(zeeda?.id, "zeeda")
+        XCTAssertEqual(zeeda?.name, "Zeeda")
+        XCTAssertEqual(zeeda?.requiresTariff, true)
+        XCTAssertEqual(yellot?.requiresTariff, false)
+    }
+
+    func testChargerCatalogDecodesStableIdentifier() {
+        let charger = ChargeMeterCharger(["id": "station-42", "name": "Shopping", "online": true])
+
+        XCTAssertEqual(charger?.id, "station-42")
+        XCTAssertEqual(charger?.name, "Shopping")
+        XCTAssertEqual(charger?.online, true)
+    }
 }
