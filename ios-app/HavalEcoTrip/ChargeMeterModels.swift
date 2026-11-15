@@ -21,6 +21,10 @@ struct ChargeLocationCandidate: Identifiable, Equatable {
         return lat.isFinite && lng.isFinite && (-90...90).contains(lat) && (-180...180).contains(lng)
     }
 
+    static func unlinked(_ locations: [ChargeLocationCandidate]) -> [ChargeLocationCandidate] {
+        locations.filter { $0.knownPlaceId == nil }
+    }
+
     private static func string(_ value: Any?) -> String? {
         if let value = value as? String { return value }
         if let value = value as? NSNumber { return value.stringValue }
