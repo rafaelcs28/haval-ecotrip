@@ -148,6 +148,68 @@ final class ChargeMeterModelsTests: XCTestCase {
         }
     }
 
+    func testProviderGroupsRoundTripWithoutLosingTariffs() {
+        let configs = [
+            ChargeMeterConfig(
+                enabled: true,
+                provider: "zeeda",
+                chargerId: "Z-1",
+                chargerName: "Zeeda 1",
+                tariffs: [ChargeMeterTariff(effectiveFromMs: 1000, pricePerKwh: 0.18)]
+            ),
+            ChargeMeterConfig(enabled: true, provider: "yellotmob", chargerId: "Y-1", chargerName: "Yellot 1"),
+            ChargeMeterConfig(
+                enabled: true,
+                provider: "zeeda",
+                chargerId: "Z-2",
+                chargerName: "Zeeda 2",
+                tariffs: [ChargeMeterTariff(effectiveFromMs: 2000, pricePerKwh: 0.32)]
+            )
+        ]
+
+        let groups = ChargeMeterProviderGroup.group(configs)
+
+        XCTAssertEqual(groups.map(\.provider), ["zeeda", "yellotmob"])
+        XCTAssertEqual(groups[0].meters.map(\.chargerId), ["Z-1", "Z-2"])
+        XCTAssertEqual(ChargeMeterProviderGroup.flatten(groups), configs)
+    }
+
+    func testApplyingMultipleSelectionPreservesExistingTariffAndAddsNewMeter() {
+        let existing = ChargeMeterConfig(
+            enabled: true,
+            provider: "zeeda",
+            chargerId: "Z-1",
+            chargerName: "Existing",
+            tariffs: [ChargeMeterTariff(effectiveFromMs: 1000, pricePerKwh: 0.18)]
+        )
+        let group = ChargeMeterProviderGroup(provider: "zeeda", meters: [existing])
+        let catalog = [
+            ChargeMeterCharger(["id": "Z-1", "name": "Existing"])!,
+            ChargeMeterCharger(["id": "Z-2", "name": "New"])!
+        ]
+
+        let expanded = group.applyingSelection(["Z-1", "Z-2"], catalog: catalog)
+        XCTAssertEqual(expanded.meters.map(\.chargerId), ["Z-1", "Z-2"])
+        XCTAssertEqual(expanded.meters[0].currentPricePerKwh, 0.18)
+        XCTAssertTrue(expanded.meters[1].tariffs.isEmpty)
+
+        let reduced = expanded.applyingSelection(["Z-2"], catalog: catalog)
+        XCTAssertEqual(reduced.meters.map(\.chargerId), ["Z-2"])
+    }
+
+    func testRemovingProviderGroupKeepsOtherProviders() {
+        let groups = [
+            ChargeMeterProviderGroup(provider: "zeeda", meters: [
+                ChargeMeterConfig(enabled: true, provider: "zeeda", chargerId: "Z-1", chargerName: "Zeeda")
+            ]),
+            ChargeMeterProviderGroup(provider: "yellotmob", meters: [
+                ChargeMeterConfig(enabled: true, provider: "yellotmob", chargerId: "Y-1", chargerName: "Yellot")
+            ])
+        ]
+
+        XCTAssertEqual(ChargeMeterProviderGroup.removing("zeeda", from: groups).map(\.provider), ["yellotmob"])
+    }
+
     func testUpdatingPriceAcceptsCommaAndKeepsTariffHistory() throws {
         let existing = ChargeMeterConfig(
             enabled: true,
