@@ -2,6 +2,46 @@ import XCTest
 @testable import HavalEcoTrip
 
 final class ChargeMeterModelsTests: XCTestCase {
+    func testChargeLocationCandidateDecodesNumericIdentifiers() {
+        let location = ChargeLocationCandidate([
+            "id": 42,
+            "name": "YellotMob | T-63",
+            "lat": -16.701,
+            "lng": -49.261,
+            "known_place_id": 7
+        ])
+
+        XCTAssertEqual(location?.id, "42")
+        XCTAssertEqual(location?.name, "YellotMob | T-63")
+        XCTAssertEqual(location?.knownPlaceId, "7")
+        XCTAssertEqual(location?.canCreateKnownPlace, true)
+    }
+
+    func testChargeLocationCandidateDecodesStringIdentifierWithoutLink() {
+        let location = ChargeLocationCandidate([
+            "id": "history-1",
+            "name": "Garagem",
+            "lat": -16.7,
+            "lng": -49.2
+        ])
+
+        XCTAssertEqual(location?.id, "history-1")
+        XCTAssertNil(location?.knownPlaceId)
+    }
+
+    func testChargeLocationCandidateCannotCreateKnownPlaceWithoutCoordinates() {
+        let location = ChargeLocationCandidate([
+            "id": 1,
+            "name": "Sem GPS",
+            "lat": NSNull(),
+            "lng": NSNull()
+        ])
+
+        XCTAssertEqual(location?.lat, nil)
+        XCTAssertEqual(location?.lng, nil)
+        XCTAssertEqual(location?.canCreateKnownPlace, false)
+    }
+
     func testKnownPlaceDecodesExistingMeterConfiguration() {
         let place = KnownPlace([
             "id": "lisboa",
