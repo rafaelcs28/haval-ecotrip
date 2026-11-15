@@ -206,3 +206,54 @@ struct ChargeMeterConfig: Equatable {
         )
     }
 }
+
+struct ChargeMeterProviderGroup: Identifiable, Equatable {
+    let provider: String
+    var meters: [ChargeMeterConfig]
+    var id: String { provider }
+
+    init(provider: String, meters: [ChargeMeterConfig] = []) {
+        self.provider = provider.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        self.meters = meters
+    }
+
+    static func group(_ configs: [ChargeMeterConfig]) -> [ChargeMeterProviderGroup] {
+        var groups: [ChargeMeterProviderGroup] = []
+        for config in configs {
+            let provider = config.provider.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if let index = groups.firstIndex(where: { $0.provider == provider }) {
+                groups[index].meters.append(config)
+            } else {
+                groups.append(ChargeMeterProviderGroup(provider: provider, meters: [config]))
+            }
+        }
+        return groups
+    }
+
+    static func flatten(_ groups: [ChargeMeterProviderGroup]) -> [ChargeMeterConfig] {
+        groups.flatMap(\.meters)
+    }
+
+    static func removing(_ provider: String, from groups: [ChargeMeterProviderGroup]) -> [ChargeMeterProviderGroup] {
+        let normalized = provider.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return groups.filter { $0.provider != normalized }
+    }
+
+    func applyingSelection(_ selectedIds: Set<String>, catalog: [ChargeMeterCharger]) -> ChargeMeterProviderGroup {
+        let selected = Set(selectedIds.map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() })
+        let existing = Dictionary(uniqueKeysWithValues: meters.map {
+            ($0.chargerId.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(), $0)
+        })
+        let updated = catalog.compactMap { charger -> ChargeMeterConfig? in
+            let key = charger.id.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard selected.contains(key) else { return nil }
+            return existing[key] ?? ChargeMeterConfig(
+                enabled: true,
+                provider: provider,
+                chargerId: charger.id,
+                chargerName: charger.name
+            )
+        }
+        return ChargeMeterProviderGroup(provider: provider, meters: updated)
+    }
+}
