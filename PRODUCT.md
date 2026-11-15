@@ -54,13 +54,15 @@ Este é um produto pessoal. Não há evidência de um SaaS público ou de requis
 
 - Telemetria e comandos mantêm contratos compatíveis entre carro, bridge, PWA, iPhone e iPad.
 - Viagens e recargas não são duplicadas ou perdidas após desconexão e retomada.
+- Recargas podem usar medição externa vinculada ao local sem sobrescrever valores manuais. Zeeda usa tarifa local; YellotMob usa custo da sessão.
+- Durante a recarga, a Live Activity compara potência do carregador e do carro quando ambas estiverem disponíveis.
 - Automações executam somente quando todas as condições configuradas são satisfeitas.
 - Falha de LAN ou nuvem apresenta estado compreensível e usa o fallback previsto sem duplicar comandos.
 - Atualizações instaláveis preservam a identidade de assinatura exigida pelo dispositivo.
 
 ## Próxima entrega
 
-Criar a primeira suíte de testes de domínio para regras de viagem, recarga, automação e serialização, sem depender de hardware ou credenciais.
+Expandir a suíte de domínio iniciada no iOS para reconciliação no Bridge, agrupamento de sessões e proteção de valores manuais.
 
 ## Manutenção
 
