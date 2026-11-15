@@ -342,7 +342,7 @@ private struct PlaceRow: View {
 
     private var effective: (Double, Double) { coord ?? (place.lat, place.lng) }
     private var requiresTariff: Bool {
-        providers.first(where: { $0.id == providerId })?.requiresTariff ?? providerId.lowercased() == "zeeda"
+        providers.first(where: { $0.id == providerId })?.requiresTariff ?? (providerId.lowercased() == "zeeda")
     }
 
     var body: some View {
