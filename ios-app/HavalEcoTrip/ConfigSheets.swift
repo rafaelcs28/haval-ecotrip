@@ -222,6 +222,13 @@ struct FlowChipsSelect: View {
 }
 
 // MARK: - Locais conhecidos
+private struct PendingChargeLocationLink: Identifiable {
+    let id = UUID()
+    let location: ChargeLocationCandidate
+    let knownPlaceId: String?
+    let knownPlaceName: String?
+}
+
 struct KnownPlacesSheet: View {
     @ObservedObject var cfg: ConfigStore
     @ObservedObject private var car = CarStore.shared
@@ -233,8 +240,16 @@ struct KnownPlacesSheet: View {
     @State private var coord: (Double, Double)? = nil
     @State private var addrLabel = ""
     @State private var showMap = false
+    @State private var chargeLocations: [ChargeLocationCandidate] = []
+    @State private var chargeLocationsFailed = false
+    @State private var chargeLocationMessage = ""
+    @State private var pendingLink: PendingChargeLocationLink?
+    @State private var editingPlaceId: String?
 
     private var effective: (Double, Double)? { coord ?? (car.hasGps ? (car.lat, car.lng) : nil) }
+    private var unlinkedChargeLocations: [ChargeLocationCandidate] {
+        ChargeLocationCandidate.unlinked(chargeLocations)
+    }
     private var locText: String {
         if coord != nil { return addrLabel.isEmpty ? "Ponto escolhido" : addrLabel }
         return car.hasGps ? "Posição atual do carro" : "Sem local — busque ou escolha no mapa"
@@ -282,7 +297,57 @@ struct KnownPlacesSheet: View {
                             }.disabled(newName.isEmpty || effective == nil)
                         }
                     }
-                    ForEach(cfg.places) { p in PlaceRow(place: p, cfg: cfg) }
+                    if !unlinkedChargeLocations.isEmpty {
+                        DSCard(title: "Locais de recarga para vincular", icon: "bolt.badge.clock") {
+                            VStack(spacing: 12) {
+                                ForEach(unlinkedChargeLocations) { location in
+                                    HStack(spacing: 10) {
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(location.name).font(.system(size: 14, weight: .semibold)).foregroundStyle(DS.text)
+                                            Text(location.canCreateKnownPlace ? "Coordenadas disponíveis" : "Sem coordenadas · escolha um local existente")
+                                                .font(.caption2).foregroundStyle(DS.muted)
+                                        }
+                                        Spacer()
+                                        Menu {
+                                            ForEach(cfg.places) { place in
+                                                Button(place.name) {
+                                                    pendingLink = PendingChargeLocationLink(
+                                                        location: location,
+                                                        knownPlaceId: place.id,
+                                                        knownPlaceName: place.name
+                                                    )
+                                                }
+                                            }
+                                            if location.canCreateKnownPlace {
+                                                Divider()
+                                                Button("Criar local conhecido") {
+                                                    pendingLink = PendingChargeLocationLink(
+                                                        location: location,
+                                                        knownPlaceId: nil,
+                                                        knownPlaceName: nil
+                                                    )
+                                                }
+                                            }
+                                        } label: {
+                                            Label("Vincular", systemImage: "link")
+                                                .font(.caption.weight(.semibold)).foregroundStyle(DS.teal)
+                                        }
+                                    }
+                                    if location.id != unlinkedChargeLocations.last?.id { Divider().overlay(DS.border) }
+                                }
+                            }
+                        }
+                    }
+                    if chargeLocationsFailed {
+                        Text("Não foi possível carregar os locais usados nas recargas.")
+                            .font(.caption).foregroundStyle(DS.red).frame(maxWidth: .infinity, alignment: .leading)
+                    } else if !chargeLocationMessage.isEmpty {
+                        Text(chargeLocationMessage)
+                            .font(.caption).foregroundStyle(DS.teal).frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    ForEach(cfg.places) { p in
+                        PlaceRow(place: p, cfg: cfg, startEditing: editingPlaceId == p.id)
+                    }
                 }.padding(16)
             }
             .background(DS.bg.ignoresSafeArea())
@@ -295,8 +360,21 @@ struct KnownPlacesSheet: View {
                     if newName.isEmpty { newName = nm }
                 }
             }
+            .alert(item: $pendingLink) { pending in
+                Alert(
+                    title: Text(pending.knownPlaceId == nil ? "Criar local conhecido?" : "Vincular locais?"),
+                    message: Text(confirmationMessage(pending)),
+                    primaryButton: .default(Text("Confirmar")) {
+                        Task { await confirm(pending) }
+                    },
+                    secondaryButton: .cancel()
+                )
+            }
         }
-        .task { await cfg.loadPlaces() }
+        .task {
+            await cfg.loadPlaces()
+            await reloadChargeLocations()
+        }
     }
 
     @ViewBuilder private func field(_ ph: String, _ text: Binding<String>, icon: String? = nil) -> some View {
@@ -319,11 +397,48 @@ struct KnownPlacesSheet: View {
     }
 
     private func reset() { newName = ""; search = ""; coord = nil; addrLabel = ""; completer.clear() }
+
+    private func confirmationMessage(_ pending: PendingChargeLocationLink) -> String {
+        if let name = pending.knownPlaceName {
+            return "Vincular “\(pending.location.name)” ao local conhecido “\(name)”?"
+        }
+        return "Criar “\(pending.location.name)” como local conhecido com raio de 200 m?"
+    }
+
+    private func reloadChargeLocations() async {
+        guard let loaded = await cfg.loadChargeLocations() else {
+            chargeLocationsFailed = true
+            return
+        }
+        chargeLocations = loaded
+        chargeLocationsFailed = false
+    }
+
+    private func confirm(_ pending: PendingChargeLocationLink) async {
+        chargeLocationMessage = ""
+        if let knownPlaceId = pending.knownPlaceId {
+            let ok = await cfg.linkChargeLocation(pending.location.id, to: knownPlaceId)
+            guard ok else {
+                chargeLocationMessage = "Não foi possível salvar o vínculo."
+                return
+            }
+            editingPlaceId = knownPlaceId
+        } else {
+            guard let newId = await cfg.createKnownPlace(from: pending.location, radius: 200) else {
+                chargeLocationMessage = "Não foi possível criar o local conhecido."
+                return
+            }
+            editingPlaceId = newId
+        }
+        chargeLocationMessage = "Vínculo salvo. Configure o provedor e o carregador abaixo."
+        await reloadChargeLocations()
+    }
 }
 
 private struct PlaceRow: View {
     let place: KnownPlace
     let cfg: ConfigStore
+    let startEditing: Bool
     @State private var name = ""
     @State private var radius = 200.0
     @State private var loaded = false
@@ -412,11 +527,17 @@ private struct PlaceRow: View {
                         Text("\(meter.chargerName) · \(meter.provider == "zeeda" ? "tarifa R$ \(String(format: "%.2f", meter.currentPricePerKwh ?? 0))" : "valor do provedor")")
                             .font(.caption2).foregroundStyle(DS.teal)
                     }
-                    Button("Editar") { editing = true; loadState(); Task { await loadCatalog() } }.font(.caption).foregroundStyle(DS.blue)
+                    Button("Editar") { beginEditing() }.font(.caption).foregroundStyle(DS.blue)
                 }
             }
         }
-        .onAppear { if !loaded { loadState(); loaded = true } }
+        .onAppear {
+            if !loaded { loadState(); loaded = true }
+            if startEditing { beginEditing() }
+        }
+        .onChange(of: startEditing) { _, shouldEdit in
+            if shouldEdit { beginEditing() }
+        }
         .sheet(isPresented: $showMap) {
             MapPickerSheet(start: .init(latitude: effective.0, longitude: effective.1),
                            initial: .init(latitude: effective.0, longitude: effective.1)) { c, _ in
@@ -440,6 +561,12 @@ private struct PlaceRow: View {
     private func loadCatalog() async {
         providers = await cfg.loadChargeMeterProviders()
         if !providerId.isEmpty { chargers = await cfg.loadChargeMeterChargers(provider: providerId) }
+    }
+
+    private func beginEditing() {
+        editing = true
+        loadState()
+        Task { await loadCatalog() }
     }
 
     private func selectProvider(_ provider: ChargeMeterProvider) {

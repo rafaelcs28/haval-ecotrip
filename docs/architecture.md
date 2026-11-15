@@ -31,6 +31,8 @@ docs/        instalação, operação, arquitetura, qualidade e evidências
 
 Locais conhecidos podem conter `charge_meter`, com provedor e carregador normalizados pelo Bridge. Zeeda mantém tarifa por vigência; YellotMob fornece energia e custo da sessão. A Live Activity aceita `charge_charger_power_kw` opcional para comparar potência do carregador com a potência recebida pelo carro.
 
+O Bridge deriva candidatos persistidos de `chargesArr` em `GET /api/charge-locations`. O Haval Hub exige confirmação para `POST /api/charge-locations/:id/link` ou `POST /api/charge-locations/:id/create-known-place`. `known_place_id` mantém o vínculo; nomes são apenas apresentação.
+
 ## Dados e runtime
 
 Arquivos de estado, históricos, tokens, certificados e configurações reais do bridge não são fonte versionada. A `.gitignore` define os dados recriados ou preservados somente no servidor. Mudanças de schema devem mapear leitores, escritores, compatibilidade e rollback antes da edição.
