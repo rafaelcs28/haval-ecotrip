@@ -164,10 +164,38 @@ final class ConfigStore: ObservableObject {
               let (code, data) = await send("/api/charge-meter/providers/\(encoded)/chargers", "GET"), code == 200 else { return [] }
         return rows(data, key: "chargers").compactMap(ChargeMeterCharger.init)
     }
+    func loadChargeLocations() async -> [ChargeLocationCandidate]? {
+        guard let (code, data) = await send("/api/charge-locations", "GET"), code == 200 else { return nil }
+        return rows(data, key: "locations").compactMap(ChargeLocationCandidate.init)
+    }
+    func linkChargeLocation(_ id: String, to knownPlaceId: String) async -> Bool {
+        guard let encoded = id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
+              let (code, _) = await send("/api/charge-locations/\(encoded)/link", "POST", ["known_place_id": knownPlaceId]),
+              (200..<300).contains(code) else { return false }
+        await loadPlaces()
+        return true
+    }
+    func createKnownPlace(from location: ChargeLocationCandidate, radius: Double) async -> String? {
+        guard location.canCreateKnownPlace,
+              let encoded = location.id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
+              let (code, data) = await send(
+                "/api/charge-locations/\(encoded)/create-known-place",
+                "POST",
+                ["name": location.name, "radius_m": radius]
+              ), (200..<300).contains(code),
+              let knownPlaceId = Self.stringId(obj(data)["known_place_id"]) else { return nil }
+        await loadPlaces()
+        return knownPlaceId
+    }
     private func rows(_ data: Data, key: String) -> [[String: Any]] {
         guard let json = try? JSONSerialization.jsonObject(with: data) else { return [] }
         if let rows = json as? [[String: Any]] { return rows }
         return (json as? [String: Any])?[key] as? [[String: Any]] ?? []
+    }
+    private static func stringId(_ value: Any?) -> String? {
+        if let value = value as? String { return value }
+        if let value = value as? NSNumber { return value.stringValue }
+        return nil
     }
     /// Catálogo de chaves do carro (referência pra montar condições/ações).
     func loadCarKeys() async -> [CarKey] {
