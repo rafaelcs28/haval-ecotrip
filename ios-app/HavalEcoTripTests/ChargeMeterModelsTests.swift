@@ -42,6 +42,17 @@ final class ChargeMeterModelsTests: XCTestCase {
         XCTAssertEqual(location?.canCreateKnownPlace, false)
     }
 
+    func testOnlyUnlinkedChargeLocationsNeedUserConfirmation() {
+        let linked = ChargeLocationCandidate([
+            "id": 1, "name": "Vinculado", "known_place_id": 10
+        ])!
+        let unlinked = ChargeLocationCandidate([
+            "id": 2, "name": "Pendente"
+        ])!
+
+        XCTAssertEqual(ChargeLocationCandidate.unlinked([linked, unlinked]).map(\.id), ["2"])
+    }
+
     func testKnownPlaceDecodesExistingMeterConfiguration() {
         let place = KnownPlace([
             "id": "lisboa",
