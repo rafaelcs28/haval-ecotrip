@@ -11514,8 +11514,12 @@ app.get('/api/charge-meter/providers/:provider/chargers', async (req, res) => {
   }
   const url = provider === 'zeeda'
     ? (process.env.ZEEDA_GATEWAY_URL || 'http://127.0.0.1:8788') + '/api/zeeda/chargers'
-    : (process.env.YELLOTMOB_URL || 'http://127.0.0.1:8790') + '/api/chargers';
-  const headers = provider === 'zeeda' ? { Authorization: `Bearer ${BRIDGE_TOKEN_HASH}` } : {};
+    : provider === 'mhzmob'
+      ? `http://127.0.0.1:${PORT}/api/mhzmob/chargers`
+      : (process.env.YELLOTMOB_URL || 'http://127.0.0.1:8790') + '/api/chargers';
+  const headers = ['zeeda', 'mhzmob'].includes(provider)
+    ? { Authorization: `Bearer ${BRIDGE_TOKEN_HASH}` }
+    : {};
   try {
     const upstream = await fetch(url, { headers, signal: AbortSignal.timeout(5_000) });
     if (!upstream.ok) throw new Error(`HTTP ${upstream.status}`);
@@ -11593,7 +11597,9 @@ async function _reconcileChargeMeterRecord(charge) {
           {
             zeedaUrl: process.env.ZEEDA_GATEWAY_URL || 'http://127.0.0.1:8788',
             yellotmobUrl: process.env.YELLOTMOB_URL || 'http://127.0.0.1:8790',
+            mhzmobUrl: `http://127.0.0.1:${PORT}`,
             zeedaToken: BRIDGE_TOKEN_HASH,
+            mhzmobToken: BRIDGE_TOKEN_HASH,
           }
         );
         sessionsByKey[key] = sessions;

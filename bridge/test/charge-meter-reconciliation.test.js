@@ -29,6 +29,14 @@ const yellotmob = id => ({
   tariffs: [],
 });
 
+const mhzmob = id => ({
+  enabled: true,
+  provider: 'mhzmob',
+  charger_id: id,
+  charger_name: id,
+  tariffs: [],
+});
+
 const session = (id, startMinute, endMinute, energy, extra = {}) => ({
   external_session_id: id,
   started_at: new Date(base + startMinute * MINUTE).toISOString(),
@@ -140,6 +148,33 @@ test('uses YellotMob energy and provider cost', () => {
 
   assert.equal(result.charger_kwh, 22.502);
   assert.deepEqual(result.cost_override, { total: 31.11, perKwh: 1.3825 });
+});
+
+test('uses MHZ MOB energy and provider cost', () => {
+  const result = reconcileChargeMeter({
+    charge: charge(),
+    configs: [mhzmob('4')],
+    sessionsByKey: {
+      'mhzmob:4': [session('transaction:2084', 0, 60, 20.722, { provider_cost: 32.88 })],
+    },
+  });
+
+  assert.equal(result.charger_kwh, 20.722);
+  assert.deepEqual(result.cost_override, { total: 32.88, perKwh: 1.5867 });
+});
+
+test('keeps MHZ MOB pending when provider cost is absent', () => {
+  const result = reconcileChargeMeter({
+    charge: charge(),
+    configs: [mhzmob('4')],
+    sessionsByKey: {
+      'mhzmob:4': [session('transaction:2084', 0, 60, 20.722, { provider_cost: null })],
+    },
+  });
+
+  assert.equal(result.status, 'pending');
+  assert.equal(result.charger_kwh, 20.722);
+  assert.equal(result.cost_override, undefined);
 });
 
 test('preserves manual energy and cost independently', () => {

@@ -3,6 +3,7 @@
 const PROVIDERS = [
   { id: 'zeeda', name: 'Zeeda', requires_tariff: true },
   { id: 'yellotmob', name: 'YellotMob', requires_tariff: false },
+  { id: 'mhzmob', name: 'MHZ MOB', requires_tariff: false },
 ];
 
 function chargeMeterProviders() {

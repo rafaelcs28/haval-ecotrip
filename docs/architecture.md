@@ -29,9 +29,9 @@ docs/        instalação, operação, arquitetura, qualidade e evidências
 4. No iOS, `CarStore`, `BridgeRouter`, stores especializados e views SwiftUI consomem o bridge e gerenciam estado local, notificações e Live Activities.
 5. O iPad/OBD pode receber dados do bridge ou BLE/ELM327 e enviar telemetria por MQTT/HTTP; a descoberta LAN reduz latência e possui fallback remoto.
 
-Locais conhecidos usam `charge_meters` como lista canônica e mantêm `charge_meter` como espelho legado do primeiro item. Cada par normalizado `provider + charger_id` é único. Zeeda mantém tarifa por carregador e vigência; YellotMob fornece energia e custo da sessão.
+Locais conhecidos usam `charge_meters` como lista canônica e mantêm `charge_meter` como espelho legado do primeiro item. Cada par normalizado `provider + charger_id` é único. Zeeda mantém tarifa por carregador e vigência; YellotMob e MHZ MOB fornecem energia e custo da sessão.
 
-O aplicativo agrupa a lista por provedor apenas na interface. O Bridge consulta os adaptadores locais Zeeda (`127.0.0.1:8788`) e YellotMob (`127.0.0.1:8790`), remove payloads brutos e concilia somente sessões sobrepostas ao período da recarga. Sessões sequenciais do mesmo carregador podem ser somadas; carregadores diferentes nunca são somados. Maior sobreposição temporal e término mais próximo resolvem concorrência; empate permanece pendente. Falhas repetem a cada 5 minutos por até 72 horas. Energia e custo já preenchidos têm precedência independente.
+O aplicativo agrupa a lista por provedor apenas na interface. O Bridge consulta os adaptadores locais Zeeda (`127.0.0.1:8788`), YellotMob (`127.0.0.1:8790`) e seu namespace autenticado MHZ MOB (`/api/mhzmob`), remove payloads brutos e concilia somente sessões sobrepostas ao período da recarga. Sessões sequenciais do mesmo carregador podem ser somadas; carregadores diferentes nunca são somados. Maior sobreposição temporal e término mais próximo resolvem concorrência; empate permanece pendente. Falhas repetem a cada 5 minutos por até 72 horas. Energia e custo já preenchidos têm precedência independente.
 
 A Live Activity aceita `charge_charger_power_kw` opcional para comparar potência do carregador com a potência recebida pelo carro.
 

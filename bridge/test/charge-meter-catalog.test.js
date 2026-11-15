@@ -28,10 +28,11 @@ const yellotmob = id => ({
   tariffs: [],
 });
 
-test('publishes Zeeda and YellotMob capabilities', () => {
+test('publishes Zeeda, YellotMob and MHZ MOB capabilities', () => {
   assert.deepEqual(chargeMeterProviders(), [
     { id: 'zeeda', name: 'Zeeda', requires_tariff: true },
     { id: 'yellotmob', name: 'YellotMob', requires_tariff: false },
+    { id: 'mhzmob', name: 'MHZ MOB', requires_tariff: false },
   ]);
 });
 
@@ -42,6 +43,9 @@ test('normalizes charger catalogs without leaking raw provider data', () => {
   assert.deepEqual(normalizeChargeMeterChargers('yellotmob', { items: [{
     id: 273, name: 'Pão de Açúcar T-63', raw: { address: 'omit' },
   }] }), [{ id: '273', name: 'Pão de Açúcar T-63' }]);
+  assert.deepEqual(normalizeChargeMeterChargers('mhzmob', { items: [{
+    id: '4', name: 'MHZ MOB - PREMIER', raw: { token: 'omit' },
+  }] }), [{ id: '4', name: 'MHZ MOB - PREMIER' }]);
 });
 
 test('validates provider configuration before persistence', () => {
@@ -78,6 +82,22 @@ test('validates mixed charger lists with independent Zeeda tariffs', () => {
   assert.equal(result[1].tariffs[0].price_per_kwh, 0.32);
   assert.deepEqual(result[2].tariffs, []);
   assert.deepEqual(validateChargeMeterConfigs([]), []);
+});
+
+test('validates MHZ MOB without a local tariff', () => {
+  assert.deepEqual(validateChargeMeterConfig({
+    enabled: true,
+    provider: 'mhzmob',
+    charger_id: '4',
+    charger_name: 'MHZ MOB - PREMIER',
+    tariffs: [{ effective_from_ms: 1000, price_per_kwh: 9.99 }],
+  }), {
+    enabled: true,
+    provider: 'mhzmob',
+    charger_id: '4',
+    charger_name: 'MHZ MOB - PREMIER',
+    tariffs: [],
+  });
 });
 
 test('rejects normalized duplicate provider and charger pairs', () => {

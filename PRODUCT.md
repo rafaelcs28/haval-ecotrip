@@ -21,6 +21,7 @@ Este é um produto pessoal. Não há evidência de um SaaS público ou de requis
 5. Automações são configuradas pelos clientes e executadas pelo carro.
 6. Widgets e Live Activities mantêm estados relevantes visíveis no iPhone.
 7. O iPad/OBD coleta ou consome telemetria e oferece cluster, navegação e controles.
+8. Locais conhecidos podem vincular vários carregadores Zeeda, YellotMob ou MHZ MOB; o bridge preenche energia e custo sem expor credenciais ao app.
 
 ## Escopo
 
@@ -54,7 +55,7 @@ Este é um produto pessoal. Não há evidência de um SaaS público ou de requis
 
 - Telemetria e comandos mantêm contratos compatíveis entre carro, bridge, PWA, iPhone e iPad.
 - Viagens e recargas não são duplicadas ou perdidas após desconexão e retomada.
-- Recargas podem usar vários medidores externos vinculados ao mesmo local sem sobrescrever valores manuais. Cada Zeeda usa sua tarifa; cada YellotMob usa energia e custo da sessão.
+- Recargas podem usar vários medidores externos vinculados ao mesmo local sem sobrescrever valores manuais. Cada Zeeda usa sua tarifa; YellotMob e MHZ MOB usam energia e custo da sessão.
 - Locais já usados em recargas aparecem para vínculo confirmado com um local conhecido; nomes diferentes não quebram a associação por ID.
 - Durante a recarga, a Live Activity compara potência do carregador e do carro quando ambas estiverem disponíveis.
 - Automações executam somente quando todas as condições configuradas são satisfeitas.
@@ -63,7 +64,7 @@ Este é um produto pessoal. Não há evidência de um SaaS público ou de requis
 
 ## Próxima entrega
 
-Validar a conciliação com sessões reais Zeeda e YellotMob sem alterar lançamentos manuais existentes.
+Validar a conciliação com sessões reais Zeeda, YellotMob e MHZ MOB sem alterar lançamentos manuais existentes.
 
 ## Manutenção
 

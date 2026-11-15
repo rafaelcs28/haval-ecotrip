@@ -116,10 +116,10 @@ function reconcileChargeMeter({ charge, configs, sessionsByKey }) {
     } else {
       status = 'missing_tariff';
     }
-  } else if (cost == null && winner.config.provider === 'yellotmob') {
-    const providerCosts = winner.sessions.map(item => Number(item.session.provider_cost));
-    if (providerCosts.every(Number.isFinite)) {
-      const total = round(providerCosts.reduce((sum, value) => sum + value, 0), 2);
+  } else if (cost == null && ['yellotmob', 'mhzmob'].includes(winner.config.provider)) {
+    const providerCosts = winner.sessions.map(item => item.session.provider_cost);
+    if (providerCosts.every(value => value != null && Number.isFinite(Number(value)))) {
+      const total = round(providerCosts.reduce((sum, value) => sum + Number(value), 0), 2);
       cost = total === 0
         ? { total: 0, perKwh: 0, free: true }
         : { total, perKwh: round(total / providerEnergy, 4) };

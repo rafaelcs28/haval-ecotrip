@@ -81,6 +81,56 @@ test('normalizes paginated Zeeda sessions with loopback gateway auth', async () 
   assert.ok(calls[0].signal instanceof AbortSignal);
 });
 
+test('loads MHZ MOB through its Bridge namespace and ignores the upstream provider field', async () => {
+  const calls = [];
+  const fetchImpl = async (url, options) => {
+    calls.push({ url: String(url), authorization: options.headers.Authorization });
+    const cursor = new URL(url).searchParams.get('cursor');
+    return new Response(JSON.stringify(cursor === '0' ? {
+      items: [{
+        provider: 'yellotmob',
+        external_session_id: 'transaction:2084',
+        charger_id: '4',
+        charger_name: 'MHZ MOB - PREMIER',
+        started_at: '2026-10-17T13:20:23.367Z',
+        ended_at: '2026-10-17T13:45:56.367Z',
+        energy_kwh: 20.722,
+        provider_cost: 32.88,
+        status: 'Pago',
+        raw_updated_at: null,
+        raw: { token: 'omit' },
+      }],
+      next_cursor: 100,
+    } : {
+      items: [],
+      next_cursor: null,
+    }), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+
+  const sessions = await listChargeMeterSessions('mhzmob', '4', from, to, {
+    fetchImpl,
+    mhzmobUrl: 'http://127.0.0.1:3000',
+    mhzmobToken: 'bridge-hash',
+  });
+
+  assert.equal(calls[0].url, `http://127.0.0.1:3000/api/mhzmob/sessions?charger=4&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&limit=100&cursor=0`);
+  assert.deepEqual(calls.map(call => new URL(call.url).searchParams.get('cursor')), ['0', '100']);
+  assert.ok(calls.every(call => call.authorization === 'Bearer bridge-hash'));
+  assert.deepEqual(sessions, [{
+    provider: 'mhzmob',
+    external_session_id: 'transaction:2084',
+    charger_id: '4',
+    charger_name: 'MHZ MOB - PREMIER',
+    started_at: '2026-10-17T13:20:23.367Z',
+    ended_at: '2026-10-17T13:45:56.367Z',
+    energy_kwh: 20.722,
+    power_kw: null,
+    provider_cost: 32.88,
+    status: 'Pago',
+    raw_updated_at: null,
+  }]);
+});
+
 test('maps upstream failures to a stable error without response data', async () => {
   await assert.rejects(
     listChargeMeterSessions('yellotmob', '273', from, to, {
