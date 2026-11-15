@@ -155,17 +155,35 @@ final class ConfigStore: ObservableObject {
     func addPlace(name: String, lat: Double, lng: Double, radius: Double) async {
         await send("/api/known-places", "POST", ["name": name, "lat": lat, "lng": lng, "radius_m": radius]); await loadPlaces()
     }
+    func loadChargeMeterProviders() async -> [ChargeMeterProvider] {
+        guard let (code, data) = await send("/api/charge-meter/providers", "GET"), code == 200 else { return [] }
+        return rows(data, key: "providers").compactMap(ChargeMeterProvider.init)
+    }
+    func loadChargeMeterChargers(provider: String) async -> [ChargeMeterCharger] {
+        guard let encoded = provider.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
+              let (code, data) = await send("/api/charge-meter/providers/\(encoded)/chargers", "GET"), code == 200 else { return [] }
+        return rows(data, key: "chargers").compactMap(ChargeMeterCharger.init)
+    }
+    private func rows(_ data: Data, key: String) -> [[String: Any]] {
+        guard let json = try? JSONSerialization.jsonObject(with: data) else { return [] }
+        if let rows = json as? [[String: Any]] { return rows }
+        return (json as? [String: Any])?[key] as? [[String: Any]] ?? []
+    }
     /// Catálogo de chaves do carro (referência pra montar condições/ações).
     func loadCarKeys() async -> [CarKey] {
         guard let (c, d) = await send("/api/car-keys", "GET"), c == 200,
               let arr = (try? JSONSerialization.jsonObject(with: d)) as? [[String: Any]] else { return [] }
         return arr.map { CarKey(key: ($0["key"] as? String) ?? "", label: ($0["label"] as? String) ?? "", values: ($0["values"] as? String) ?? "") }
     }
-    func updatePlace(_ id: String, name: String, radius: Double, lat: Double? = nil, lng: Double? = nil) async {
+    @discardableResult
+    func updatePlace(_ id: String, name: String, radius: Double, lat: Double? = nil, lng: Double? = nil, chargeMeter: ChargeMeterConfig? = nil) async -> Bool {
         var body: [String: Any] = ["name": name, "radius_m": radius]
         if let lat { body["lat"] = lat }
         if let lng { body["lng"] = lng }
-        await send("/api/known-places/\(id)", "PUT", body); await loadPlaces()
+        if let chargeMeter { body["charge_meter"] = chargeMeter.json }
+        guard let (code, _) = await send("/api/known-places/\(id)", "PUT", body), (200..<300).contains(code) else { return false }
+        await loadPlaces()
+        return true
     }
     func deletePlace(_ id: String) async {
         places.removeAll { $0.id == id }

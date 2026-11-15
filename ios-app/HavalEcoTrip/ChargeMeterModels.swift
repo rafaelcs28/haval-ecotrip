@@ -1,5 +1,31 @@
 import Foundation
 
+struct ChargeMeterProvider: Identifiable, Equatable {
+    let id: String
+    let name: String
+    let requiresTariff: Bool
+
+    init?(_ raw: [String: Any]) {
+        guard let id = raw["id"] as? String, !id.isEmpty else { return nil }
+        self.id = id
+        name = (raw["name"] as? String) ?? id
+        requiresTariff = (raw["requires_tariff"] as? Bool) ?? (id.lowercased() == "zeeda")
+    }
+}
+
+struct ChargeMeterCharger: Identifiable, Equatable {
+    let id: String
+    let name: String
+    let online: Bool?
+
+    init?(_ raw: [String: Any]) {
+        guard let id = raw["id"] as? String, !id.isEmpty else { return nil }
+        self.id = id
+        name = (raw["name"] as? String) ?? id
+        online = raw["online"] as? Bool
+    }
+}
+
 struct ChargeMeterTariff: Equatable {
     let effectiveFromMs: Int64
     let pricePerKwh: Double

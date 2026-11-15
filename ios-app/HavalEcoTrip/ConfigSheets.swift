@@ -330,8 +330,20 @@ private struct PlaceRow: View {
     @State private var editing = false
     @State private var coord: (Double, Double)? = nil
     @State private var showMap = false
+    @State private var meterEnabled = false
+    @State private var providerId = ""
+    @State private var chargerId = ""
+    @State private var chargerName = ""
+    @State private var tariff = ""
+    @State private var providers: [ChargeMeterProvider] = []
+    @State private var chargers: [ChargeMeterCharger] = []
+    @State private var meterError = ""
+    @State private var saving = false
 
     private var effective: (Double, Double) { coord ?? (place.lat, place.lng) }
+    private var requiresTariff: Bool {
+        providers.first(where: { $0.id == providerId })?.requiresTariff ?? providerId.lowercased() == "zeeda"
+    }
 
     var body: some View {
         DSCard {
@@ -353,25 +365,129 @@ private struct PlaceRow: View {
                         Label(coord != nil ? "Local ajustado no mapa ✓" : "Editar local no mapa", systemImage: "map.fill")
                             .font(.caption.weight(.semibold)).foregroundStyle(coord != nil ? DS.teal : DS.blue)
                     }
+                    Divider().overlay(DS.border)
+                    Toggle("Preencher recargas pelo carregador", isOn: $meterEnabled)
+                        .tint(DS.green).font(.system(size: 14))
+                    if meterEnabled {
+                        meterMenu(
+                            title: "Provedor",
+                            value: providers.first(where: { $0.id == providerId })?.name ?? providerId,
+                            empty: "Nenhum provedor disponível"
+                        ) {
+                            ForEach(providers) { provider in
+                                Button(provider.name) { selectProvider(provider) }
+                            }
+                        }
+                        meterMenu(
+                            title: "Carregador",
+                            value: chargerName,
+                            empty: providerId.isEmpty ? "Escolha o provedor" : "Nenhum carregador disponível"
+                        ) {
+                            ForEach(chargers) { charger in
+                                Button(charger.name) { chargerId = charger.id; chargerName = charger.name }
+                            }
+                        }
+                        if requiresTariff {
+                            TextField("Tarifa (R$/kWh)", text: $tariff)
+                                .keyboardType(.decimalPad).foregroundStyle(DS.text)
+                                .padding(9).background(DS.panel2).clipShape(RoundedRectangle(cornerRadius: 9))
+                            Text("Zeeda: custo calculado pela tarifa vigente.")
+                                .font(.caption2).foregroundStyle(DS.muted)
+                        } else if !providerId.isEmpty {
+                            Text("Energia e valor vêm da sessão do provedor.")
+                                .font(.caption2).foregroundStyle(DS.muted)
+                        }
+                    }
+                    if !meterError.isEmpty {
+                        Text(meterError).font(.caption2).foregroundStyle(DS.red)
+                    }
                     HStack(spacing: 10) {
-                        Button("Cancelar") { editing = false; name = place.name; radius = place.radiusM; coord = nil }.foregroundStyle(DS.muted)
+                        Button("Cancelar") { editing = false; loadState() }.foregroundStyle(DS.muted)
                         Spacer()
-                        Button("Salvar") {
-                            Task { await cfg.updatePlace(place.id, name: name, radius: radius, lat: coord?.0, lng: coord?.1); editing = false; coord = nil }
-                        }.font(.system(size: 14, weight: .bold)).foregroundStyle(DS.green)
+                        Button(saving ? "Salvando…" : "Salvar") { save() }
+                            .disabled(saving).font(.system(size: 14, weight: .bold)).foregroundStyle(DS.green)
                     }
                 } else {
-                    Button("Editar") { editing = true }.font(.caption).foregroundStyle(DS.blue)
+                    if let meter = place.chargeMeter, meter.enabled {
+                        Text("\(meter.chargerName) · \(meter.provider == "zeeda" ? "tarifa R$ \(String(format: "%.2f", meter.currentPricePerKwh ?? 0))" : "valor do provedor")")
+                            .font(.caption2).foregroundStyle(DS.teal)
+                    }
+                    Button("Editar") { editing = true; loadState(); Task { await loadCatalog() } }.font(.caption).foregroundStyle(DS.blue)
                 }
             }
         }
-        .onAppear { if !loaded { name = place.name; radius = place.radiusM; loaded = true } }
+        .onAppear { if !loaded { loadState(); loaded = true } }
         .sheet(isPresented: $showMap) {
             MapPickerSheet(start: .init(latitude: effective.0, longitude: effective.1),
                            initial: .init(latitude: effective.0, longitude: effective.1)) { c, _ in
                 coord = (c.latitude, c.longitude)
             }
         }
+    }
+
+    private func loadState() {
+        name = place.name
+        radius = place.radiusM
+        coord = nil
+        meterEnabled = place.chargeMeter?.enabled ?? false
+        providerId = place.chargeMeter?.provider ?? ""
+        chargerId = place.chargeMeter?.chargerId ?? ""
+        chargerName = place.chargeMeter?.chargerName ?? ""
+        tariff = place.chargeMeter?.currentPricePerKwh.map { String(format: "%.2f", $0).replacingOccurrences(of: ".", with: ",") } ?? ""
+        meterError = ""
+    }
+
+    private func loadCatalog() async {
+        providers = await cfg.loadChargeMeterProviders()
+        if !providerId.isEmpty { chargers = await cfg.loadChargeMeterChargers(provider: providerId) }
+    }
+
+    private func selectProvider(_ provider: ChargeMeterProvider) {
+        providerId = provider.id
+        chargerId = ""
+        chargerName = ""
+        chargers = []
+        Task { chargers = await cfg.loadChargeMeterChargers(provider: provider.id) }
+    }
+
+    private func save() {
+        saving = true
+        meterError = ""
+        Task {
+            var meter = place.chargeMeter
+            do {
+                if meterEnabled {
+                    meter = try (meter ?? ChargeMeterConfig()).updating(
+                        enabled: true,
+                        provider: providerId,
+                        chargerId: chargerId,
+                        chargerName: chargerName,
+                        priceText: tariff,
+                        effectiveFromMs: Int64(Date().timeIntervalSince1970 * 1000)
+                    )
+                } else if var existing = meter {
+                    existing.enabled = false
+                    meter = existing
+                }
+                let ok = await cfg.updatePlace(place.id, name: name, radius: radius, lat: coord?.0, lng: coord?.1, chargeMeter: meter)
+                saving = false
+                if ok { editing = false; coord = nil } else { meterError = "Não foi possível salvar no Bridge." }
+            } catch {
+                saving = false
+                meterError = error.localizedDescription
+            }
+        }
+    }
+
+    private func meterMenu<Content: View>(title: String, value: String, empty: String, @ViewBuilder content: () -> Content) -> some View {
+        HStack {
+            Text(title).font(.caption).foregroundStyle(DS.muted)
+            Spacer()
+            Menu(content: content) {
+                Text(value.isEmpty ? empty : value).font(.system(size: 13, weight: .semibold)).foregroundStyle(DS.text)
+            }
+        }
+        .padding(9).background(DS.panel2).clipShape(RoundedRectangle(cornerRadius: 9))
     }
 }
 
