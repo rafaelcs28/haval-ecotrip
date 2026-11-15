@@ -471,6 +471,19 @@ private struct ChargeLocationLinkPicker: View {
     }
 }
 
+private enum ChargeMeterCatalogSelection: String, Identifiable, Equatable {
+    case provider
+    case charger
+
+    var id: String { rawValue }
+    var title: String { self == .provider ? "Escolher provedor" : "Escolher carregador" }
+}
+
+private struct ChargeMeterChoice: Identifiable {
+    let id: String
+    let name: String
+}
+
 private struct PlaceRow: View {
     let place: KnownPlace
     let cfg: ConfigStore
@@ -490,6 +503,7 @@ private struct PlaceRow: View {
     @State private var chargers: [ChargeMeterCharger] = []
     @State private var meterError = ""
     @State private var saving = false
+    @State private var selectingCatalog: ChargeMeterCatalogSelection?
 
     private var effective: (Double, Double) { coord ?? (place.lat, place.lng) }
     private var requiresTariff: Bool {
@@ -520,23 +534,21 @@ private struct PlaceRow: View {
                     Toggle("Preencher recargas pelo carregador", isOn: $meterEnabled)
                         .tint(DS.green).font(.system(size: 14))
                     if meterEnabled {
-                        meterMenu(
+                        meterSelector(
                             title: "Provedor",
                             value: providers.first(where: { $0.id == providerId })?.name ?? providerId,
-                            empty: "Nenhum provedor disponível"
+                            empty: "Nenhum provedor disponível",
+                            enabled: !providers.isEmpty
                         ) {
-                            ForEach(providers) { provider in
-                                Button(provider.name) { selectProvider(provider) }
-                            }
+                            selectingCatalog = .provider
                         }
-                        meterMenu(
+                        meterSelector(
                             title: "Carregador",
                             value: chargerName,
-                            empty: providerId.isEmpty ? "Escolha o provedor" : "Nenhum carregador disponível"
+                            empty: providerId.isEmpty ? "Escolha o provedor" : "Nenhum carregador disponível",
+                            enabled: !providerId.isEmpty && !chargers.isEmpty
                         ) {
-                            ForEach(chargers) { charger in
-                                Button(charger.name) { chargerId = charger.id; chargerName = charger.name }
-                            }
+                            selectingCatalog = .charger
                         }
                         if requiresTariff {
                             TextField("Tarifa (R$/kWh)", text: $tariff)
@@ -578,6 +590,15 @@ private struct PlaceRow: View {
             MapPickerSheet(start: .init(latitude: effective.0, longitude: effective.1),
                            initial: .init(latitude: effective.0, longitude: effective.1)) { c, _ in
                 coord = (c.latitude, c.longitude)
+            }
+        }
+        .sheet(item: $selectingCatalog) { selection in
+            ChargeMeterCatalogPicker(
+                title: selection.title,
+                choices: choices(for: selection),
+                selectedId: selection == .provider ? providerId : chargerId
+            ) { choice in
+                select(choice, for: selection)
             }
         }
     }
@@ -642,15 +663,74 @@ private struct PlaceRow: View {
         }
     }
 
-    private func meterMenu<Content: View>(title: String, value: String, empty: String, @ViewBuilder content: () -> Content) -> some View {
-        HStack {
-            Text(title).font(.caption).foregroundStyle(DS.muted)
-            Spacer()
-            Menu(content: content) {
-                Text(value.isEmpty ? empty : value).font(.system(size: 13, weight: .semibold)).foregroundStyle(DS.text)
+    private func choices(for selection: ChargeMeterCatalogSelection) -> [ChargeMeterChoice] {
+        switch selection {
+        case .provider:
+            return providers.map { ChargeMeterChoice(id: $0.id, name: $0.name) }
+        case .charger:
+            return chargers.map { ChargeMeterChoice(id: $0.id, name: $0.name) }
+        }
+    }
+
+    private func select(_ choice: ChargeMeterChoice, for selection: ChargeMeterCatalogSelection) {
+        switch selection {
+        case .provider:
+            guard let provider = providers.first(where: { $0.id == choice.id }) else { return }
+            selectProvider(provider)
+        case .charger:
+            chargerId = choice.id
+            chargerName = choice.name
+        }
+    }
+
+    private func meterSelector(title: String, value: String, empty: String, enabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack {
+                Text(title).font(.caption).foregroundStyle(DS.muted)
+                Spacer()
+                Text(value.isEmpty ? empty : value)
+                    .font(.system(size: 13, weight: .semibold)).foregroundStyle(DS.text)
             }
         }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
         .padding(9).background(DS.panel2).clipShape(RoundedRectangle(cornerRadius: 9))
+    }
+}
+
+private struct ChargeMeterCatalogPicker: View {
+    @Environment(\.dismiss) private var dismiss
+    let title: String
+    let choices: [ChargeMeterChoice]
+    let selectedId: String
+    let onSelect: (ChargeMeterChoice) -> Void
+
+    var body: some View {
+        NavigationStack {
+            List(choices) { choice in
+                Button {
+                    onSelect(choice)
+                    dismiss()
+                } label: {
+                    HStack {
+                        Text(choice.name).foregroundStyle(DS.text)
+                        Spacer()
+                        if choice.id == selectedId {
+                            Image(systemName: "checkmark").foregroundStyle(DS.green)
+                        }
+                    }
+                }
+            }
+            .scrollContentBackground(.hidden)
+            .background(DS.bg)
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancelar") { dismiss() }
+                }
+            }
+        }
     }
 }
 
