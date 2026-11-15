@@ -64,6 +64,10 @@ function round(value, digits) {
   return Number(Number(value).toFixed(digits));
 }
 
+function shouldRetryChargeMeter(status, nowMs, deadlineMs) {
+  return status !== 'matched' && Number(nowMs) < Number(deadlineMs);
+}
+
 function reconcileChargeMeter({ charge, configs, sessionsByKey }) {
   const chargeEnd = Number(charge?.timestamp_ms);
   const durationMs = Number(charge?.duration_sec) * 1000;
@@ -136,4 +140,5 @@ function reconcileChargeMeter({ charge, configs, sessionsByKey }) {
 module.exports = {
   deduplicateSessions,
   reconcileChargeMeter,
+  shouldRetryChargeMeter,
 };

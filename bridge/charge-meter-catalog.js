@@ -75,7 +75,13 @@ function chargeMeterConfigsFromPlace(place) {
 
 function mergeLegacyChargeMeter(existing, legacy) {
   const configs = Array.isArray(existing) ? existing : [];
-  return [{ ...legacy }, ...configs.slice(1).map(config => ({ ...config }))];
+  const legacyKey = chargeMeterKey(legacy);
+  return [
+    { ...legacy },
+    ...configs.slice(1)
+      .filter(config => chargeMeterKey(config) !== legacyKey)
+      .map(config => ({ ...config })),
+  ];
 }
 
 module.exports = {

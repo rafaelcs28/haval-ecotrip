@@ -107,3 +107,14 @@ test('legacy writes replace only the first meter and preserve extras', () => {
   assert.deepEqual(mergeLegacyChargeMeter([], replacement), [replacement]);
   assert.deepEqual(existing, [zeeda('Z-1', 0.18), yellotmob('273')]);
 });
+
+test('legacy writes can promote an existing extra without creating a duplicate', () => {
+  const first = zeeda('Z-1', 0.18);
+  const promoted = yellotmob('273');
+  const remaining = yellotmob('274');
+
+  assert.deepEqual(
+    mergeLegacyChargeMeter([first, promoted, remaining], promoted),
+    [promoted, remaining]
+  );
+});

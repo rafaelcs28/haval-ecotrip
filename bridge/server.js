@@ -41,7 +41,7 @@ const {
   validateChargeMeterConfigs,
 } = require('./charge-meter-catalog');
 const { listChargeMeterSessions } = require('./charge-meter-provider');
-const { reconcileChargeMeter } = require('./charge-meter-reconciliation');
+const { reconcileChargeMeter, shouldRetryChargeMeter } = require('./charge-meter-reconciliation');
 
 // Sem isto, uma rejection/exception fora de rota (timer, callback MQTT, fetch em
 // background) derrubava o processo inteiro. Loga e segue — pm2 só reinicia em crash real.
@@ -11541,7 +11541,7 @@ function _knownPlaceForCharge(charge) {
 function _chargeMeterRetryState(charge, status, now, details = {}) {
   const previous = charge.charge_meter_reconcile || {};
   const deadline = Number(charge.timestamp_ms) + CHARGE_METER_RETRY_TTL_MS;
-  const retry = !['matched', 'not_configured'].includes(status) && now < deadline;
+  const retry = shouldRetryChargeMeter(status, now, deadline);
   return {
     status,
     attempts: Number(previous.attempts || 0) + 1,
@@ -11654,7 +11654,7 @@ async function _runChargeMeterRetries() {
     if (!end || now - end > CHARGE_METER_RETRY_TTL_MS) return false;
     if (Number(charge.charger_kwh) > 0 && charge.cost_override != null) return false;
     const state = charge.charge_meter_reconcile;
-    if (state && ['matched', 'not_configured'].includes(state.status)) return false;
+    if (state && !shouldRetryChargeMeter(state.status, now, state.deadline_ms)) return false;
     return !state || state.next_attempt_ms == null || Number(state.next_attempt_ms) <= now;
   });
   for (const charge of pending) {

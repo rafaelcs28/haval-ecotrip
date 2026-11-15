@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { reconcileChargeMeter } = require('../charge-meter-reconciliation');
+const { reconcileChargeMeter, shouldRetryChargeMeter } = require('../charge-meter-reconciliation');
 
 const MINUTE = 60_000;
 const base = Date.parse('2026-11-15T12:00:00.000Z');
@@ -159,4 +159,10 @@ test('preserves manual energy and cost independently', () => {
   });
   assert.equal(energyOnly.charger_kwh, 10);
   assert.deepEqual(energyOnly.cost_override, { total: 1.8, perKwh: 0.18 });
+});
+
+test('retries an unconfigured recent charge so later configuration can reconcile it', () => {
+  assert.equal(shouldRetryChargeMeter('not_configured', base, base + MINUTE), true);
+  assert.equal(shouldRetryChargeMeter('matched', base, base + MINUTE), false);
+  assert.equal(shouldRetryChargeMeter('pending', base + MINUTE, base + MINUTE), false);
 });
