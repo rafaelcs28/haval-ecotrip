@@ -31,6 +31,11 @@ const {
   resolveChargeLocationLinks,
   runPersistedMutation,
 } = require('./charge-location-links');
+const {
+  chargeMeterProviders,
+  normalizeChargeMeterChargers,
+  validateChargeMeterConfig,
+} = require('./charge-meter-catalog');
 
 // Sem isto, uma rejection/exception fora de rota (timer, callback MQTT, fetch em
 // background) derrubava o processo inteiro. Loga e segue — pm2 só reinicia em crash real.
@@ -11492,6 +11497,30 @@ app.post('/api/charges/merge', (req, res) => {
 });
 
 // ── Locais de recarga ─────────────────────────────────────────────────────────
+app.get('/api/charge-meter/providers', (_req, res) => {
+  res.json({ providers: chargeMeterProviders() });
+});
+
+app.get('/api/charge-meter/providers/:provider/chargers', async (req, res) => {
+  const provider = String(req.params.provider || '').toLowerCase();
+  if (!chargeMeterProviders().some(item => item.id === provider)) {
+    return res.status(404).json({ error: 'provedor não encontrado' });
+  }
+  const url = provider === 'zeeda'
+    ? (process.env.ZEEDA_GATEWAY_URL || 'http://127.0.0.1:8788') + '/api/zeeda/chargers'
+    : (process.env.YELLOTMOB_URL || 'http://127.0.0.1:8790') + '/api/chargers';
+  const headers = provider === 'zeeda' ? { Authorization: `Bearer ${BRIDGE_TOKEN_HASH}` } : {};
+  try {
+    const upstream = await fetch(url, { headers, signal: AbortSignal.timeout(5_000) });
+    if (!upstream.ok) throw new Error(`HTTP ${upstream.status}`);
+    const payload = await upstream.json();
+    res.json({ chargers: normalizeChargeMeterChargers(provider, payload) });
+  } catch (error) {
+    console.error(`[charge-meter:${provider}]`, error.message);
+    res.status(502).json({ error: 'catálogo do provedor indisponível' });
+  }
+});
+
 app.get('/api/charge-locations', (_req, res) => {
   syncChargeLocationsFromHistory();
   res.json(chargeLocations);
@@ -12267,10 +12296,19 @@ app.put('/api/known-places/:id', (req, res) => {
   const place = knownPlaces.find(p => p.id === id);
   if (!place) return res.status(404).json({ error: 'not found' });
   const { name, lat, lng, radius_m } = req.body || {};
+  let chargeMeter;
+  if (Object.prototype.hasOwnProperty.call(req.body || {}, 'charge_meter')) {
+    try {
+      chargeMeter = validateChargeMeterConfig(req.body.charge_meter);
+    } catch (error) {
+      return res.status(400).json({ error: error.message });
+    }
+  }
   if (name?.trim()) place.name = name.trim();
   if (lat != null) place.lat = lat;
   if (lng != null) place.lng = lng;
   if (radius_m != null) place.radius_m = Math.max(50, Math.min(2000, parseInt(radius_m)));
+  if (chargeMeter) place.charge_meter = chargeMeter;
   saveKnownPlaces();
   res.json(place);
 });

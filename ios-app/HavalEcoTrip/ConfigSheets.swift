@@ -243,7 +243,7 @@ struct KnownPlacesSheet: View {
     @State private var chargeLocations: [ChargeLocationCandidate] = []
     @State private var chargeLocationsFailed = false
     @State private var chargeLocationMessage = ""
-    @State private var pendingLink: PendingChargeLocationLink?
+    @State private var selectingChargeLocation: ChargeLocationCandidate?
     @State private var editingPlaceId: String?
 
     private var effective: (Double, Double)? { coord ?? (car.hasGps ? (car.lat, car.lng) : nil) }
@@ -308,26 +308,8 @@ struct KnownPlacesSheet: View {
                                                 .font(.caption2).foregroundStyle(DS.muted)
                                         }
                                         Spacer()
-                                        Menu {
-                                            ForEach(cfg.places) { place in
-                                                Button(place.name) {
-                                                    pendingLink = PendingChargeLocationLink(
-                                                        location: location,
-                                                        knownPlaceId: place.id,
-                                                        knownPlaceName: place.name
-                                                    )
-                                                }
-                                            }
-                                            if location.canCreateKnownPlace {
-                                                Divider()
-                                                Button("Criar local conhecido") {
-                                                    pendingLink = PendingChargeLocationLink(
-                                                        location: location,
-                                                        knownPlaceId: nil,
-                                                        knownPlaceName: nil
-                                                    )
-                                                }
-                                            }
+                                        Button {
+                                            selectingChargeLocation = location
                                         } label: {
                                             Label("Vincular", systemImage: "link")
                                                 .font(.caption.weight(.semibold)).foregroundStyle(DS.teal)
@@ -360,15 +342,10 @@ struct KnownPlacesSheet: View {
                     if newName.isEmpty { newName = nm }
                 }
             }
-            .alert(item: $pendingLink) { pending in
-                Alert(
-                    title: Text(pending.knownPlaceId == nil ? "Criar local conhecido?" : "Vincular locais?"),
-                    message: Text(confirmationMessage(pending)),
-                    primaryButton: .default(Text("Confirmar")) {
-                        Task { await confirm(pending) }
-                    },
-                    secondaryButton: .cancel()
-                )
+            .sheet(item: $selectingChargeLocation) { location in
+                ChargeLocationLinkPicker(location: location, places: cfg.places) { pending in
+                    Task { await confirm(pending) }
+                }
             }
         }
         .task {
@@ -398,13 +375,6 @@ struct KnownPlacesSheet: View {
 
     private func reset() { newName = ""; search = ""; coord = nil; addrLabel = ""; completer.clear() }
 
-    private func confirmationMessage(_ pending: PendingChargeLocationLink) -> String {
-        if let name = pending.knownPlaceName {
-            return "Vincular “\(pending.location.name)” ao local conhecido “\(name)”?"
-        }
-        return "Criar “\(pending.location.name)” como local conhecido com raio de 200 m?"
-    }
-
     private func reloadChargeLocations() async {
         guard let loaded = await cfg.loadChargeLocations() else {
             chargeLocationsFailed = true
@@ -432,6 +402,72 @@ struct KnownPlacesSheet: View {
         }
         chargeLocationMessage = "Vínculo salvo. Configure o provedor e o carregador abaixo."
         await reloadChargeLocations()
+    }
+}
+
+private struct ChargeLocationLinkPicker: View {
+    @Environment(\.dismiss) private var dismiss
+    let location: ChargeLocationCandidate
+    let places: [KnownPlace]
+    let onConfirm: (PendingChargeLocationLink) -> Void
+    @State private var pendingLink: PendingChargeLocationLink?
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("Locais conhecidos") {
+                    ForEach(places) { place in
+                        Button(place.name) {
+                            pendingLink = PendingChargeLocationLink(
+                                location: location,
+                                knownPlaceId: place.id,
+                                knownPlaceName: place.name
+                            )
+                        }
+                        .foregroundStyle(DS.text)
+                    }
+                }
+                if location.canCreateKnownPlace {
+                    Section {
+                        Button("Criar local conhecido") {
+                            pendingLink = PendingChargeLocationLink(
+                                location: location,
+                                knownPlaceId: nil,
+                                knownPlaceName: nil
+                            )
+                        }
+                        .foregroundStyle(DS.teal)
+                    }
+                }
+            }
+            .scrollContentBackground(.hidden)
+            .background(DS.bg)
+            .navigationTitle(location.name)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancelar") { dismiss() }
+                }
+            }
+            .alert(item: $pendingLink) { pending in
+                Alert(
+                    title: Text(pending.knownPlaceId == nil ? "Criar local conhecido?" : "Vincular locais?"),
+                    message: Text(confirmationMessage(pending)),
+                    primaryButton: .default(Text("Confirmar")) {
+                        dismiss()
+                        onConfirm(pending)
+                    },
+                    secondaryButton: .cancel()
+                )
+            }
+        }
+    }
+
+    private func confirmationMessage(_ pending: PendingChargeLocationLink) -> String {
+        if let name = pending.knownPlaceName {
+            return "Vincular “\(pending.location.name)” ao local conhecido “\(name)”?"
+        }
+        return "Criar “\(pending.location.name)” como local conhecido com raio de 200 m?"
     }
 }
 
