@@ -1,5 +1,40 @@
 import Foundation
 
+struct ChargeLocationCandidate: Identifiable, Equatable {
+    let id: String
+    let name: String
+    let lat: Double?
+    let lng: Double?
+    let knownPlaceId: String?
+
+    init?(_ raw: [String: Any]) {
+        guard let id = Self.string(raw["id"]), !id.isEmpty else { return nil }
+        self.id = id
+        name = ((raw["name"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 } ?? "Local de recarga"
+        lat = Self.double(raw["lat"])
+        lng = Self.double(raw["lng"])
+        knownPlaceId = Self.string(raw["known_place_id"])
+    }
+
+    var canCreateKnownPlace: Bool {
+        guard let lat, let lng else { return false }
+        return lat.isFinite && lng.isFinite && (-90...90).contains(lat) && (-180...180).contains(lng)
+    }
+
+    private static func string(_ value: Any?) -> String? {
+        if let value = value as? String { return value }
+        if let value = value as? NSNumber { return value.stringValue }
+        return nil
+    }
+
+    private static func double(_ value: Any?) -> Double? {
+        if let value = value as? Double, value.isFinite { return value }
+        if let value = value as? NSNumber, value.doubleValue.isFinite { return value.doubleValue }
+        if let value = value as? String, let number = Double(value), number.isFinite { return number }
+        return nil
+    }
+}
+
 struct ChargeMeterProvider: Identifiable, Equatable {
     let id: String
     let name: String
