@@ -43,9 +43,11 @@ Rollback para o aplicativo anterior mantém o primeiro carregador visível. Os d
 
 ## Interface
 
-O cartão do local mostra todos os carregadores configurados. A edição oferece `Adicionar carregador` e uma linha por configuração, com provedor, carregador, estado e tarifa quando for Zeeda.
+O cartão do local mostra todos os carregadores configurados. A edição oferece `Adicionar carregadores` e uma linha por configuração, com provedor, carregador, estado e tarifa quando for Zeeda.
 
-Adicionar abre o seletor rolável de provedor e depois o seletor rolável de carregador. Editar ou remover afeta apenas o item escolhido. Salvar valida a lista inteira e exige confirmação antes de remover uma configuração existente.
+Adicionar abre o seletor rolável de provedor e depois uma lista rolável de carregadores com seleção múltipla. O usuário marca quantos quiser e toca `Concluir`; os selecionados entram juntos no local. Para incluir carregadores de outro provedor, repete o fluxo. Carregadores já vinculados aparecem marcados e podem ser desmarcados somente após confirmação de remoção.
+
+Depois da seleção, cada Zeeda recebe sua tarifa individual antes do Save. Editar ou remover afeta apenas o item escolhido. Salvar valida a lista inteira e exige confirmação antes de remover uma configuração existente.
 
 Zeeda exige tarifa individual. YellotMob usa energia e custo fornecidos pelo provedor e não mostra tarifa.
 
@@ -86,5 +88,7 @@ Cada Zeeda usa sua própria tarifa vigente. Cada YellotMob usa seu próprio cust
 - Salvar dois YellotMob e uma mistura entre provedores.
 - Rejeitar duplicata exata sem alterar o JSON persistido.
 - Adicionar, editar e remover um item sem afetar os demais.
+- Marcar vários carregadores do mesmo provedor em uma única abertura do seletor.
+- Reabrir o seletor com itens existentes marcados e preservar tarifas ao manter a seleção.
 - Confirmar listas roláveis no iOS e build no Mac Mini autorizado.
 - Validar Bridge em produção antes de publicar o novo TestFlight.
