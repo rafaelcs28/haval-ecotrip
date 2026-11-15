@@ -13,14 +13,19 @@ struct KnownPlace: Identifiable {
     var lat: Double
     var lng: Double
     var radiusM: Double
-    var chargeMeter: ChargeMeterConfig?
+    var chargeMeters: [ChargeMeterConfig]
+    var chargeMeter: ChargeMeterConfig? { chargeMeters.first }
     init(_ r: [String: Any]) {
         if let i = r["id"] as? String { id = i } else if let n = r["id"] as? NSNumber { id = n.stringValue } else { id = UUID().uuidString }
         name = (r["name"] as? String) ?? "Local"
         lat = (r["lat"] as? Double) ?? (r["lat"] as? NSNumber)?.doubleValue ?? 0
         lng = (r["lng"] as? Double) ?? (r["lng"] as? NSNumber)?.doubleValue ?? 0
         radiusM = (r["radius_m"] as? Double) ?? (r["radius_m"] as? NSNumber)?.doubleValue ?? 200
-        chargeMeter = (r["charge_meter"] as? [String: Any]).flatMap(ChargeMeterConfig.init)
+        if r.keys.contains("charge_meters") {
+            chargeMeters = (r["charge_meters"] as? [[String: Any]] ?? []).compactMap(ChargeMeterConfig.init)
+        } else {
+            chargeMeters = (r["charge_meter"] as? [String: Any]).flatMap(ChargeMeterConfig.init).map { [$0] } ?? []
+        }
     }
 }
 
@@ -204,14 +209,20 @@ final class ConfigStore: ObservableObject {
         return arr.map { CarKey(key: ($0["key"] as? String) ?? "", label: ($0["label"] as? String) ?? "", values: ($0["values"] as? String) ?? "") }
     }
     @discardableResult
-    func updatePlace(_ id: String, name: String, radius: Double, lat: Double? = nil, lng: Double? = nil, chargeMeter: ChargeMeterConfig? = nil) async -> Bool {
+    func updatePlace(_ id: String, name: String, radius: Double, lat: Double? = nil, lng: Double? = nil, chargeMeters: [ChargeMeterConfig]? = nil) async -> Bool {
         var body: [String: Any] = ["name": name, "radius_m": radius]
         if let lat { body["lat"] = lat }
         if let lng { body["lng"] = lng }
-        if let chargeMeter { body["charge_meter"] = chargeMeter.json }
+        if let chargeMeters {
+            guard let validated = try? ChargeMeterConfig.validateUnique(chargeMeters) else { return false }
+            body["charge_meters"] = validated.map(\.json)
+        }
         guard let (code, _) = await send("/api/known-places/\(id)", "PUT", body), (200..<300).contains(code) else { return false }
         await loadPlaces()
         return true
+    }
+    func updatePlace(_ id: String, name: String, radius: Double, lat: Double? = nil, lng: Double? = nil, chargeMeter: ChargeMeterConfig?) async -> Bool {
+        await updatePlace(id, name: name, radius: radius, lat: lat, lng: lng, chargeMeters: chargeMeter.map { [$0] } ?? [])
     }
     func deletePlace(_ id: String) async {
         places.removeAll { $0.id == id }

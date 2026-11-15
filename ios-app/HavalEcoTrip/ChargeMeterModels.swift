@@ -101,16 +101,18 @@ struct ChargeMeterTariff: Equatable {
     }
 }
 
-enum ChargeMeterConfigError: LocalizedError {
+enum ChargeMeterConfigError: LocalizedError, Equatable {
     case missingProvider
     case missingCharger
     case invalidTariff
+    case duplicateCharger
 
     var errorDescription: String? {
         switch self {
         case .missingProvider: return "Escolha o provedor."
         case .missingCharger: return "Escolha o carregador."
         case .invalidTariff: return "Informe uma tarifa válida."
+        case .duplicateCharger: return "O carregador já está vinculado a este local."
         }
     }
 }
@@ -149,6 +151,9 @@ struct ChargeMeterConfig: Equatable {
     }
 
     var currentPricePerKwh: Double? { tariffs.last?.pricePerKwh }
+    var key: String {
+        "\(provider.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()):\(chargerId.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())"
+    }
 
     var json: [String: Any] {
         [
@@ -158,6 +163,14 @@ struct ChargeMeterConfig: Equatable {
             "charger_name": chargerName,
             "tariffs": tariffs.map(\.json)
         ]
+    }
+
+    static func validateUnique(_ configs: [ChargeMeterConfig]) throws -> [ChargeMeterConfig] {
+        var keys = Set<String>()
+        for config in configs {
+            guard keys.insert(config.key).inserted else { throw ChargeMeterConfigError.duplicateCharger }
+        }
+        return configs
     }
 
     func updating(
