@@ -97,4 +97,11 @@ final class ChargeMeterModelsTests: XCTestCase {
         XCTAssertEqual(charger?.name, "Shopping")
         XCTAssertEqual(charger?.online, true)
     }
+
+    func testLivePowerComparisonCalculatesChargingLoss() {
+        let comparison = ChargePowerComparison(chargerPowerKw: 6.2, vehiclePowerKw: 5.7)
+
+        XCTAssertEqual(comparison?.lossPercent ?? -1, 8.0645, accuracy: 0.001)
+        XCTAssertNil(ChargePowerComparison(chargerPowerKw: 0, vehiclePowerKw: 5.7))
+    }
 }
