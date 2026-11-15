@@ -29,6 +29,8 @@ docs/        instalação, operação, arquitetura, qualidade e evidências
 4. No iOS, `CarStore`, `BridgeRouter`, stores especializados e views SwiftUI consomem o bridge e gerenciam estado local, notificações e Live Activities.
 5. O iPad/OBD pode receber dados do bridge ou BLE/ELM327 e enviar telemetria por MQTT/HTTP; a descoberta LAN reduz latência e possui fallback remoto.
 
+Locais conhecidos podem conter `charge_meter`, com provedor e carregador normalizados pelo Bridge. Zeeda mantém tarifa por vigência; YellotMob fornece energia e custo da sessão. A Live Activity aceita `charge_charger_power_kw` opcional para comparar potência do carregador com a potência recebida pelo carro.
+
 ## Dados e runtime
 
 Arquivos de estado, históricos, tokens, certificados e configurações reais do bridge não são fonte versionada. A `.gitignore` define os dados recriados ou preservados somente no servidor. Mudanças de schema devem mapear leitores, escritores, compatibilidade e rollback antes da edição.
@@ -49,7 +51,7 @@ Arquivos de estado, históricos, tokens, certificados e configurações reais do
 
 ## Riscos observados
 
-- Não foi encontrada suíte automatizada de clientes nem script de teste no `bridge/package.json`.
+- O cliente iOS possui testes unitários incrementais em `HavalEcoTripTests`; o bridge ainda não possui script de teste observado neste snapshot.
 - Há arquivos Kotlin e Swift grandes, aumentando o custo de revisão.
 - Contratos distribuídos entre APK, bridge, PWA e apps Apple exigem revisão de consumidores antes de mudar nomes ou semântica.
 
