@@ -471,17 +471,33 @@ private struct ChargeLocationLinkPicker: View {
     }
 }
 
-private enum ChargeMeterCatalogSelection: String, Identifiable, Equatable {
+private enum ChargeMeterCatalogSelection: Identifiable {
     case provider
-    case charger
+    case chargers(String)
 
-    var id: String { rawValue }
-    var title: String { self == .provider ? "Escolher provedor" : "Escolher carregador" }
+    var id: String {
+        switch self {
+        case .provider: return "provider"
+        case .chargers(let provider): return "chargers:\(provider)"
+        }
+    }
 }
 
 private struct ChargeMeterChoice: Identifiable {
     let id: String
     let name: String
+}
+
+private enum ChargeMeterConfirmation: Identifiable {
+    case selection(provider: String, ids: Set<String>, removed: Int)
+    case provider(provider: String, count: Int)
+
+    var id: String {
+        switch self {
+        case .selection(let provider, _, _): return "selection:\(provider)"
+        case .provider(let provider, _): return "provider:\(provider)"
+        }
+    }
 }
 
 private struct PlaceRow: View {
@@ -495,19 +511,18 @@ private struct PlaceRow: View {
     @State private var coord: (Double, Double)? = nil
     @State private var showMap = false
     @State private var meterEnabled = false
-    @State private var providerId = ""
-    @State private var chargerId = ""
-    @State private var chargerName = ""
-    @State private var tariff = ""
     @State private var providers: [ChargeMeterProvider] = []
-    @State private var chargers: [ChargeMeterCharger] = []
+    @State private var providerGroups: [ChargeMeterProviderGroup] = []
+    @State private var chargerCatalogs: [String: [ChargeMeterCharger]] = [:]
+    @State private var tariffTexts: [String: String] = [:]
     @State private var meterError = ""
     @State private var saving = false
     @State private var selectingCatalog: ChargeMeterCatalogSelection?
+    @State private var meterConfirmation: ChargeMeterConfirmation?
 
     private var effective: (Double, Double) { coord ?? (place.lat, place.lng) }
-    private var requiresTariff: Bool {
-        providers.first(where: { $0.id == providerId })?.requiresTariff ?? (providerId.lowercased() == "zeeda")
+    private var availableProviders: [ChargeMeterProvider] {
+        providers.filter { provider in !providerGroups.contains(where: { $0.provider == provider.id }) }
     }
 
     var body: some View {
@@ -534,32 +549,16 @@ private struct PlaceRow: View {
                     Toggle("Preencher recargas pelo carregador", isOn: $meterEnabled)
                         .tint(DS.green).font(.system(size: 14))
                     if meterEnabled {
-                        meterSelector(
-                            title: "Provedor",
-                            value: providers.first(where: { $0.id == providerId })?.name ?? providerId,
-                            empty: "Nenhum provedor disponível",
-                            enabled: !providers.isEmpty
-                        ) {
+                        ForEach(providerGroups) { group in
+                            providerBlock(group)
+                        }
+                        Button {
                             selectingCatalog = .provider
+                        } label: {
+                            Label("Adicionar provedor", systemImage: "plus.circle.fill")
+                                .font(.system(size: 13, weight: .semibold)).foregroundStyle(DS.teal)
                         }
-                        meterSelector(
-                            title: "Carregador",
-                            value: chargerName,
-                            empty: providerId.isEmpty ? "Escolha o provedor" : "Nenhum carregador disponível",
-                            enabled: !providerId.isEmpty && !chargers.isEmpty
-                        ) {
-                            selectingCatalog = .charger
-                        }
-                        if requiresTariff {
-                            TextField("Tarifa (R$/kWh)", text: $tariff)
-                                .keyboardType(.decimalPad).foregroundStyle(DS.text)
-                                .padding(9).background(DS.panel2).clipShape(RoundedRectangle(cornerRadius: 9))
-                            Text("Zeeda: custo calculado pela tarifa vigente.")
-                                .font(.caption2).foregroundStyle(DS.muted)
-                        } else if !providerId.isEmpty {
-                            Text("Energia e valor vêm da sessão do provedor.")
-                                .font(.caption2).foregroundStyle(DS.muted)
-                        }
+                        .disabled(availableProviders.isEmpty)
                     }
                     if !meterError.isEmpty {
                         Text(meterError).font(.caption2).foregroundStyle(DS.red)
@@ -571,7 +570,7 @@ private struct PlaceRow: View {
                             .disabled(saving).font(.system(size: 14, weight: .bold)).foregroundStyle(DS.green)
                     }
                 } else {
-                    if let meter = place.chargeMeter, meter.enabled {
+                    ForEach(place.chargeMeters.filter(\.enabled), id: \.key) { meter in
                         Text("\(meter.chargerName) · \(meter.provider == "zeeda" ? "tarifa R$ \(String(format: "%.2f", meter.currentPricePerKwh ?? 0))" : "valor do provedor")")
                             .font(.caption2).foregroundStyle(DS.teal)
                     }
@@ -593,12 +592,43 @@ private struct PlaceRow: View {
             }
         }
         .sheet(item: $selectingCatalog) { selection in
-            ChargeMeterCatalogPicker(
-                title: selection.title,
-                choices: choices(for: selection),
-                selectedId: selection == .provider ? providerId : chargerId
-            ) { choice in
-                select(choice, for: selection)
+            switch selection {
+            case .provider:
+                ChargeMeterCatalogPicker(
+                    title: "Adicionar provedor",
+                    choices: availableProviders.map { ChargeMeterChoice(id: $0.id, name: $0.name) },
+                    selectedId: ""
+                ) { choice in
+                    addProvider(choice.id)
+                }
+            case .chargers(let provider):
+                ChargeMeterMultiPicker(
+                    title: providerName(provider),
+                    choices: chargerChoices(provider),
+                    selectedIds: Set(group(provider)?.meters.map(\.chargerId) ?? [])
+                ) { ids in
+                    requestSelection(ids, provider: provider)
+                }
+            }
+        }
+        .alert(item: $meterConfirmation) { confirmation in
+            switch confirmation {
+            case .selection(let provider, let ids, let removed):
+                Alert(
+                    title: Text("Remover carregador\(removed == 1 ? "" : "es")?"),
+                    message: Text("\(removed) carregador\(removed == 1 ? " será removido" : "es serão removidos") deste local."),
+                    primaryButton: .destructive(Text("Remover")) { applySelection(ids, provider: provider) },
+                    secondaryButton: .cancel()
+                )
+            case .provider(let provider, let count):
+                Alert(
+                    title: Text("Remover provedor?"),
+                    message: Text("Todos os \(count) carregadores de \(providerName(provider)) serão removidos."),
+                    primaryButton: .destructive(Text("Remover")) {
+                        providerGroups = ChargeMeterProviderGroup.removing(provider, from: providerGroups)
+                    },
+                    secondaryButton: .cancel()
+                )
             }
         }
     }
@@ -607,17 +637,19 @@ private struct PlaceRow: View {
         name = place.name
         radius = place.radiusM
         coord = nil
-        meterEnabled = place.chargeMeter?.enabled ?? false
-        providerId = place.chargeMeter?.provider ?? ""
-        chargerId = place.chargeMeter?.chargerId ?? ""
-        chargerName = place.chargeMeter?.chargerName ?? ""
-        tariff = place.chargeMeter?.currentPricePerKwh.map { String(format: "%.2f", $0).replacingOccurrences(of: ".", with: ",") } ?? ""
+        meterEnabled = place.chargeMeters.contains(where: \.enabled)
+        providerGroups = ChargeMeterProviderGroup.group(place.chargeMeters)
+        tariffTexts = Dictionary(uniqueKeysWithValues: place.chargeMeters.map { meter in
+            (meter.key, meter.currentPricePerKwh.map { String(format: "%.2f", $0).replacingOccurrences(of: ".", with: ",") } ?? "")
+        })
         meterError = ""
     }
 
     private func loadCatalog() async {
         providers = await cfg.loadChargeMeterProviders()
-        if !providerId.isEmpty { chargers = await cfg.loadChargeMeterChargers(provider: providerId) }
+        for group in providerGroups {
+            chargerCatalogs[group.provider] = await cfg.loadChargeMeterChargers(provider: group.provider)
+        }
     }
 
     private func beginEditing() {
@@ -626,34 +658,46 @@ private struct PlaceRow: View {
         Task { await loadCatalog() }
     }
 
-    private func selectProvider(_ provider: ChargeMeterProvider) {
-        providerId = provider.id
-        chargerId = ""
-        chargerName = ""
-        chargers = []
-        Task { chargers = await cfg.loadChargeMeterChargers(provider: provider.id) }
+    private func addProvider(_ provider: String) {
+        guard !providerGroups.contains(where: { $0.provider == provider }) else { return }
+        providerGroups.append(ChargeMeterProviderGroup(provider: provider))
+        Task {
+            chargerCatalogs[provider] = await cfg.loadChargeMeterChargers(provider: provider)
+            selectingCatalog = .chargers(provider)
+        }
     }
 
     private func save() {
         saving = true
         meterError = ""
         Task {
-            var meter = place.chargeMeter
             do {
+                var meters = ChargeMeterProviderGroup.flatten(providerGroups)
                 if meterEnabled {
-                    meter = try (meter ?? ChargeMeterConfig()).updating(
-                        enabled: true,
-                        provider: providerId,
-                        chargerId: chargerId,
-                        chargerName: chargerName,
-                        priceText: tariff,
-                        effectiveFromMs: Int64(Date().timeIntervalSince1970 * 1000)
-                    )
-                } else if var existing = meter {
-                    existing.enabled = false
-                    meter = existing
+                    guard providerGroups.allSatisfy({ !$0.meters.isEmpty }) else {
+                        throw ChargeMeterConfigError.missingCharger
+                    }
+                    guard !meters.isEmpty else { throw ChargeMeterConfigError.missingCharger }
+                    let now = Int64(Date().timeIntervalSince1970 * 1000)
+                    meters = try meters.map { meter in
+                        try meter.updating(
+                            enabled: true,
+                            provider: meter.provider,
+                            chargerId: meter.chargerId,
+                            chargerName: meter.chargerName,
+                            priceText: tariffTexts[meter.key] ?? "",
+                            effectiveFromMs: now
+                        )
+                    }
+                } else {
+                    meters = meters.map { meter in
+                        var disabled = meter
+                        disabled.enabled = false
+                        return disabled
+                    }
                 }
-                let ok = await cfg.updatePlace(place.id, name: name, radius: radius, lat: coord?.0, lng: coord?.1, chargeMeter: meter)
+                meters = try ChargeMeterConfig.validateUnique(meters)
+                let ok = await cfg.updatePlace(place.id, name: name, radius: radius, lat: coord?.0, lng: coord?.1, chargeMeters: meters)
                 saving = false
                 if ok { editing = false; coord = nil } else { meterError = "Não foi possível salvar no Bridge." }
             } catch {
@@ -663,38 +707,70 @@ private struct PlaceRow: View {
         }
     }
 
-    private func choices(for selection: ChargeMeterCatalogSelection) -> [ChargeMeterChoice] {
-        switch selection {
-        case .provider:
-            return providers.map { ChargeMeterChoice(id: $0.id, name: $0.name) }
-        case .charger:
-            return chargers.map { ChargeMeterChoice(id: $0.id, name: $0.name) }
-        }
+    private func group(_ provider: String) -> ChargeMeterProviderGroup? {
+        providerGroups.first { $0.provider == provider }
     }
 
-    private func select(_ choice: ChargeMeterChoice, for selection: ChargeMeterCatalogSelection) {
-        switch selection {
-        case .provider:
-            guard let provider = providers.first(where: { $0.id == choice.id }) else { return }
-            selectProvider(provider)
-        case .charger:
-            chargerId = choice.id
-            chargerName = choice.name
-        }
+    private func providerName(_ provider: String) -> String {
+        providers.first(where: { $0.id == provider })?.name ?? provider
     }
 
-    private func meterSelector(title: String, value: String, empty: String, enabled: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
+    private func chargerChoices(_ provider: String) -> [ChargeMeterChoice] {
+        var choices = (chargerCatalogs[provider] ?? []).map { ChargeMeterChoice(id: $0.id, name: $0.name) }
+        for meter in group(provider)?.meters ?? [] where !choices.contains(where: { $0.id == meter.chargerId }) {
+            choices.append(ChargeMeterChoice(id: meter.chargerId, name: meter.chargerName))
+        }
+        return choices
+    }
+
+    private func requestSelection(_ ids: Set<String>, provider: String) {
+        let existing = Set(group(provider)?.meters.map(\.chargerId) ?? [])
+        let removed = existing.subtracting(ids)
+        if removed.isEmpty { applySelection(ids, provider: provider) }
+        else { meterConfirmation = .selection(provider: provider, ids: ids, removed: removed.count) }
+    }
+
+    private func applySelection(_ ids: Set<String>, provider: String) {
+        guard let index = providerGroups.firstIndex(where: { $0.provider == provider }) else { return }
+        let catalog = chargerChoices(provider).compactMap { ChargeMeterCharger(["id": $0.id, "name": $0.name]) }
+        providerGroups[index] = providerGroups[index].applyingSelection(ids, catalog: catalog)
+    }
+
+    @ViewBuilder private func providerBlock(_ group: ChargeMeterProviderGroup) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text(title).font(.caption).foregroundStyle(DS.muted)
+                Text(providerName(group.provider)).font(.system(size: 14, weight: .semibold)).foregroundStyle(DS.text)
                 Spacer()
-                Text(value.isEmpty ? empty : value)
-                    .font(.system(size: 13, weight: .semibold)).foregroundStyle(DS.text)
+                Button {
+                    meterConfirmation = .provider(provider: group.provider, count: group.meters.count)
+                } label: {
+                    Image(systemName: "trash").foregroundStyle(DS.red)
+                }
+                .buttonStyle(.plain)
+            }
+            ForEach(group.meters, id: \.key) { meter in
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(meter.chargerName).font(.caption).foregroundStyle(DS.text)
+                    if meter.provider == "zeeda" {
+                        TextField("Tarifa deste carregador (R$/kWh)", text: Binding(
+                            get: { tariffTexts[meter.key] ?? "" },
+                            set: { tariffTexts[meter.key] = $0 }
+                        ))
+                        .keyboardType(.decimalPad).foregroundStyle(DS.text)
+                        .padding(8).background(DS.bg).clipShape(RoundedRectangle(cornerRadius: 8))
+                    } else {
+                        Text("Energia e valor vêm do provedor.").font(.caption2).foregroundStyle(DS.muted)
+                    }
+                }
+            }
+            Button {
+                selectingCatalog = .chargers(group.provider)
+            } label: {
+                Label("Selecionar carregadores", systemImage: "checklist")
+                    .font(.caption.weight(.semibold)).foregroundStyle(DS.teal)
             }
         }
-        .buttonStyle(.plain)
-        .disabled(!enabled)
-        .padding(9).background(DS.panel2).clipShape(RoundedRectangle(cornerRadius: 9))
+        .padding(10).background(DS.panel2).clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
 
@@ -728,6 +804,49 @@ private struct ChargeMeterCatalogPicker: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancelar") { dismiss() }
+                }
+            }
+        }
+    }
+}
+
+private struct ChargeMeterMultiPicker: View {
+    @Environment(\.dismiss) private var dismiss
+    let title: String
+    let choices: [ChargeMeterChoice]
+    let onDone: (Set<String>) -> Void
+    @State private var selectedIds: Set<String>
+
+    init(title: String, choices: [ChargeMeterChoice], selectedIds: Set<String>, onDone: @escaping (Set<String>) -> Void) {
+        self.title = title
+        self.choices = choices
+        self.onDone = onDone
+        _selectedIds = State(initialValue: selectedIds)
+    }
+
+    var body: some View {
+        NavigationStack {
+            List(choices) { choice in
+                Button {
+                    if selectedIds.contains(choice.id) { selectedIds.remove(choice.id) }
+                    else { selectedIds.insert(choice.id) }
+                } label: {
+                    HStack {
+                        Text(choice.name).foregroundStyle(DS.text)
+                        Spacer()
+                        Image(systemName: selectedIds.contains(choice.id) ? "checkmark.circle.fill" : "circle")
+                            .foregroundStyle(selectedIds.contains(choice.id) ? DS.green : DS.muted)
+                    }
+                }
+            }
+            .scrollContentBackground(.hidden)
+            .background(DS.bg)
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancelar") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Concluir") { onDone(selectedIds); dismiss() }
                 }
             }
         }
