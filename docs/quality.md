@@ -6,10 +6,10 @@
 bash -n scripts/build-on-mac-mini.sh
 node --check bridge/server.js
 node --check bridge/gateway.js
-node --test bridge/test/charge-location-links.test.js
+node --test bridge/test/charge-meter-*.test.js bridge/test/charge-location-links.test.js
 ```
 
-Os checks Node validam sintaxe, não integração, rotas, autenticação ou runtime. Android e Apple compilam somente na fila autorizada.
+Os testes de medidores validam catálogo, compatibilidade legada, deduplicação, seleção temporal, tarifas, custo do provedor e normalização dos adaptadores com `fetch` simulado. Eles não substituem validação das rotas, autenticação ou runtime. Android e Apple compilam somente na fila autorizada.
 
 ## Builds
 
@@ -19,7 +19,7 @@ O target `HavalEcoTripTests` roda pela fila com o tipo `xcode-native-test`, proj
 
 ## Estratégia de testes
 
-Há testes Swift para configuração de medidores e cálculo de perda instantânea. Não foram encontrados testes Android nem script de teste no bridge. A evolução recomendada continua incremental:
+Há testes Swift para configuração de medidores e cálculo de perda instantânea, além dos testes Node descritos acima. Não foram encontrados testes Android. A evolução recomendada continua incremental:
 
 1. regras puras de viagem, recarga, energia e automação;
 2. serialização e compatibilidade de payloads HTTP/MQTT;

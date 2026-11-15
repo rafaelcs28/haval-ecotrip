@@ -47,14 +47,14 @@ Este é um produto pessoal. Não há evidência de um SaaS público ou de requis
 
 ## Pendências conhecidas
 
-- Não foi encontrada uma suíte de testes automatizados para os clientes ou um script de teste no pacote do bridge.
+- Não foi encontrada uma suíte de testes Android.
 - Arquivos grandes indicam dívida de organização, mas refatorações devem ser incrementais e guiadas por comportamento reproduzível.
 
 ## Critérios de aceitação
 
 - Telemetria e comandos mantêm contratos compatíveis entre carro, bridge, PWA, iPhone e iPad.
 - Viagens e recargas não são duplicadas ou perdidas após desconexão e retomada.
-- Recargas podem usar medição externa vinculada ao local sem sobrescrever valores manuais. Zeeda usa tarifa local; YellotMob usa custo da sessão.
+- Recargas podem usar vários medidores externos vinculados ao mesmo local sem sobrescrever valores manuais. Cada Zeeda usa sua tarifa; cada YellotMob usa energia e custo da sessão.
 - Locais já usados em recargas aparecem para vínculo confirmado com um local conhecido; nomes diferentes não quebram a associação por ID.
 - Durante a recarga, a Live Activity compara potência do carregador e do carro quando ambas estiverem disponíveis.
 - Automações executam somente quando todas as condições configuradas são satisfeitas.
@@ -63,7 +63,7 @@ Este é um produto pessoal. Não há evidência de um SaaS público ou de requis
 
 ## Próxima entrega
 
-Expandir a suíte de domínio iniciada no iOS para reconciliação no Bridge, agrupamento de sessões e proteção de valores manuais.
+Validar a conciliação com sessões reais Zeeda e YellotMob sem alterar lançamentos manuais existentes.
 
 ## Manutenção
 
