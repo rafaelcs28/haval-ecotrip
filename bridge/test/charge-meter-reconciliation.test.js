@@ -160,4 +160,3 @@ test('preserves manual energy and cost independently', () => {
   assert.equal(energyOnly.charger_kwh, 10);
   assert.deepEqual(energyOnly.cost_override, { total: 1.8, perKwh: 0.18 });
 });
-

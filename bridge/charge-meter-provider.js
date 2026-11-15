@@ -79,4 +79,3 @@ module.exports = {
   ChargeMeterProviderError,
   listChargeMeterSessions,
 };
-

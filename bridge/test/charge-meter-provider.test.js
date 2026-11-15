@@ -113,4 +113,3 @@ test('keeps charger requests separate', async () => {
 
   assert.deepEqual(chargers.sort(), ['273', '274']);
 });
-
