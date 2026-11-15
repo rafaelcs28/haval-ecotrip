@@ -78,6 +78,74 @@ final class ChargeMeterModelsTests: XCTestCase {
         XCTAssertEqual(place.chargeMeter?.chargerId, "D42787B28BA6")
         XCTAssertEqual(place.chargeMeter?.currentPricePerKwh, 0.18)
         XCTAssertEqual(place.chargeMeter?.tariffs.count, 1)
+        XCTAssertEqual(place.chargeMeters.count, 1)
+    }
+
+    func testKnownPlaceDecodesMixedChargeMeterList() {
+        let place = KnownPlace([
+            "id": "mixed",
+            "name": "Shopping",
+            "lat": -16.0,
+            "lng": -49.0,
+            "charge_meters": [
+                [
+                    "enabled": true,
+                    "provider": "zeeda",
+                    "charger_id": "Z-1",
+                    "charger_name": "Zeeda 1",
+                    "tariffs": [["effective_from_ms": 1_700_000_000_000, "price_per_kwh": 0.18]]
+                ],
+                [
+                    "enabled": true,
+                    "provider": "zeeda",
+                    "charger_id": "Z-2",
+                    "charger_name": "Zeeda 2",
+                    "tariffs": [["effective_from_ms": 1_800_000_000_000, "price_per_kwh": 0.32]]
+                ],
+                [
+                    "enabled": true,
+                    "provider": "yellotmob",
+                    "charger_id": "273",
+                    "charger_name": "Yellot",
+                    "tariffs": []
+                ]
+            ]
+        ])
+
+        XCTAssertEqual(place.chargeMeters.map(\.key), ["zeeda:z-1", "zeeda:z-2", "yellotmob:273"])
+        XCTAssertEqual(place.chargeMeters[0].currentPricePerKwh, 0.18)
+        XCTAssertEqual(place.chargeMeters[1].currentPricePerKwh, 0.32)
+        XCTAssertEqual(place.chargeMeter?.chargerId, "Z-1")
+    }
+
+    func testEmptyCanonicalMeterListDoesNotFallBackToLegacyMeter() {
+        let place = KnownPlace([
+            "id": "empty",
+            "name": "Empty",
+            "lat": 1.0,
+            "lng": 1.0,
+            "charge_meters": [],
+            "charge_meter": [
+                "enabled": true,
+                "provider": "yellotmob",
+                "charger_id": "legacy",
+                "charger_name": "Legacy",
+                "tariffs": []
+            ]
+        ])
+
+        XCTAssertTrue(place.chargeMeters.isEmpty)
+        XCTAssertNil(place.chargeMeter)
+    }
+
+    func testChargeMeterKeysRejectNormalizedDuplicates() throws {
+        let first = ChargeMeterConfig(enabled: true, provider: " ZEEDA ", chargerId: " AbC ", chargerName: "A")
+        let duplicate = ChargeMeterConfig(enabled: true, provider: "zeeda", chargerId: "abc", chargerName: "B")
+
+        XCTAssertEqual(first.key, "zeeda:abc")
+        XCTAssertThrowsError(try ChargeMeterConfig.validateUnique([first, duplicate])) { error in
+            XCTAssertEqual(error as? ChargeMeterConfigError, .duplicateCharger)
+        }
     }
 
     func testUpdatingPriceAcceptsCommaAndKeepsTariffHistory() throws {
