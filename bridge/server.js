@@ -33,12 +33,15 @@ const {
 } = require('./charge-location-links');
 const {
   chargeMeterConfigsFromPlace,
+  chargeMeterKey,
   chargeMeterProviders,
   mergeLegacyChargeMeter,
   normalizeChargeMeterChargers,
   validateChargeMeterConfig,
   validateChargeMeterConfigs,
 } = require('./charge-meter-catalog');
+const { listChargeMeterSessions } = require('./charge-meter-provider');
+const { reconcileChargeMeter } = require('./charge-meter-reconciliation');
 
 // Sem isto, uma rejection/exception fora de rota (timer, callback MQTT, fetch em
 // background) derrubava o processo inteiro. Loga e segue — pm2 só reinicia em crash real.
@@ -11523,6 +11526,146 @@ app.get('/api/charge-meter/providers/:provider/chargers', async (req, res) => {
     res.status(502).json({ error: 'catálogo do provedor indisponível' });
   }
 });
+
+const CHARGE_METER_RETRY_MS = 5 * 60_000;
+const CHARGE_METER_RETRY_TTL_MS = 72 * 3600_000;
+const _chargeMeterReconcileRunning = new Set();
+
+function _knownPlaceForCharge(charge) {
+  const byCoordinates = matchKnownPlace(Number(charge?.location_lat), Number(charge?.location_lng));
+  if (byCoordinates) return byCoordinates;
+  const name = String(charge?.location_name || '').trim().toLowerCase();
+  return name ? knownPlaces.find(place => String(place.name || '').trim().toLowerCase() === name) || null : null;
+}
+
+function _chargeMeterRetryState(charge, status, now, details = {}) {
+  const previous = charge.charge_meter_reconcile || {};
+  const deadline = Number(charge.timestamp_ms) + CHARGE_METER_RETRY_TTL_MS;
+  const retry = !['matched', 'not_configured'].includes(status) && now < deadline;
+  return {
+    status,
+    attempts: Number(previous.attempts || 0) + 1,
+    first_attempt_ms: Number(previous.first_attempt_ms || now),
+    last_attempt_ms: now,
+    next_attempt_ms: retry ? now + CHARGE_METER_RETRY_MS : null,
+    deadline_ms: deadline,
+    ...details,
+  };
+}
+
+async function _reconcileChargeMeterRecord(charge) {
+  const timestamp = Number(charge?.timestamp_ms);
+  if (!timestamp || _chargeMeterReconcileRunning.has(timestamp)) return { status: 'busy' };
+  _chargeMeterReconcileRunning.add(timestamp);
+  try {
+    const now = Date.now();
+    const place = _knownPlaceForCharge(charge);
+    if (!place) {
+      const previous = charge.charge_meter_reconcile;
+      charge.charge_meter_reconcile = _chargeMeterRetryState(charge, 'pending_location', now);
+      try { atomicWriteFileSync(CHARGES_FILE, JSON.stringify({ charges: chargesArr }, null, 2)); }
+      catch (error) { charge.charge_meter_reconcile = previous; throw error; }
+      return { status: 'pending_location', providers: [] };
+    }
+    const configs = chargeMeterConfigsFromPlace(place).filter(config => config.enabled !== false);
+    if (!configs.length) {
+      const previous = charge.charge_meter_reconcile;
+      charge.charge_meter_reconcile = _chargeMeterRetryState(charge, 'not_configured', now);
+      try { atomicWriteFileSync(CHARGES_FILE, JSON.stringify({ charges: chargesArr }, null, 2)); }
+      catch (error) { charge.charge_meter_reconcile = previous; throw error; }
+      return { status: 'not_configured', providers: [] };
+    }
+
+    const endMs = timestamp;
+    const startMs = endMs - Number(charge.duration_sec || 0) * 1000;
+    const fromIso = new Date(startMs - 10 * 60_000).toISOString();
+    const toIso = new Date(endMs + 10 * 60_000).toISOString();
+    const states = [];
+    const sessionsByKey = {};
+    await Promise.all(configs.map(async config => {
+      const key = chargeMeterKey(config);
+      try {
+        const sessions = await listChargeMeterSessions(
+          config.provider,
+          config.charger_id,
+          fromIso,
+          toIso,
+          {
+            zeedaUrl: process.env.ZEEDA_GATEWAY_URL || 'http://127.0.0.1:8788',
+            yellotmobUrl: process.env.YELLOTMOB_URL || 'http://127.0.0.1:8790',
+            zeedaToken: BRIDGE_TOKEN_HASH,
+          }
+        );
+        sessionsByKey[key] = sessions;
+        states.push({ meter_key: key, status: sessions.length ? 'found' : 'empty', sessions: sessions.length });
+      } catch (error) {
+        states.push({ meter_key: key, status: error.code || 'provider_unavailable' });
+      }
+    }));
+
+    const failed = states.some(state => state.status === 'provider_unavailable');
+    const result = failed
+      ? { status: 'pending_provider' }
+      : reconcileChargeMeter({ charge, configs, sessionsByKey, nowMs: now });
+    const index = chargesArr.findIndex(item => Number(item.timestamp_ms) === timestamp);
+    const before = structuredClone(charge);
+    let costChanged = false;
+    if (Number(charge.charger_kwh) <= 0 && Number(result.charger_kwh) > 0) {
+      charge.charger_kwh = result.charger_kwh;
+    }
+    if (charge.cost_override == null && result.cost_override != null) {
+      charge.cost_override = result.cost_override;
+      costChanged = true;
+    }
+    if (result.meter_key) charge.charge_meter_key = result.meter_key;
+    charge.charge_meter_reconcile = _chargeMeterRetryState(charge, result.status, now, {
+      meter_key: result.meter_key || null,
+    });
+    charge._updated_ms = now;
+    try {
+      atomicWriteFileSync(CHARGES_FILE, JSON.stringify({ charges: chargesArr }, null, 2));
+    } catch (error) {
+      if (index >= 0) chargesArr[index] = before;
+      throw error;
+    }
+    if (costChanged) recomputeBatteryAvgPrice();
+    return { ...result, providers: states };
+  } finally {
+    _chargeMeterReconcileRunning.delete(timestamp);
+  }
+}
+
+app.post('/api/charges/:ts/reconcile-meter', async (req, res) => {
+  const timestamp = Number(req.params.ts);
+  const charge = chargesArr.find(item => Number(item.timestamp_ms) === timestamp);
+  if (!charge) return res.status(404).json({ error: 'recarga não encontrada' });
+  try {
+    res.json(await _reconcileChargeMeterRecord(charge));
+  } catch (error) {
+    console.error('[charge-meter:reconcile]', error.message);
+    res.status(500).json({ error: 'não foi possível conciliar a recarga' });
+  }
+});
+
+async function _runChargeMeterRetries() {
+  const now = Date.now();
+  const pending = chargesArr.filter(charge => {
+    const end = Number(charge.timestamp_ms || 0);
+    if (!end || now - end > CHARGE_METER_RETRY_TTL_MS) return false;
+    if (Number(charge.charger_kwh) > 0 && charge.cost_override != null) return false;
+    const state = charge.charge_meter_reconcile;
+    if (state && ['matched', 'not_configured'].includes(state.status)) return false;
+    return !state || state.next_attempt_ms == null || Number(state.next_attempt_ms) <= now;
+  });
+  for (const charge of pending) {
+    try { await _reconcileChargeMeterRecord(charge); }
+    catch (error) { console.warn('[charge-meter:retry]', error.message); }
+  }
+}
+
+const _chargeMeterRetryTimer = setInterval(_runChargeMeterRetries, CHARGE_METER_RETRY_MS);
+_chargeMeterRetryTimer.unref?.();
+setImmediate(_runChargeMeterRetries);
 
 app.get('/api/charge-locations', (_req, res) => {
   syncChargeLocationsFromHistory();
@@ -26983,6 +27126,8 @@ function applyMqttMessage(key, value, isRetained = false) {
             if (existing.avg_temp_c       != null) keep.avg_temp_c       = existing.avg_temp_c;
             if (existing.manual_overrides != null) keep.manual_overrides = existing.manual_overrides;
             if (existing._updated_ms      != null) keep._updated_ms      = existing._updated_ms;
+            if (existing.charge_meter_key != null) keep.charge_meter_key = existing.charge_meter_key;
+            if (existing.charge_meter_reconcile != null) keep.charge_meter_reconcile = existing.charge_meter_reconcile;
             // Anotações do bridge sobre coerência. Sem preservar, a re-ingestão do
             // retained recria o objeto, a marca some e o aviso volta a ser logado a
             // cada ciclo — era o que fazia a recarga de 31/07 aparecer no log pra
@@ -27174,6 +27319,9 @@ function applyMqttMessage(key, value, isRetained = false) {
                     + (stored.location_name ? ` — mantendo "${stored.location_name}" (herdado, pode estar errado)` : ''));
                 }
               }
+              _reconcileChargeMeterRecord(stored).catch(error => {
+                console.warn('[charge-meter:auto]', error.message);
+              });
               broadcast('new_charge', {
                 timestamp_ms: nova.timestamp_ms,
                 energy_kwh:   nova.energy_kwh,
