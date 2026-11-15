@@ -40,6 +40,12 @@ final class ChargeMeterModelsTests: XCTestCase {
         XCTAssertEqual(location?.lat, nil)
         XCTAssertEqual(location?.lng, nil)
         XCTAssertEqual(location?.canCreateKnownPlace, false)
+
+        let sentinel = ChargeLocationCandidate(["id": 2, "name": "Sem GPS", "lat": 0, "lng": 0])
+        XCTAssertEqual(sentinel?.canCreateKnownPlace, false)
+
+        let equator = ChargeLocationCandidate(["id": 3, "name": "Equador", "lat": 0, "lng": 10])
+        XCTAssertEqual(equator?.canCreateKnownPlace, true)
     }
 
     func testOnlyUnlinkedChargeLocationsNeedUserConfirmation() {

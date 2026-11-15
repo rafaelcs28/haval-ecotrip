@@ -4,14 +4,36 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
   discoverChargeLocations,
+  findNearbyKnownPlace,
   hasChargeLocationCoordinates,
   resolveChargeLocationLinks,
+  runPersistedMutation,
   setChargeLocationLink,
 } = require('../charge-location-links');
 
 test('requires both real coordinates before creating a known place', () => {
   assert.equal(hasChargeLocationCoordinates({ lat: null, lng: null }), false);
+  assert.equal(hasChargeLocationCoordinates({ lat: 0, lng: 0 }), false);
+  assert.equal(hasChargeLocationCoordinates({ lat: 0, lng: 10 }), true);
   assert.equal(hasChargeLocationCoordinates({ lat: -16.7, lng: -49.2 }), true);
+});
+
+test('same display name at distant coordinates is not a known-place duplicate', () => {
+  const knownPlaces = [{ id: 1, name: 'Shopping', lat: -16.7, lng: -49.2 }];
+
+  assert.equal(findNearbyKnownPlace(knownPlaces, { name: 'Shopping', lat: -17.7, lng: -50.2 }), null);
+  assert.equal(findNearbyKnownPlace(knownPlaces, { name: 'Outro nome', lat: -16.7001, lng: -49.2001 })?.id, 1);
+});
+
+test('restores in-memory state when persistence fails', () => {
+  const state = { value: 'before' };
+
+  assert.throws(() => runPersistedMutation(
+    () => { state.value = 'after'; },
+    () => { throw new Error('disk full'); },
+    () => { state.value = 'before'; }
+  ), /disk full/);
+  assert.equal(state.value, 'before');
 });
 
 test('discovers persisted candidates from charge history without changing charges', () => {
