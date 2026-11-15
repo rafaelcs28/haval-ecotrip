@@ -50,8 +50,40 @@ function validateChargeMeterConfig(raw) {
   };
 }
 
+function chargeMeterKey(config) {
+  return `${String(config?.provider || '').trim().toLowerCase()}:${String(config?.charger_id || '').trim().toLowerCase()}`;
+}
+
+function validateChargeMeterConfigs(raw) {
+  if (!Array.isArray(raw)) throw new Error('lista de carregadores inválida');
+  const configs = raw.map(validateChargeMeterConfig);
+  const keys = new Set();
+  for (const config of configs) {
+    const key = chargeMeterKey(config);
+    if (keys.has(key)) throw new Error('carregador duplicado');
+    keys.add(key);
+  }
+  return configs;
+}
+
+function chargeMeterConfigsFromPlace(place) {
+  if (Object.prototype.hasOwnProperty.call(place || {}, 'charge_meters')) {
+    return Array.isArray(place.charge_meters) ? place.charge_meters.map(config => ({ ...config })) : [];
+  }
+  return place?.charge_meter ? [{ ...place.charge_meter }] : [];
+}
+
+function mergeLegacyChargeMeter(existing, legacy) {
+  const configs = Array.isArray(existing) ? existing : [];
+  return [{ ...legacy }, ...configs.slice(1).map(config => ({ ...config }))];
+}
+
 module.exports = {
+  chargeMeterConfigsFromPlace,
+  chargeMeterKey,
   chargeMeterProviders,
+  mergeLegacyChargeMeter,
   normalizeChargeMeterChargers,
   validateChargeMeterConfig,
+  validateChargeMeterConfigs,
 };

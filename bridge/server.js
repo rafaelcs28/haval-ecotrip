@@ -32,9 +32,12 @@ const {
   runPersistedMutation,
 } = require('./charge-location-links');
 const {
+  chargeMeterConfigsFromPlace,
   chargeMeterProviders,
+  mergeLegacyChargeMeter,
   normalizeChargeMeterChargers,
   validateChargeMeterConfig,
+  validateChargeMeterConfigs,
 } = require('./charge-meter-catalog');
 
 // Sem isto, uma rejection/exception fora de rota (timer, callback MQTT, fetch em
@@ -12293,24 +12296,47 @@ app.post('/api/known-places', (req, res) => {
 
 app.put('/api/known-places/:id', (req, res) => {
   const id = parseInt(req.params.id, 10);
-  const place = knownPlaces.find(p => p.id === id);
-  if (!place) return res.status(404).json({ error: 'not found' });
+  const index = knownPlaces.findIndex(p => p.id === id);
+  if (index < 0) return res.status(404).json({ error: 'not found' });
+  const place = knownPlaces[index];
   const { name, lat, lng, radius_m } = req.body || {};
-  let chargeMeter;
-  if (Object.prototype.hasOwnProperty.call(req.body || {}, 'charge_meter')) {
+  const hasChargeMeters = Object.prototype.hasOwnProperty.call(req.body || {}, 'charge_meters');
+  const hasLegacyMeter = Object.prototype.hasOwnProperty.call(req.body || {}, 'charge_meter');
+  let chargeMeters;
+  if (hasChargeMeters || hasLegacyMeter) {
     try {
-      chargeMeter = validateChargeMeterConfig(req.body.charge_meter);
+      chargeMeters = hasChargeMeters
+        ? validateChargeMeterConfigs(req.body.charge_meters)
+        : mergeLegacyChargeMeter(
+          chargeMeterConfigsFromPlace(place),
+          validateChargeMeterConfig(req.body.charge_meter)
+        );
+      chargeMeters = validateChargeMeterConfigs(chargeMeters);
     } catch (error) {
       return res.status(400).json({ error: error.message });
     }
   }
-  if (name?.trim()) place.name = name.trim();
-  if (lat != null) place.lat = lat;
-  if (lng != null) place.lng = lng;
-  if (radius_m != null) place.radius_m = Math.max(50, Math.min(2000, parseInt(radius_m)));
-  if (chargeMeter) place.charge_meter = chargeMeter;
-  saveKnownPlaces();
-  res.json(place);
+  const updated = { ...place };
+  if (name?.trim()) updated.name = name.trim();
+  if (lat != null) updated.lat = lat;
+  if (lng != null) updated.lng = lng;
+  if (radius_m != null) updated.radius_m = Math.max(50, Math.min(2000, parseInt(radius_m)));
+  if (chargeMeters) {
+    updated.charge_meters = chargeMeters;
+    if (chargeMeters.length) updated.charge_meter = chargeMeters[0];
+    else delete updated.charge_meter;
+  }
+  try {
+    runPersistedMutation(
+      () => { knownPlaces[index] = updated; },
+      saveKnownPlaces,
+      () => { knownPlaces[index] = place; }
+    );
+  } catch (error) {
+    console.error('[known-place-update]', error);
+    return res.status(500).json({ error: 'não foi possível persistir o local conhecido' });
+  }
+  res.json(updated);
 });
 
 app.delete('/api/known-places/:id', (req, res) => {
