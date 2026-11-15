@@ -43,9 +43,11 @@ Rollback para o aplicativo anterior mantém o primeiro carregador visível. Os d
 
 ## Interface
 
-O cartão do local mostra todos os carregadores configurados. A edição oferece `Adicionar carregadores` e uma linha por configuração, com provedor, carregador, estado e tarifa quando for Zeeda.
+O cartão do local mostra todos os carregadores configurados. Na edição, as configurações são agrupadas visualmente por provedor, embora continuem persistidas como lista plana e independente.
 
-Adicionar abre o seletor rolável de provedor e depois uma lista rolável de carregadores com seleção múltipla. O usuário marca quantos quiser e toca `Concluir`; os selecionados entram juntos no local. Para incluir carregadores de outro provedor, repete o fluxo. Carregadores já vinculados aparecem marcados e podem ser desmarcados somente após confirmação de remoção.
+O botão `Adicionar provedor` abre a lista de provedores ainda não adicionados ao local. Cada bloco de provedor contém `Selecionar carregadores`, que abre uma lista rolável com seleção múltipla. O usuário marca quantos quiser e toca `Concluir`; os selecionados entram juntos naquele bloco. Carregadores já vinculados aparecem marcados e podem ser desmarcados somente após confirmação de remoção.
+
+Cada provedor aparece no máximo uma vez na interface do local. Remover um bloco exige confirmação e remove todas as configurações daquele provedor. É permitido manter simultaneamente Zeeda e YellotMob, cada um com vários carregadores.
 
 Depois da seleção, cada Zeeda recebe sua tarifa individual antes do Save. Editar ou remover afeta apenas o item escolhido. Salvar valida a lista inteira e exige confirmação antes de remover uma configuração existente.
 
@@ -90,5 +92,7 @@ Cada Zeeda usa sua própria tarifa vigente. Cada YellotMob usa seu próprio cust
 - Adicionar, editar e remover um item sem afetar os demais.
 - Marcar vários carregadores do mesmo provedor em uma única abertura do seletor.
 - Reabrir o seletor com itens existentes marcados e preservar tarifas ao manter a seleção.
+- Adicionar mais de um provedor ao mesmo local e manter um único bloco por provedor.
+- Remover um provedor somente após confirmar a remoção de todos os carregadores daquele bloco.
 - Confirmar listas roláveis no iOS e build no Mac Mini autorizado.
 - Validar Bridge em produção antes de publicar o novo TestFlight.

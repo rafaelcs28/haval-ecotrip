@@ -4,7 +4,7 @@
 
 **Goal:** Permitir vários carregadores Zeeda e YellotMob, com tarifa Zeeda individual, em cada local conhecido sem perder configurações legadas.
 
-**Architecture:** Expandir `charge_meter` para `charge_meters` como lista canônica, mantendo o primeiro item espelhado no campo legado. Bridge valida e persiste a lista atomicamente; iOS usa seleção múltipla por provedor, edita drafts independentes e envia a lista completa. A reconciliação percorre todas as configurações ativas e escolhe a sessão temporalmente compatível sem somar carregadores diferentes.
+**Architecture:** Expandir `charge_meter` para `charge_meters` como lista canônica, mantendo o primeiro item espelhado no campo legado. Bridge valida e persiste a lista atomicamente; iOS agrupa visualmente por provedor, permite adicionar vários blocos de provedor e selecionar vários carregadores em cada bloco. A reconciliação percorre todas as configurações ativas e escolhe a sessão temporalmente compatível sem somar carregadores diferentes.
 
 **Tech Stack:** Node.js 24, Express, `node:test`, Swift 6, SwiftUI, XCTest, Mac Mini build queue, App Store Connect.
 
@@ -30,6 +30,7 @@
 - Falha ao persistir deve restaurar lista e espelho em memória; Task 1 testa.
 - Duas sessões válidas em carregadores diferentes não podem ser somadas; Task 4 testa seleção determinística.
 - Reabrir multiseleção deve manter itens existentes marcados e suas tarifas; Task 3 testa.
+- Remover um bloco de provedor deve remover somente configs daquele provedor após confirmação; Task 3 testa.
 
 ---
 
@@ -132,11 +133,11 @@ git commit -m "feat(ios): model multiple charge meters"
 
 **Interfaces:**
 - Consumes: `KnownPlace.chargeMeters`, catálogos roláveis existentes e `ConfigStore.updatePlace(... chargeMeters:)`.
-- Produces: drafts estáveis por UUID, `selectedChargerIds: Set<String>` por provedor, multiseleção com `Concluir`, adicionar/editar/remover por item e uma lista validada no Save.
+- Produces: `ChargeMeterProviderDraft` estável por provedor, drafts de carregador por UUID, `selectedChargerIds: Set<String>` por provedor, multiseleção com `Concluir`, adicionar/remover blocos e uma lista plana validada no Save.
 
 - [ ] **Step 1: Add failing draft-list tests**
 
-Criar helpers puros em `ChargeMeterModels.swift` somente se necessários para testar: conversão config↔draft não perde tarifas; aplicar seleção múltipla adiciona novos IDs, preserva configs e tarifas já selecionadas, remove apenas IDs desmarcados após confirmação; duplicata retorna `ChargeMeterConfigError.duplicateCharger`.
+Criar helpers puros em `ChargeMeterModels.swift` somente se necessários para testar: agrupar lista por provedor e achatar sem perda; aplicar seleção múltipla adiciona novos IDs, preserva configs e tarifas já selecionadas, remove apenas IDs desmarcados após confirmação; remover bloco afeta somente o provedor escolhido; duplicata retorna `ChargeMeterConfigError.duplicateCharger`.
 
 - [ ] **Step 2: Run RED XCTest on Mac Mini**
 
@@ -144,11 +145,11 @@ Expected: FAIL na validação de duplicata ou helper novo.
 
 - [ ] **Step 3: Replace single editor state with list state**
 
-`PlaceRow` carrega todos os itens. Cada item mostra provedor, carregador, estado e tarifa Zeeda. `Adicionar carregadores` abre o provedor e depois `ChargeMeterCatalogPicker` em modo multiseleção. A lista mostra checkmarks, mantém os IDs existentes marcados e só aplica mudanças ao tocar `Concluir`.
+`PlaceRow` agrupa os itens em blocos de provedor. `Adicionar provedor` lista somente provedores ausentes. Cada bloco mostra seus carregadores e oferece `Selecionar carregadores`, abrindo `ChargeMeterCatalogPicker` em modo multiseleção. A lista mostra checkmarks, mantém os IDs existentes marcados e só aplica mudanças ao tocar `Concluir`.
 
 - [ ] **Step 4: Add safe remove and save flow**
 
-Desmarcar ou remover configuração existente exige confirmação. Novos Zeeda entram com tarifa pendente individual e impedem Save até preenchimento. Salvar valida cada item e duplicatas, então envia a lista inteira. Erro mantém a edição aberta e mostra mensagem sem perder drafts.
+Desmarcar carregador existente ou remover bloco de provedor exige confirmação. Novos Zeeda entram com tarifa pendente individual e impedem Save até preenchimento. Salvar achata os blocos, valida cada item e duplicatas, então envia a lista inteira. Erro mantém a edição aberta e mostra mensagem sem perder drafts.
 
 - [ ] **Step 5: Verify iOS build and tests**
 
