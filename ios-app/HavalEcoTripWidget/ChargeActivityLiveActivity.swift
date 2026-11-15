@@ -209,7 +209,9 @@ struct ChargeLockScreenView: View {
                 .lineLimit(1).minimumScaleFactor(0.7)
             }
             HStack {
-                if state.chargerPowerKw == nil { Text("\(laDec1(state.powerKw)) kW") }
+                if state.chargerPowerKw.flatMap({ ChargePowerComparison(chargerPowerKw: $0, vehiclePowerKw: state.powerKw) }) == nil {
+                    Text("\(laDec1(state.powerKw)) kW")
+                }
                 Spacer(minLength: 6)
                 Text("+\(laDec1(state.sessionKwh)) kWh")
                 if let c = state.costBrl, c > 0 {
