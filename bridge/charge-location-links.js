@@ -4,7 +4,8 @@ function validCoordinates(item) {
   const lat = Number(item?.lat ?? item?.location_lat);
   const lng = Number(item?.lng ?? item?.location_lng);
   return Number.isFinite(lat) && Number.isFinite(lng)
-    && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
+    && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180
+    && !(lat === 0 && lng === 0);
 }
 
 function coordinates(item) {
@@ -85,9 +86,28 @@ function setChargeLocationLink(stored, locationId, knownPlaces, knownPlaceId) {
   return true;
 }
 
+function findNearbyKnownPlace(knownPlaces, location, maxDistance = 50) {
+  if (!validCoordinates(location)) return null;
+  return (Array.isArray(knownPlaces) ? knownPlaces : []).find(place =>
+    validCoordinates(place) && distanceM(place, location) < maxDistance
+  ) || null;
+}
+
+function runPersistedMutation(apply, persist, rollback) {
+  apply();
+  try {
+    persist();
+  } catch (error) {
+    rollback();
+    throw error;
+  }
+}
+
 module.exports = {
   discoverChargeLocations,
+  findNearbyKnownPlace,
   hasChargeLocationCoordinates: validCoordinates,
   resolveChargeLocationLinks,
+  runPersistedMutation,
   setChargeLocationLink,
 };

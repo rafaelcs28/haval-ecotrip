@@ -26,9 +26,10 @@ const sajCloud     = require('./saj-cloud');   // nuvem SAJ direta (Catalão), s
 const ocpp         = require('./ocpp-server'); // central system do carregador (OCPP 1.6J)
 const {
   discoverChargeLocations,
+  findNearbyKnownPlace,
   hasChargeLocationCoordinates,
   resolveChargeLocationLinks,
-  setChargeLocationLink,
+  runPersistedMutation,
 } = require('./charge-location-links');
 
 // Sem isto, uma rejection/exception fora de rota (timer, callback MQTT, fetch em
@@ -3611,7 +3612,7 @@ try {
   if (chargeLocations.length) console.log(`✓ Locais de recarga: ${chargeLocations.length}`);
 } catch (_) {}
 function saveChargeLocations() {
-  try { fs.writeFileSync(CHARGE_LOCS_FILE, JSON.stringify(chargeLocations, null, 2)); } catch (_) {}
+  atomicWriteFileSync(CHARGE_LOCS_FILE, JSON.stringify(chargeLocations, null, 2));
 }
 
 // Haversine — distância em metros entre dois pontos GPS
@@ -3640,7 +3641,7 @@ try {
 } catch (_) {}
 
 function saveKnownPlaces() {
-  try { fs.writeFileSync(KNOWN_PLACES_FILE, JSON.stringify(knownPlaces, null, 2)); } catch (_) {}
+  atomicWriteFileSync(KNOWN_PLACES_FILE, JSON.stringify(knownPlaces, null, 2));
 }
 
 function syncChargeLocationsFromHistory() {
@@ -11514,11 +11515,22 @@ app.post('/api/charge-locations', (req, res) => {
 app.post('/api/charge-locations/:id/link', (req, res) => {
   const knownPlaceId = req.body?.known_place_id;
   if (knownPlaceId == null) return res.status(400).json({ error: 'known_place_id obrigatório' });
-  if (!setChargeLocationLink(chargeLocations, req.params.id, knownPlaces, knownPlaceId)) {
+  const location = chargeLocations.find(item => String(item.id) === String(req.params.id));
+  const knownPlace = knownPlaces.find(item => String(item.id) === String(knownPlaceId));
+  if (!location || !knownPlace) {
     return res.status(404).json({ error: 'local de recarga ou local conhecido não encontrado' });
   }
-  saveChargeLocations();
-  const location = chargeLocations.find(item => String(item.id) === String(req.params.id));
+  const previousKnownPlaceId = location.known_place_id;
+  try {
+    runPersistedMutation(
+      () => { location.known_place_id = knownPlace.id; },
+      saveChargeLocations,
+      () => { location.known_place_id = previousKnownPlaceId; }
+    );
+  } catch (error) {
+    console.error('[charge-location-link]', error);
+    return res.status(500).json({ error: 'não foi possível persistir o vínculo' });
+  }
   res.json(location);
 });
 
@@ -11532,18 +11544,36 @@ app.post('/api/charge-locations/:id/create-known-place', (req, res) => {
 
   const name = String(req.body?.name || location.name || '').trim();
   if (!name) return res.status(400).json({ error: 'nome obrigatório' });
-  const duplicate = knownPlaces.find(place =>
-    place.name.trim().toLowerCase() === name.toLowerCase() ||
-    (place.lat != null && place.lng != null && haversineM(place.lat, place.lng, lat, lng) < 50)
-  );
+  const duplicate = findNearbyKnownPlace(knownPlaces, { lat, lng }, 50);
   if (duplicate) return res.status(409).json({ error: 'duplicate', existing: duplicate });
 
   const radius = Math.max(50, Math.min(2000, parseInt(req.body?.radius_m, 10) || 200));
   const place = { id: Date.now(), name, lat, lng, radius_m: radius };
-  knownPlaces.push(place);
-  location.known_place_id = place.id;
-  saveKnownPlaces();
-  saveChargeLocations();
+  const previousKnownPlaces = knownPlaces;
+  const previousKnownPlaceId = location.known_place_id;
+  try {
+    runPersistedMutation(
+      () => {
+        knownPlaces = [...knownPlaces, place];
+        location.known_place_id = place.id;
+      },
+      () => {
+        saveKnownPlaces();
+        saveChargeLocations();
+      },
+      () => {
+        knownPlaces = previousKnownPlaces;
+        location.known_place_id = previousKnownPlaceId;
+      }
+    );
+  } catch (error) {
+    try {
+      saveKnownPlaces();
+      saveChargeLocations();
+    } catch (_) {}
+    console.error('[charge-location-create]', error);
+    return res.status(500).json({ error: 'não foi possível persistir o local conhecido' });
+  }
   res.status(201).json({ known_place_id: place.id, place, location });
 });
 
