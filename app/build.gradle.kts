@@ -94,4 +94,5 @@ dependencies {
     compileOnly(libs.annotation)
     debugImplementation(libs.ui.tooling)
     debugImplementation(libs.ui.test.manifest)
+    testImplementation("junit:junit:4.13.2")
 }
