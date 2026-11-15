@@ -230,6 +230,8 @@ Na edição de recarga:
 
 Falha ao listar provedores não apaga configuração existente. O usuário ainda pode editar medidor e custo manualmente.
 
+Durante uma recarga, o Bridge publica `charge_charger_power_kw` com a leitura normalizada e recente do provedor. A Live Activity compara esse valor com `charge_power_kw` do carro e mostra ambos. Quando os dois forem válidos, mostra também `perda % = max(0, (carregador − carro) / carregador × 100)`. Zeeda e YellotMob seguem o mesmo campo normalizado. Leitura ausente ou expirada não mostra comparação nem perda.
+
 ## Compatibilidade e migração
 
 - Nenhuma migração destrutiva.

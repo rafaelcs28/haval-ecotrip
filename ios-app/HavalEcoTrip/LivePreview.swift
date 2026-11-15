@@ -15,7 +15,7 @@ enum LivePreview {
         guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
         endActive(Activity<ChargeActivityAttributes>.activities)
         let state = ChargeActivityAttributes.ContentState(
-            soc: 78, powerKw: 12.4, sessionKwh: 8.2, remainingMin: 65,
+            soc: 78, powerKw: 5.7, chargerPowerKw: 6.2, sessionKwh: 8.2, remainingMin: 65,
             charging: true, targetPct: 80, costBrl: 9.84,
             updatedAtMs: Date().timeIntervalSince1970 * 1000)
         _ = try? Activity.request(

@@ -74,10 +74,11 @@ enum BackgroundRefresh {
             let charging = (json["charging_state"] as? String) == "Carregando"
             let soc = (json["soc_pct"]              as? Double) ?? 0
             let pwr = (json["charge_power_kw"]      as? Double) ?? 0
+            let chargerPwr = json["charge_charger_power_kw"] as? Double
             let kwh = (json["charge_session_kwh"]   as? Double) ?? 0
             let rem = (json["charge_remaining_min"] as? Double) ?? 0
             let state = ChargeActivityAttributes.ContentState(
-                soc: soc, powerKw: pwr, sessionKwh: kwh,
+                soc: soc, powerKw: pwr, chargerPowerKw: chargerPwr, sessionKwh: kwh,
                 remainingMin: Int(rem.rounded()),
                 charging: charging,
                 targetPct: ActivityManager.effectiveLimit(json),
