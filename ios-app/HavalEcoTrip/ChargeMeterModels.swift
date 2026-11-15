@@ -19,6 +19,7 @@ struct ChargeLocationCandidate: Identifiable, Equatable {
     var canCreateKnownPlace: Bool {
         guard let lat, let lng else { return false }
         return lat.isFinite && lng.isFinite && (-90...90).contains(lat) && (-180...180).contains(lng)
+            && !(lat == 0 && lng == 0)
     }
 
     static func unlinked(_ locations: [ChargeLocationCandidate]) -> [ChargeLocationCandidate] {
