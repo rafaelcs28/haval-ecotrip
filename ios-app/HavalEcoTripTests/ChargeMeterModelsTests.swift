@@ -171,7 +171,8 @@ final class ChargeMeterModelsTests: XCTestCase {
 
         XCTAssertEqual(groups.map(\.provider), ["zeeda", "yellotmob"])
         XCTAssertEqual(groups[0].meters.map(\.chargerId), ["Z-1", "Z-2"])
-        XCTAssertEqual(ChargeMeterProviderGroup.flatten(groups), configs)
+        XCTAssertEqual(ChargeMeterProviderGroup.flatten(groups), [configs[0], configs[2], configs[1]])
+        XCTAssertEqual(groups[0].meters.map(\.currentPricePerKwh), [0.18, 0.32])
     }
 
     func testApplyingMultipleSelectionPreservesExistingTariffAndAddsNewMeter() {
