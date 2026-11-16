@@ -57,7 +57,7 @@
 
 - [x] Atualizar documentação responsável.
 - [x] Validar endpoints reais, incluindo 401 sem token.
-- [ ] Revisar diff e preservar proxy MHZ presente em produção.
-- [ ] Fazer deploy com backup e rollback.
-- [ ] Rodar XCTest no Mac Mini.
-- [ ] Arquivar e aguardar build `VALID` no App Store Connect.
+- [x] Revisar diff e preservar proxy MHZ presente em produção.
+- [x] Fazer deploy com backup e rollback.
+- [x] Rodar XCTest no Mac Mini.
+- [x] Arquivar e aguardar build `VALID` no App Store Connect.
