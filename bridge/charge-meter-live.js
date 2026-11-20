@@ -31,6 +31,14 @@ function meterForLiveUpdate(item, charging, final) {
   return charging || final ? item : null;
 }
 
+function chargeMeterContentFields(item) {
+  return {
+    chargerPowerKw: item?.power_kw ?? null,
+    chargerSessionKwh: item?.energy_kwh ?? null,
+    costBrl: item?.cost_brl ?? null,
+  };
+}
+
 function selectLiveChargeMeter({ configs, sessionsByKey, vehicleKwh, atMs = Date.now() }) {
   const active = (Array.isArray(configs) ? configs : []).flatMap(config => {
     if (config?.enabled === false) return [];
@@ -68,6 +76,7 @@ function selectLiveChargeMeter({ configs, sessionsByKey, vehicleKwh, atMs = Date
 }
 
 module.exports = {
+  chargeMeterContentFields,
   hasFreshVehicleChargeContext,
   meterForLiveUpdate,
   selectLiveChargeMeter,

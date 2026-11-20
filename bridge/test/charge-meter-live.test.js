@@ -3,10 +3,28 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
+  chargeMeterContentFields,
   hasFreshVehicleChargeContext,
   meterForLiveUpdate,
   selectLiveChargeMeter,
 } = require('../charge-meter-live');
+
+test('builds the same external meter fields for final and interrupted updates', () => {
+  assert.deepEqual(chargeMeterContentFields({
+    power_kw: 6.2,
+    energy_kwh: 24.902,
+    cost_brl: 27.05,
+  }), {
+    chargerPowerKw: 6.2,
+    chargerSessionKwh: 24.902,
+    costBrl: 27.05,
+  });
+  assert.deepEqual(chargeMeterContentFields(null), {
+    chargerPowerKw: null,
+    chargerSessionKwh: null,
+    costBrl: null,
+  });
+});
 
 test('requires fresh charging and GPS readings before polling linked chargers', () => {
   const now = 1_800_000_000_000;

@@ -42,7 +42,12 @@ const {
   validateChargeMeterConfigs,
 } = require('./charge-meter-catalog');
 const { getCurrentChargeMeterSession, listChargeMeterSessions } = require('./charge-meter-provider');
-const { hasFreshVehicleChargeContext, meterForLiveUpdate, selectLiveChargeMeter } = require('./charge-meter-live');
+const {
+  chargeMeterContentFields,
+  hasFreshVehicleChargeContext,
+  meterForLiveUpdate,
+  selectLiveChargeMeter,
+} = require('./charge-meter-live');
 const {
   reconcileChargeMeter,
   resolveProviderReconciliation,
@@ -23028,6 +23033,7 @@ function handleChargingStateTransition(value, isRetained) {
           stopChargeLiveTimer();
           apnsLive.pushUpdate('ChargeActivityAttributes', {}, {
             soc: endSoc, powerKw: 0, sessionKwh: finalKwh,
+            ...chargeMeterContentFields(_chargeMeterLive),
             remainingMin: 0, charging: false,
             targetPct: effTarget, locked: _isLocked(), updatedAtMs: Date.now(),
           }, { isFinal: true, dismissalDate: Date.now() + 30 * 60_000, alert: { title: aTitle, body: aBody } })
@@ -23280,15 +23286,13 @@ function sendChargeLiveUpdate(isFinal = false) {
     }
     apnsLive.pushUpdate('ChargeActivityAttributes', {}, {
       soc, powerKw: pwr,
-      chargerPowerKw: meter?.power_kw ?? null,
+      ...chargeMeterContentFields(meter),
       // No final, usa o total guardado (o APK zera o contador ao terminar).
       sessionKwh: isFinal ? Math.max(_chargeFinalKwh, +state.charge_session_kwh || 0) : (+state.charge_session_kwh || 0),
-      chargerSessionKwh: meter?.energy_kwh ?? null,
       remainingMin: Math.max(0, Math.round(rem)),
       charging: !isFinal,
       targetPct: _effectiveChargeTarget(),
       locked: _isLocked(),
-      costBrl: meter?.cost_brl ?? null,
       updatedAtMs: now,
       // charging:false no final → o widget renderiza o doneBody (card-resumo verde).
     }, {
@@ -26802,6 +26806,8 @@ function applyMqttMessage(key, value, isRetained = false) {
       // O APK publica o código numérico (0-5, mesma convenção da GWM raw); a GWM via
       // HA já manda texto. Normaliza numérico→texto antes do handler de transição.
       const v = /^\d+$/.test(String(value).trim()) ? mapChargingStateText(value) : value;
+      _notaValorFonte('charging_state', 'apk', v, isRetained);
+      _fieldSource['charging_state'] = 'apk';
       handleChargingStateTransition(v, isRetained);
       break;
     }
