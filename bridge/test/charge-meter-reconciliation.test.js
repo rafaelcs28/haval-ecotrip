@@ -150,6 +150,32 @@ test('uses YellotMob energy and provider cost', () => {
   assert.deepEqual(result.cost_override, { total: 31.11, perKwh: 1.3825 });
 });
 
+test('accepts a provider interval displaced by up to ten minutes', () => {
+  const result = reconcileChargeMeter({
+    charge: charge({ duration_sec: 28 * 60 }),
+    configs: [yellotmob('273')],
+    sessionsByKey: {
+      'yellotmob:273': [session('transaction:472330', -7, 29, 24.902, { provider_cost: 27.05 })],
+    },
+  });
+
+  assert.equal(result.status, 'matched');
+  assert.equal(result.charger_kwh, 24.902);
+  assert.deepEqual(result.cost_override, { total: 27.05, perKwh: 1.0863 });
+});
+
+test('does not match a provider interval more than ten minutes away', () => {
+  const result = reconcileChargeMeter({
+    charge: charge({ duration_sec: 28 * 60 }),
+    configs: [yellotmob('273')],
+    sessionsByKey: {
+      'yellotmob:273': [session('transaction:old', -20, 21, 24.902, { provider_cost: 27.05 })],
+    },
+  });
+
+  assert.equal(result.status, 'pending');
+});
+
 test('uses MHZ MOB energy and provider cost', () => {
   const result = reconcileChargeMeter({
     charge: charge(),

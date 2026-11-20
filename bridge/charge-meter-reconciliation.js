@@ -18,6 +18,11 @@ function overlapMs(left, right) {
   return Math.max(0, Math.min(left.end, right.end) - Math.max(left.start, right.start));
 }
 
+function gapMs(left, right) {
+  if (overlapMs(left, right) > 0) return 0;
+  return Math.max(left.start - right.end, right.start - left.end, 0);
+}
+
 function isDuplicate(left, right) {
   const a = sessionBounds(left);
   const b = sessionBounds(right);
@@ -82,8 +87,10 @@ function reconcileChargeMeter({ charge, configs, sessionsByKey }) {
       .flatMap(session => {
         const bounds = sessionBounds(session);
         const overlap = bounds ? overlapMs(bounds, chargeRange) : 0;
+        const gap = bounds ? gapMs(bounds, chargeRange) : Infinity;
         const energy = Number(session?.energy_kwh);
-        return bounds && overlap > 0 && energy > 0 ? [{ session, bounds, overlap, energy }] : [];
+        return bounds && (overlap > 0 || gap <= 10 * 60_000) && energy > 0
+          ? [{ session, bounds, overlap, gap, energy }] : [];
       });
     if (!sessions.length) continue;
     candidates.push({
@@ -91,15 +98,17 @@ function reconcileChargeMeter({ charge, configs, sessionsByKey }) {
       key,
       sessions,
       overlap: sessions.reduce((sum, item) => sum + item.overlap, 0),
+      gap: Math.min(...sessions.map(item => item.gap)),
       endDistance: Math.abs(Math.max(...sessions.map(item => item.bounds.end)) - chargeEnd),
     });
   }
 
   if (!candidates.length) return { status: 'pending' };
-  candidates.sort((left, right) => right.overlap - left.overlap || left.endDistance - right.endDistance);
+  candidates.sort((left, right) => right.overlap - left.overlap || left.gap - right.gap || left.endDistance - right.endDistance);
   const winner = candidates[0];
   const tied = candidates.filter(candidate =>
-    candidate.overlap === winner.overlap && candidate.endDistance === winner.endDistance);
+    candidate.overlap === winner.overlap && candidate.gap === winner.gap
+      && candidate.endDistance === winner.endDistance);
   if (tied.length > 1) return { status: 'ambiguous', candidates: tied.map(candidate => candidate.key) };
 
   const providerEnergy = round(winner.sessions.reduce((sum, item) => sum + item.energy, 0), 6);

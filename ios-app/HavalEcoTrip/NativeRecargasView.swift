@@ -46,6 +46,16 @@ struct Charge: Identifiable {
     }
     var costTotal: Double { (cost("cost_override") ?? cost("cost"))?.0 ?? 0 }
     var costPerKwh: Double { (cost("cost_override") ?? cost("cost"))?.1 ?? 0 }
+    var isFree: Bool {
+        ["cost_override", "cost"].contains { key in
+            (raw[key] as? [String: Any])?["free"] as? Bool == true
+        }
+    }
+    var costPending: Bool {
+        guard costTotal <= 0, !isFree,
+              let status = (raw["charge_meter_reconcile"] as? [String: Any])?["status"] as? String else { return false }
+        return status != "matched"
+    }
     var isCharge: Bool { kwh > 0 }
 
     /// Custo marcado como atípico pelo bridge (fora de 10% da mediana do local, ou
@@ -309,7 +319,12 @@ struct NativeRecargasView: View {
         .refreshable { await loader.load(); await refLoader.load() }
         // Sincroniza SEMPRE ao abrir (não só com cache vazio): senão recargas novas
         // só entravam via pull-to-refresh manual ou WS no exato momento do evento.
-        .task { await loader.load(); await refLoader.load() }
+        .task {
+            while !Task.isCancelled {
+                await loader.load(); await refLoader.load()
+                try? await Task.sleep(nanoseconds: 30_000_000_000)
+            }
+        }
     }
 
     private var periodChips: some View {
@@ -361,7 +376,7 @@ struct NativeRecargasView: View {
                     }
                     HStack {
                         DSMetric(value: f1(c.kwh), unit: "kWh", label: "Na bateria", color: DS.green)
-                        DSMetric(value: c.costTotal > 0 ? brl(c.costTotal) : "Grátis", label: "Custo", color: DS.text)
+                        DSMetric(value: c.costTotal > 0 ? brl(c.costTotal) : c.isFree ? "Grátis" : c.costPending ? "Calculando…" : "—", label: "Custo", color: DS.text)
                         DSMetric(value: c.costPerKwh > 0 ? perKwh(c.costPerKwh) : "—", unit: "R$/kWh", label: "Preço")
                     }
                 }

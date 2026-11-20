@@ -97,6 +97,10 @@ struct RecargasV2View: View {
         .task {
             await loader.load(); await refLoader.load()
             if expandedId == nil { expandedId = filtered.first?.id }
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 30_000_000_000)
+                await loader.load(); await refLoader.load()
+            }
         }
         .onChange(of: expandedId) { loadCurve() }
         .onChange(of: loader.charges.first?.id) { if expandedId == nil { expandedId = filtered.first?.id }; loadCurve() }
@@ -350,7 +354,7 @@ struct RecargasV2View: View {
             socBar(c)
 
             HStack(spacing: 8) {
-                tile("CUSTO", c.costTotal > 0 ? Fmt.brl(c.costTotal) : "Grátis", nil, DS.text)
+                tile("CUSTO", c.costTotal > 0 ? Fmt.brl(c.costTotal) : c.isFree ? "Grátis" : c.costPending ? "Calculando…" : "—", nil, DS.text)
                 tile("DURAÇÃO", durText(c.durationSec), nil, DS.text)
                 tile("MÉDIA", Fmt.dec1(c.avgPowerKw), "kW", DS.teal)
                 tile("R$/KWH", c.costPerKwh > 0 ? Fmt.dec2(c.costPerKwh) : "—", nil, DS.text)

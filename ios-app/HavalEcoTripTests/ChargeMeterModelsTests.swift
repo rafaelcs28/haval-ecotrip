@@ -310,4 +310,16 @@ final class ChargeMeterModelsTests: XCTestCase {
         XCTAssertNil(state.chargerSessionKwh)
         XCTAssertNil(state.costBrl)
     }
+
+    func testPendingProviderCostIsNotPresentedAsFree() {
+        let charge = Charge([
+            "timestamp_ms": 1_795_185_674_311,
+            "energy_kwh": 24.14,
+            "charge_meter_reconcile": ["status": "pending"]
+        ])
+
+        XCTAssertTrue(charge.costPending)
+        XCTAssertFalse(charge.isFree)
+        XCTAssertEqual(charge.costTotal, 0)
+    }
 }
