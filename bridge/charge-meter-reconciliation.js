@@ -77,6 +77,17 @@ function shouldFillChargeMeterEnergy(current, candidate) {
   return !(Number(current) > 0) && Number(candidate) > 0;
 }
 
+function resolveProviderReconciliation(result, providerStates) {
+  const failed = (Array.isArray(providerStates) ? providerStates : [])
+    .some(state => state?.status === 'provider_unavailable');
+  return failed && !result?.meter_key ? { status: 'pending_provider' } : result;
+}
+
+function terminalChargeMeterStatus(status, nowMs, deadlineMs) {
+  if (status === 'matched' || shouldRetryChargeMeter(status, nowMs, deadlineMs)) return status;
+  return 'failed';
+}
+
 function reconcileChargeMeter({ charge, configs, sessionsByKey }) {
   const chargeEnd = Number(charge?.timestamp_ms);
   const durationMs = Number(charge?.duration_sec) * 1000;
@@ -152,7 +163,9 @@ function reconcileChargeMeter({ charge, configs, sessionsByKey }) {
 
 module.exports = {
   deduplicateSessions,
+  resolveProviderReconciliation,
   reconcileChargeMeter,
   shouldFillChargeMeterEnergy,
   shouldRetryChargeMeter,
+  terminalChargeMeterStatus,
 };

@@ -24,6 +24,7 @@ const bluettiCloud = require('./bluetti-cloud');
 const starlink     = require('./starlink-sitio');
 const sajCloud     = require('./saj-cloud');   // nuvem SAJ direta (Catalão), sem o HA no caminho
 const ocpp         = require('./ocpp-server'); // central system do carregador (OCPP 1.6J)
+const { createMhzMobProxy } = require('./mhzmob-proxy');
 const {
   discoverChargeLocations,
   findNearbyKnownPlace,
@@ -41,8 +42,14 @@ const {
   validateChargeMeterConfigs,
 } = require('./charge-meter-catalog');
 const { getCurrentChargeMeterSession, listChargeMeterSessions } = require('./charge-meter-provider');
-const { selectLiveChargeMeter } = require('./charge-meter-live');
-const { reconcileChargeMeter, shouldFillChargeMeterEnergy, shouldRetryChargeMeter } = require('./charge-meter-reconciliation');
+const { hasFreshVehicleChargeContext, meterForLiveUpdate, selectLiveChargeMeter } = require('./charge-meter-live');
+const {
+  reconcileChargeMeter,
+  resolveProviderReconciliation,
+  shouldFillChargeMeterEnergy,
+  shouldRetryChargeMeter,
+  terminalChargeMeterStatus,
+} = require('./charge-meter-reconciliation');
 
 // Sem isto, uma rejection/exception fora de rota (timer, callback MQTT, fetch em
 // background) derrubava o processo inteiro. Loga e segue — pm2 só reinicia em crash real.
@@ -5603,6 +5610,11 @@ function requireAuth(req, res, next) {
   }
   return res.status(401).json({ error: 'unauthorized' });
 }
+
+app.use('/api/mhzmob', requireAuth, createMhzMobProxy({
+  express,
+  baseUrl: process.env.MHZMOB_API_URL || 'http://127.0.0.1:8792',
+}));
 
 // ── Painel admin: senha + TOTP, e emissão de tokens ──────────────────────────
 // A área não herda a sessão do monitor: exige senha + código na hora, porque o
@@ -11571,7 +11583,7 @@ function _chargeMeterRetryState(charge, status, now, details = {}) {
   const deadline = Number(charge.timestamp_ms) + CHARGE_METER_RETRY_TTL_MS;
   const retry = shouldRetryChargeMeter(status, now, deadline);
   return {
-    status,
+    status: terminalChargeMeterStatus(status, now, deadline),
     attempts: Number(previous.attempts || 0) + 1,
     first_attempt_ms: Number(previous.first_attempt_ms || now),
     last_attempt_ms: now,
@@ -11633,10 +11645,10 @@ async function _reconcileChargeMeterRecord(charge) {
       }
     }));
 
-    const failed = states.some(state => state.status === 'provider_unavailable');
-    const result = failed
-      ? { status: 'pending_provider' }
-      : reconcileChargeMeter({ charge, configs, sessionsByKey, nowMs: now });
+    const result = resolveProviderReconciliation(
+      reconcileChargeMeter({ charge, configs, sessionsByKey, nowMs: now }),
+      states
+    );
     const index = chargesArr.findIndex(item => Number(item.timestamp_ms) === timestamp);
     const before = structuredClone(charge);
     let costChanged = false;
@@ -11681,9 +11693,12 @@ async function _runChargeMeterRetries() {
   const now = Date.now();
   const pending = chargesArr.filter(charge => {
     const end = Number(charge.timestamp_ms || 0);
-    if (!end || now - end > CHARGE_METER_RETRY_TTL_MS) return false;
+    if (!end) return false;
     if (Number(charge.charger_kwh) > 0 && charge.cost_override != null) return false;
     const state = charge.charge_meter_reconcile;
+    if (!state && now - end > CHARGE_METER_RETRY_TTL_MS) return false;
+    if (state?.status === 'failed' || state?.status === 'matched') return false;
+    if (state && Number(state.deadline_ms) <= now) return true;
     if (state && !shouldRetryChargeMeter(state.status, now, state.deadline_ms)) return false;
     return !state || state.next_attempt_ms == null || Number(state.next_attempt_ms) <= now;
   });
@@ -23095,7 +23110,11 @@ function _chargeMeterStateFields() {
 }
 
 async function _refreshChargeMeterLive() {
-  if (state.charging_state !== 'Carregando') {
+  if (!hasFreshVehicleChargeContext({
+    chargingState: state.charging_state,
+    chargingSeenMs: _fieldSeenMs('charging_state'),
+    gpsSeenMs: state._gps_live_ms,
+  })) {
     _chargeMeterLive = null;
     return;
   }
@@ -23204,7 +23223,7 @@ function sendChargeLiveUpdate(isFinal = false) {
   const soc = +state.soc_pct || 0;
   const pwr = +state.charge_power_kw || 0;
   const rem = chargeEtaMin();   // nosso ETA (o do carro trava em ~5min)
-  const meter = state.charging_state === 'Carregando' ? _chargeMeterLive : null;
+  const meter = meterForLiveUpdate(_chargeMeterLive, charging, isFinal);
   const meterSig = JSON.stringify(meter && [meter.charger_id, meter.power_kw, meter.energy_kwh, meter.cost_brl]);
   const now = Date.now();
   if (!isFinal) {
@@ -26702,13 +26721,18 @@ function applyMqttMessage(key, value, isRetained = false) {
     // GPS — posição ao vivo do veículo
     case 'gps_lat': {
       const lat = parseFloat(value);
-      if (lat && lat !== 0) { state.gps_lat = lat; state.gps_ts = Date.now(); checkGeofence(); checkTheft(); _liveTripAppend(); }
+      if (lat && lat !== 0) {
+        state.gps_lat = lat; state.gps_ts = Date.now();
+        if (!isRetained) state._gps_live_ms = _now;
+        checkGeofence(); checkTheft(); _liveTripAppend();
+      }
       break;
     }
     case 'gps_lng': {
       const lng = parseFloat(value);
       if (lng && lng !== 0) {
         state.gps_lng = lng; state.gps_ts = Date.now();
+        if (!isRetained) state._gps_live_ms = _now;
         // Trilha do detector de barramento congelado: precisa do ritmo do GPS
         // (~1/s), não do tick de alerta (1/min). Só o par completo entra.
         canFrozen.registraPos(_canMem, +state.gps_lat, lng, +state.speed_kmh || 0, state.gps_ts);

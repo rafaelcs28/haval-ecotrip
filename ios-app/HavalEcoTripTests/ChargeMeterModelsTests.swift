@@ -322,4 +322,16 @@ final class ChargeMeterModelsTests: XCTestCase {
         XCTAssertFalse(charge.isFree)
         XCTAssertEqual(charge.costTotal, 0)
     }
+
+    func testFailedProviderCostIsNotPresentedAsCalculatingForever() {
+        let charge = Charge([
+            "timestamp_ms": 1_795_185_674_311,
+            "energy_kwh": 24.14,
+            "charge_meter_reconcile": ["status": "failed"]
+        ])
+
+        XCTAssertFalse(charge.costPending)
+        XCTAssertFalse(charge.isFree)
+        XCTAssertEqual(charge.costTotal, 0)
+    }
 }

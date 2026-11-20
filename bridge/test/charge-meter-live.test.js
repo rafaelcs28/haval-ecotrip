@@ -2,7 +2,34 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { selectLiveChargeMeter } = require('../charge-meter-live');
+const {
+  hasFreshVehicleChargeContext,
+  meterForLiveUpdate,
+  selectLiveChargeMeter,
+} = require('../charge-meter-live');
+
+test('requires fresh charging and GPS readings before polling linked chargers', () => {
+  const now = 1_800_000_000_000;
+  assert.equal(hasFreshVehicleChargeContext({
+    chargingState: 'Carregando', chargingSeenMs: now - 30_000, gpsSeenMs: now - 20_000, nowMs: now,
+  }), true);
+  assert.equal(hasFreshVehicleChargeContext({
+    chargingState: 'Carregando', chargingSeenMs: now - 6 * 60_000, gpsSeenMs: now - 20_000, nowMs: now,
+  }), false);
+  assert.equal(hasFreshVehicleChargeContext({
+    chargingState: 'Carregando', chargingSeenMs: now - 30_000, gpsSeenMs: 0, nowMs: now,
+  }), false);
+  assert.equal(hasFreshVehicleChargeContext({
+    chargingState: 'Desconectado', chargingSeenMs: now - 30_000, gpsSeenMs: now - 20_000, nowMs: now,
+  }), false);
+});
+
+test('keeps the last external meter in the final live update only', () => {
+  const meter = { charger_id: '273', energy_kwh: 24.902, cost_brl: 27.05 };
+  assert.equal(meterForLiveUpdate(meter, true, false), meter);
+  assert.equal(meterForLiveUpdate(meter, false, true), meter);
+  assert.equal(meterForLiveUpdate(meter, false, false), null);
+});
 
 test('selects the only active linked charger and calculates energy loss', () => {
   const result = selectLiveChargeMeter({

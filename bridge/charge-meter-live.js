@@ -13,6 +13,24 @@ function tariffAt(config, atMs) {
     .at(-1)?.price_per_kwh;
 }
 
+function hasFreshVehicleChargeContext({
+  chargingState,
+  chargingSeenMs,
+  gpsSeenMs,
+  nowMs = Date.now(),
+  maxAgeMs = 5 * 60_000,
+}) {
+  if (chargingState !== 'Carregando') return false;
+  return [chargingSeenMs, gpsSeenMs].every(value => {
+    const age = Number(nowMs) - Number(value);
+    return Number(value) > 0 && age >= 0 && age <= maxAgeMs;
+  });
+}
+
+function meterForLiveUpdate(item, charging, final) {
+  return charging || final ? item : null;
+}
+
 function selectLiveChargeMeter({ configs, sessionsByKey, vehicleKwh, atMs = Date.now() }) {
   const active = (Array.isArray(configs) ? configs : []).flatMap(config => {
     if (config?.enabled === false) return [];
@@ -49,4 +67,8 @@ function selectLiveChargeMeter({ configs, sessionsByKey, vehicleKwh, atMs = Date
   };
 }
 
-module.exports = { selectLiveChargeMeter };
+module.exports = {
+  hasFreshVehicleChargeContext,
+  meterForLiveUpdate,
+  selectLiveChargeMeter,
+};

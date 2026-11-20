@@ -3,9 +3,11 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
+  resolveProviderReconciliation,
   reconcileChargeMeter,
   shouldFillChargeMeterEnergy,
   shouldRetryChargeMeter,
+  terminalChargeMeterStatus,
 } = require('../charge-meter-reconciliation');
 
 const MINUTE = 60_000;
@@ -236,4 +238,20 @@ test('retries an unconfigured recent charge so later configuration can reconcile
   assert.equal(shouldRetryChargeMeter('not_configured', base, base + MINUTE), true);
   assert.equal(shouldRetryChargeMeter('matched', base, base + MINUTE), false);
   assert.equal(shouldRetryChargeMeter('pending', base + MINUTE, base + MINUTE), false);
+});
+
+test('keeps a valid match when another linked provider is unavailable', () => {
+  const matched = { status: 'matched', meter_key: 'yellotmob:273', charger_kwh: 24.902 };
+  const states = [
+    { meter_key: 'yellotmob:273', status: 'found' },
+    { meter_key: 'mhzmob:4', status: 'provider_unavailable' },
+  ];
+  assert.equal(resolveProviderReconciliation(matched, states), matched);
+  assert.deepEqual(resolveProviderReconciliation({ status: 'pending' }, states), { status: 'pending_provider' });
+});
+
+test('marks an unresolved reconciliation failed after its deadline', () => {
+  assert.equal(terminalChargeMeterStatus('pending_provider', base, base + MINUTE), 'pending_provider');
+  assert.equal(terminalChargeMeterStatus('pending_provider', base + MINUTE, base + MINUTE), 'failed');
+  assert.equal(terminalChargeMeterStatus('matched', base + MINUTE, base + MINUTE), 'matched');
 });

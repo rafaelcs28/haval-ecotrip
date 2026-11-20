@@ -54,7 +54,7 @@ struct Charge: Identifiable {
     var costPending: Bool {
         guard costTotal <= 0, !isFree,
               let status = (raw["charge_meter_reconcile"] as? [String: Any])?["status"] as? String else { return false }
-        return status != "matched"
+        return ["pending", "pending_provider", "pending_location", "not_configured", "missing_tariff", "ambiguous"].contains(status)
     }
     var isCharge: Bool { kwh > 0 }
 
