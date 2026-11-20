@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { listChargeMeterSessions } = require('../charge-meter-provider');
+const { getCurrentChargeMeterSession, listChargeMeterSessions } = require('../charge-meter-provider');
 
 const from = '2026-11-15T12:00:00.000Z';
 const to = '2026-11-15T13:00:00.000Z';
@@ -162,4 +162,84 @@ test('keeps charger requests separate', async () => {
   ]);
 
   assert.deepEqual(chargers.sort(), ['273', '274']);
+});
+
+test('keeps YellotMob Charging active when power is absent', async () => {
+  const calls = [];
+  const fetchImpl = async (url, options) => {
+    calls.push({ url: String(url), headers: options.headers });
+    return new Response(JSON.stringify({
+      item: {
+        provider: 'yellotmob', external_session_id: 'charging:472330', charger_id: '273',
+        charger_name: 'Pão de Açúcar T-63', started_at: '2026-11-20T17:09:01.000Z',
+        ended_at: null, energy_kwh: 11.106, power_kw: null, provider_cost: 10.03,
+        status: 'Charging', raw_updated_at: null, raw: { token: 'omit' },
+      },
+    }), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+
+  const item = await getCurrentChargeMeterSession('yellotmob', '273', {
+    fetchImpl, yellotmobUrl: 'http://127.0.0.1:8790',
+  });
+
+  assert.equal(calls[0].url, 'http://127.0.0.1:8790/api/current-session?charger=273');
+  assert.deepEqual(calls[0].headers, {});
+  assert.deepEqual(item, {
+    provider: 'yellotmob', external_session_id: 'charging:472330', charger_id: '273',
+    charger_name: 'Pão de Açúcar T-63', started_at: '2026-11-20T17:09:01.000Z',
+    ended_at: null, energy_kwh: 11.106, power_kw: null, provider_cost: 10.03,
+    status: 'Charging', raw_updated_at: null,
+  });
+});
+
+test('normalizes active Zeeda live data and rejects stale session energy when inactive', async () => {
+  const payloads = [{
+    deviceCode: 'D4', name: 'Jardins Lisboa', online: true, connectorStatus: '2.0',
+    currentPowerKw: 6.16, sessionEnergyKwh: 0.631, elapsedSeconds: 377, secret: 'omit',
+  }, {
+    deviceCode: 'D4', name: 'Jardins Lisboa', online: true, connectorStatus: '0.0',
+    currentPowerKw: 0, sessionEnergyKwh: 18.982, elapsedSeconds: 23618,
+  }];
+  const calls = [];
+  const fetchImpl = async (url, options) => {
+    calls.push({ url: String(url), authorization: options.headers.Authorization });
+    return new Response(JSON.stringify(payloads.shift()), { status: 200 });
+  };
+  const options = {
+    fetchImpl, zeedaUrl: 'http://127.0.0.1:8788', zeedaToken: 'bridge-hash',
+  };
+
+  const active = await getCurrentChargeMeterSession('zeeda', 'D4', options);
+  const inactive = await getCurrentChargeMeterSession('zeeda', 'D4', options);
+
+  assert.equal(calls[0].url, 'http://127.0.0.1:8788/api/zeeda/chargers/D4/live');
+  assert.ok(calls.every(call => call.authorization === 'Bearer bridge-hash'));
+  assert.deepEqual(active, {
+    provider: 'zeeda', external_session_id: '', charger_id: 'D4',
+    charger_name: 'Jardins Lisboa', started_at: null, ended_at: null,
+    energy_kwh: 0.631, power_kw: 6.16, provider_cost: null,
+    status: 'Charging', raw_updated_at: null,
+  });
+  assert.equal(inactive, null);
+});
+
+test('loads active MHZ MOB through the authenticated Bridge namespace', async () => {
+  const calls = [];
+  const fetchImpl = async (url, options) => {
+    calls.push({ url: String(url), authorization: options.headers.Authorization });
+    return new Response(JSON.stringify({ item: {
+      provider: 'yellotmob', external_session_id: 'charging:8', charger_id: '4',
+      charger_name: 'MHZ MOB - PREMIER', energy_kwh: 3.2, power_kw: 7.4,
+      provider_cost: 5.1, status: 'Charging', raw: { token: 'omit' },
+    } }), { status: 200 });
+  };
+
+  const item = await getCurrentChargeMeterSession('mhzmob', '4', {
+    fetchImpl, mhzmobUrl: 'http://127.0.0.1:3000', mhzmobToken: 'bridge-hash',
+  });
+
+  assert.equal(calls[0].url, 'http://127.0.0.1:3000/api/mhzmob/current-session?charger=4');
+  assert.equal(calls[0].authorization, 'Bearer bridge-hash');
+  assert.equal(item.provider, 'mhzmob');
+  assert.equal(Object.hasOwn(item, 'raw'), false);
 });

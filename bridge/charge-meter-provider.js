@@ -40,6 +40,62 @@ function normalizeZeeda(item) {
   };
 }
 
+function normalizeCurrentZeeda(item, chargerId) {
+  const status = String(item?.connectorStatus ?? '').trim().toLowerCase();
+  const powerKw = Number(item?.currentPowerKw);
+  const active = item?.online !== false
+    && (powerKw > 0.05 || status === '2' || status === '2.0'
+      || status.includes('charging') || status.includes('carregando') || status.includes('occupied'));
+  if (!active) return null;
+  return {
+    provider: 'zeeda',
+    external_session_id: '',
+    charger_id: String(item?.deviceCode || chargerId),
+    charger_name: String(item?.name || item?.deviceCode || chargerId),
+    started_at: null,
+    ended_at: null,
+    energy_kwh: Number(item?.sessionEnergyKwh),
+    power_kw: Number.isFinite(powerKw) ? powerKw : null,
+    provider_cost: null,
+    status: 'Charging',
+    raw_updated_at: null,
+  };
+}
+
+async function getCurrentChargeMeterSession(provider, chargerId, options = {}) {
+  const fetchImpl = options.fetchImpl || global.fetch;
+  const normalizedProvider = String(provider || '').trim().toLowerCase();
+  const zeeda = normalizedProvider === 'zeeda';
+  const mhzmob = normalizedProvider === 'mhzmob';
+  if (!zeeda && !mhzmob && normalizedProvider !== 'yellotmob') {
+    throw new ChargeMeterProviderError(normalizedProvider || 'provedor');
+  }
+  const baseUrl = zeeda
+    ? options.zeedaUrl || 'http://127.0.0.1:8788'
+    : mhzmob
+      ? options.mhzmobUrl || 'http://127.0.0.1:3000'
+      : options.yellotmobUrl || 'http://127.0.0.1:8790';
+  const endpoint = zeeda
+    ? `/api/zeeda/chargers/${encodeURIComponent(chargerId)}/live`
+    : mhzmob ? '/api/mhzmob/current-session' : '/api/current-session';
+
+  try {
+    const url = new URL(endpoint, baseUrl);
+    if (!zeeda) url.searchParams.set('charger', String(chargerId));
+    const headers = zeeda || mhzmob
+      ? { Authorization: `Bearer ${zeeda ? options.zeedaToken || '' : options.mhzmobToken || ''}` }
+      : {};
+    const response = await fetchImpl(url, { headers, signal: AbortSignal.timeout(5_000) });
+    if (!response.ok) throw new Error('upstream');
+    const payload = await response.json();
+    if (zeeda) return normalizeCurrentZeeda(payload, chargerId);
+    if (!payload?.item || String(payload.item.status || '').toLowerCase() !== 'charging') return null;
+    return normalizeYellotMob(payload.item, normalizedProvider);
+  } catch {
+    throw new ChargeMeterProviderError(normalizedProvider);
+  }
+}
+
 async function listChargeMeterSessions(provider, chargerId, fromIso, toIso, options = {}) {
   const fetchImpl = options.fetchImpl || global.fetch;
   const normalizedProvider = String(provider || '').trim().toLowerCase();
@@ -82,5 +138,6 @@ async function listChargeMeterSessions(provider, chargerId, fromIso, toIso, opti
 
 module.exports = {
   ChargeMeterProviderError,
+  getCurrentChargeMeterSession,
   listChargeMeterSessions,
 };
