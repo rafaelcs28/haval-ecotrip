@@ -292,4 +292,22 @@ final class ChargeMeterModelsTests: XCTestCase {
         XCTAssertEqual(comparison?.lossPercent ?? -1, 8.0645, accuracy: 0.001)
         XCTAssertNil(ChargePowerComparison(chargerPowerKw: 0, vehiclePowerKw: 5.7))
     }
+
+    func testLiveEnergyComparisonCalculatesChargingLoss() {
+        let comparison = ChargeEnergyComparison(chargerEnergyKwh: 14.115, vehicleEnergyKwh: 12.48)
+
+        XCTAssertEqual(comparison?.lossKwh ?? -1, 1.635, accuracy: 0.0001)
+        XCTAssertEqual(comparison?.lossPercent ?? -1, 11.5834, accuracy: 0.001)
+        XCTAssertNil(ChargeEnergyComparison(chargerEnergyKwh: 0, vehicleEnergyKwh: 12.48))
+    }
+
+    func testChargeActivityDecodesPayloadWithoutExternalMeterFields() throws {
+        let data = #"{"soc":67,"powerKw":50.93,"sessionKwh":12.48,"remainingMin":20,"charging":true,"targetPct":100,"updatedAtMs":1795194000000}"#.data(using: .utf8)!
+
+        let state = try JSONDecoder().decode(ChargeActivityAttributes.ContentState.self, from: data)
+
+        XCTAssertNil(state.chargerPowerKw)
+        XCTAssertNil(state.chargerSessionKwh)
+        XCTAssertNil(state.costBrl)
+    }
 }

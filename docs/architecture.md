@@ -33,7 +33,7 @@ Locais conhecidos usam `charge_meters` como lista canônica e mantêm `charge_me
 
 O aplicativo agrupa a lista por provedor apenas na interface. O Bridge consulta os adaptadores locais Zeeda (`127.0.0.1:8788`), YellotMob (`127.0.0.1:8790`) e seu namespace autenticado MHZ MOB (`/api/mhzmob`), remove payloads brutos e concilia somente sessões sobrepostas ao período da recarga. Sessões sequenciais do mesmo carregador podem ser somadas; carregadores diferentes nunca são somados. Maior sobreposição temporal e término mais próximo resolvem concorrência; empate permanece pendente. Falhas repetem a cada 5 minutos por até 72 horas. Energia e custo já preenchidos têm precedência independente.
 
-A Live Activity aceita `charge_charger_power_kw` opcional para comparar potência do carregador com a potência recebida pelo carro.
+A telemetria ao vivo consulta provedores a cada 15 segundos somente quando o Haval informa `Carregando`. O Bridge escolhe primeiro o local conhecido pelo GPS do Haval e consulta apenas seus vínculos ativos. Uma única sessão ativa fornece `charge_charger_power_kw`, `charge_charger_kwh`, `charge_charger_cost_brl` e perdas; nenhuma ou múltiplas sessões não são atribuídas. A Live Activity recebe os mesmos campos pelo estado, notificação e APNs.
 
 O Bridge deriva candidatos persistidos de `chargesArr` em `GET /api/charge-locations`. O Haval Hub exige confirmação para `POST /api/charge-locations/:id/link` ou `POST /api/charge-locations/:id/create-known-place`. `known_place_id` mantém o vínculo; nomes são apenas apresentação.
 

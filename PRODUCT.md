@@ -57,7 +57,9 @@ Este é um produto pessoal. Não há evidência de um SaaS público ou de requis
 - Viagens e recargas não são duplicadas ou perdidas após desconexão e retomada.
 - Recargas podem usar vários medidores externos vinculados ao mesmo local sem sobrescrever valores manuais. Cada Zeeda usa sua tarifa; YellotMob e MHZ MOB usam energia e custo da sessão.
 - Locais já usados em recargas aparecem para vínculo confirmado com um local conhecido; nomes diferentes não quebram a associação por ID.
-- Durante a recarga, a Live Activity compara potência do carregador e do carro quando ambas estiverem disponíveis.
+- Durante a recarga, app e Live Activity mostram potência, energia, custo e perda do carregador vinculado.
+- Dados externos só aparecem quando o Haval confirma `Carregando`; o GPS do Haval escolhe primeiro o local conhecido.
+- Se nenhum ou mais de um carregador vinculado estiver ativo, o app não atribui uma sessão por suposição.
 - Automações executam somente quando todas as condições configuradas são satisfeitas.
 - Falha de LAN ou nuvem apresenta estado compreensível e usa o fallback previsto sem duplicar comandos.
 - Atualizações instaláveis preservam a identidade de assinatura exigida pelo dispositivo.

@@ -73,7 +73,8 @@ final class ActivityManager: ObservableObject {
 
     // Atualiza a Live Activity ativa diretamente de um payload (sem fetch).
     // Chamado pelo UNUserNotificationCenterDelegate quando chega charge_live.
-    static func updateFromPayload(soc: Double, pwr: Double, chargerPwr: Double?, rem: Double, kwh: Double) async {
+    static func updateFromPayload(soc: Double, pwr: Double, chargerPwr: Double?, rem: Double,
+                                  kwh: Double, chargerKwh: Double?, costBrl: Double?) async {
         let activities = await MainActor.run {
             Activity<ChargeActivityAttributes>.activities.filter { $0.activityState == .active }
         }
@@ -82,8 +83,10 @@ final class ActivityManager: ObservableObject {
         let prevTarget = activity.content.state.targetPct
         let state = ChargeActivityAttributes.ContentState(
             soc: soc, powerKw: pwr, chargerPowerKw: chargerPwr, sessionKwh: kwh,
+            chargerSessionKwh: chargerKwh,
             remainingMin: Int(rem.rounded()), charging: true,
             targetPct: prevTarget,
+            costBrl: costBrl,
             updatedAtMs: Date().timeIntervalSince1970 * 1000
         )
         await activity.update(ActivityContent(state: state, staleDate: Date().addingTimeInterval(60 * 60)))
@@ -147,6 +150,8 @@ final class ActivityManager: ObservableObject {
             let pwr      = (json["charge_power_kw"]      as? Double) ?? 0
             let chargerPwr = json["charge_charger_power_kw"] as? Double
             let kwh      = (json["charge_session_kwh"]   as? Double) ?? 0
+            let chargerKwh = json["charge_charger_kwh"] as? Double
+            let costBrl = json["charge_charger_cost_brl"] as? Double
             let rem      = (json["charge_remaining_min"] as? Double) ?? 0
 
             let state = ChargeActivityAttributes.ContentState(
@@ -154,9 +159,11 @@ final class ActivityManager: ObservableObject {
                 powerKw: pwr,
                 chargerPowerKw: chargerPwr,
                 sessionKwh: kwh,
+                chargerSessionKwh: chargerKwh,
                 remainingMin: Int(rem.rounded()),
                 charging: charging,
                 targetPct: Self.effectiveLimit(json),
+                costBrl: costBrl,
                 updatedAtMs: Date().timeIntervalSince1970 * 1000
             )
             let content = ActivityContent(state: state, staleDate: Date().addingTimeInterval(60 * 60))

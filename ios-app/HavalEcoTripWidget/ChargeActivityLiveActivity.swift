@@ -120,9 +120,15 @@ struct ChargeActivityLiveActivity: Widget {
         var parts: [String]
         if let chargerPower = s.chargerPowerKw,
            let comparison = ChargePowerComparison(chargerPowerKw: chargerPower, vehiclePowerKw: s.powerKw) {
-            parts = ["\(laDec1(comparison.chargerPowerKw))→\(laDec1(comparison.vehiclePowerKw)) kW", "perda \(Int(comparison.lossPercent.rounded()))%", "+\(laDec1(s.sessionKwh)) kWh"]
+            parts = ["\(laDec1(comparison.chargerPowerKw))→\(laDec1(comparison.vehiclePowerKw)) kW", "perda \(Int(comparison.lossPercent.rounded()))%"]
         } else {
             parts = ["\(laDec1(s.powerKw)) kW", "+\(laDec1(s.sessionKwh)) kWh"]
+        }
+        if let chargerEnergy = s.chargerSessionKwh,
+           let comparison = ChargeEnergyComparison(chargerEnergyKwh: chargerEnergy, vehicleEnergyKwh: s.sessionKwh) {
+            parts.append("\(laDec1(comparison.chargerEnergyKwh))→\(laDec1(comparison.vehicleEnergyKwh)) kWh")
+        } else {
+            parts.append("+\(laDec1(s.sessionKwh)) kWh")
         }
         if s.remainingMin > 0 {
             let ready = s.updatedAt.addingTimeInterval(Double(s.remainingMin) * 60)
@@ -221,6 +227,20 @@ struct ChargeLockScreenView: View {
             }
             .font(.system(size: 10.5)).monospacedDigit().foregroundStyle(LAv2.text2)
             .lineLimit(1).minimumScaleFactor(0.7)
+            if let chargerEnergy = state.chargerSessionKwh,
+               let comparison = ChargeEnergyComparison(
+                chargerEnergyKwh: chargerEnergy, vehicleEnergyKwh: state.sessionKwh
+               ) {
+                HStack {
+                    Text("carregador \(laDec1(comparison.chargerEnergyKwh)) kWh")
+                    Spacer(minLength: 6)
+                    Text("carro \(laDec1(comparison.vehicleEnergyKwh)) kWh")
+                    Spacer(minLength: 6)
+                    Text("perda \(laDec1(comparison.lossKwh)) kWh · \(laDec1(comparison.lossPercent))%")
+                }
+                .font(.system(size: 10.5)).monospacedDigit().foregroundStyle(LAv2.text2)
+                .lineLimit(1).minimumScaleFactor(0.65)
+            }
             if #available(iOS 17.0, *) {
                 chargeLAButtons(state)
             }

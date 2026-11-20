@@ -23,12 +23,29 @@ struct ChargePowerComparison: Equatable {
     }
 }
 
+struct ChargeEnergyComparison: Equatable {
+    let chargerEnergyKwh: Double
+    let vehicleEnergyKwh: Double
+    let lossKwh: Double
+    let lossPercent: Double
+
+    init?(chargerEnergyKwh: Double, vehicleEnergyKwh: Double) {
+        guard chargerEnergyKwh.isFinite, vehicleEnergyKwh.isFinite,
+              chargerEnergyKwh > 0, vehicleEnergyKwh >= 0 else { return nil }
+        self.chargerEnergyKwh = chargerEnergyKwh
+        self.vehicleEnergyKwh = vehicleEnergyKwh
+        lossKwh = max(0, chargerEnergyKwh - vehicleEnergyKwh)
+        lossPercent = max(0, lossKwh / chargerEnergyKwh * 100)
+    }
+}
+
 struct ChargeActivityAttributes: ActivityAttributes {
     public struct ContentState: Codable, Hashable {
         var soc:          Double   // 0..100 — SOC %
         var powerKw:      Double   // potência instantânea
         var chargerPowerKw: Double? = nil // potência medida pelo carregador
         var sessionKwh:   Double   // energia já transferida na sessão
+        var chargerSessionKwh: Double? = nil // energia entregue pelo carregador
         var remainingMin: Int      // minutos restantes (0 = sem estimativa)
         var charging:     Bool     // false quando termina (estado final)
         var targetPct:    Double   // meta de SOC (limite de carga) — 100 se desconhecido

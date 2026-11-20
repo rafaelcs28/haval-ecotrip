@@ -40,7 +40,8 @@ const {
   validateChargeMeterConfig,
   validateChargeMeterConfigs,
 } = require('./charge-meter-catalog');
-const { listChargeMeterSessions } = require('./charge-meter-provider');
+const { getCurrentChargeMeterSession, listChargeMeterSessions } = require('./charge-meter-provider');
+const { selectLiveChargeMeter } = require('./charge-meter-live');
 const { reconcileChargeMeter, shouldRetryChargeMeter } = require('./charge-meter-reconciliation');
 
 // Sem isto, uma rejection/exception fora de rota (timer, callback MQTT, fetch em
@@ -11009,6 +11010,7 @@ app.get('/api/auth/passkey/available', (_req, res) => {
 
 app.get('/api/state',  (_req, res) => res.json({
   ...state, _field_source: _fieldSource,
+  ..._chargeMeterStateFields(),
   // Idade REAL da medição, pro app não escrever "agora" sobre dado de horas atrás.
   medicao_ms: _ultimaMedicaoMs(),
   // Navegação do AA. Reavaliada NA LEITURA: o probe manda a cada ~7s, então um _nav
@@ -11528,6 +11530,28 @@ app.get('/api/charge-meter/providers/:provider/chargers', async (req, res) => {
   } catch (error) {
     console.error(`[charge-meter:${provider}]`, error.message);
     res.status(502).json({ error: 'catálogo do provedor indisponível' });
+  }
+});
+
+app.get('/api/charge-meter/providers/:provider/current-session', async (req, res) => {
+  const provider = String(req.params.provider || '').toLowerCase();
+  const charger = String(req.query.charger || '').trim();
+  if (!chargeMeterProviders().some(item => item.id === provider)) {
+    return res.status(404).json({ error: 'provedor não encontrado' });
+  }
+  if (!charger) return res.status(400).json({ error: 'carregador obrigatório' });
+  try {
+    const item = await getCurrentChargeMeterSession(provider, charger, {
+      zeedaUrl: process.env.ZEEDA_GATEWAY_URL || 'http://127.0.0.1:8788',
+      yellotmobUrl: process.env.YELLOTMOB_URL || 'http://127.0.0.1:8790',
+      mhzmobUrl: `http://127.0.0.1:${PORT}`,
+      zeedaToken: BRIDGE_TOKEN_HASH,
+      mhzmobToken: BRIDGE_TOKEN_HASH,
+    });
+    res.json({ item });
+  } catch (error) {
+    console.error(`[charge-meter:${provider}:current]`, error.message);
+    res.status(502).json({ error: 'provedor indisponível' });
   }
 });
 
@@ -19899,15 +19923,19 @@ function _isLocked() { return state.lock_state === 'off'; }
 
 // Content-state da Live Activity de recarga (casa com ChargeActivityAttributes.ContentState).
 function _chargeContentState() {
+  const live = state.charging_state === 'Carregando' ? _chargeMeterLive : null;
+  const localCost = +(((+state.charge_session_kwh || 0) * (+state.price_kwh || 0)).toFixed(2));
   return {
     soc:          +state.soc_pct || 0,
     powerKw:      +state.charge_power_kw || 0,
+    chargerPowerKw: live?.power_kw ?? null,
     sessionKwh:   +state.charge_session_kwh || 0,
+    chargerSessionKwh: live?.energy_kwh ?? null,
     remainingMin: chargeEtaMin(),   // ETA calculado por nós (o do carro trava em ~5min)
     charging:     state.charging_state === 'Carregando',
     targetPct:    _effectiveChargeTarget(),
     locked:       _isLocked(),
-    costBrl:      +(((+state.charge_session_kwh || 0) * (+state.price_kwh || 0)).toFixed(2)),
+    costBrl:      live?.cost_brl ?? localCost,
     updatedAtMs:  Date.now(),
   };
 }
@@ -23046,8 +23074,70 @@ function handleChargingStateTransition(value, isRetained) {
 // quando SOC/potência mudam significativamente. Cada update substitui a
 // notif anterior pelo `tag` igual. Silent = true → atualiza sem ding/vibrar.
 let _chargeLiveTimer = null;
-let _chargeLiveLast  = { soc: -1, pwr: -1, rem: -1, ts: 0 };
+let _chargeLiveLast  = { soc: -1, pwr: -1, rem: -1, meter: '', ts: 0 };
+let _chargeMeterLiveTimer = null;
+let _chargeMeterLive = null;
 const CHARGE_LIVE_TAG = 'charge-live';
+
+function _chargeMeterStateFields() {
+  const item = state.charging_state === 'Carregando' ? _chargeMeterLive : null;
+  return {
+    charge_charger_provider: item?.provider ?? null,
+    charge_charger_id: item?.charger_id ?? null,
+    charge_charger_name: item?.charger_name ?? null,
+    charge_charger_power_kw: item?.power_kw ?? null,
+    charge_charger_kwh: item?.energy_kwh ?? null,
+    charge_charger_cost_brl: item?.cost_brl ?? null,
+    charge_charger_loss_kwh: item?.loss_kwh ?? null,
+    charge_charger_loss_pct: item?.loss_pct ?? null,
+    charge_charger_updated_at_ms: item?.updated_at_ms ?? null,
+  };
+}
+
+async function _refreshChargeMeterLive() {
+  if (state.charging_state !== 'Carregando') {
+    _chargeMeterLive = null;
+    return;
+  }
+  const place = matchKnownPlace(Number(state.gps_lat), Number(state.gps_lng));
+  const configs = place
+    ? chargeMeterConfigsFromPlace(place).filter(config => config.enabled !== false)
+    : [];
+  if (!configs.length) {
+    _chargeMeterLive = null;
+    return;
+  }
+  const sessionsByKey = {};
+  await Promise.all(configs.map(async config => {
+    try {
+      sessionsByKey[chargeMeterKey(config)] = await getCurrentChargeMeterSession(
+        config.provider,
+        config.charger_id,
+        {
+          zeedaUrl: process.env.ZEEDA_GATEWAY_URL || 'http://127.0.0.1:8788',
+          yellotmobUrl: process.env.YELLOTMOB_URL || 'http://127.0.0.1:8790',
+          mhzmobUrl: `http://127.0.0.1:${PORT}`,
+          zeedaToken: BRIDGE_TOKEN_HASH,
+          mhzmobToken: BRIDGE_TOKEN_HASH,
+        }
+      );
+    } catch (error) {
+      console.warn(`[charge-meter:${config.provider}:live] ${error.message}`);
+      sessionsByKey[chargeMeterKey(config)] = null;
+    }
+  }));
+  const signature = item => JSON.stringify(item && [
+    item.provider, item.charger_id, item.power_kw, item.energy_kwh, item.cost_brl,
+  ]);
+  const previous = signature(_chargeMeterLive);
+  _chargeMeterLive = selectLiveChargeMeter({
+    configs,
+    sessionsByKey,
+    vehicleKwh: Number(state.charge_session_kwh),
+    atMs: Number(state.charge_session_start_ms) || Date.now(),
+  }).item;
+  if (signature(_chargeMeterLive) !== previous) sendChargeLiveUpdate(false);
+}
 // Maior kWh visto na sessão atual. O APK zera o contador ao terminar a recarga,
 // então guardamos o total aqui pra a LA final NÃO mostrar 0 (fica fixo até o
 // usuário limpar a LA). Reseta ao iniciar uma nova sessão.
@@ -23114,6 +23204,8 @@ function sendChargeLiveUpdate(isFinal = false) {
   const soc = +state.soc_pct || 0;
   const pwr = +state.charge_power_kw || 0;
   const rem = chargeEtaMin();   // nosso ETA (o do carro trava em ~5min)
+  const meter = state.charging_state === 'Carregando' ? _chargeMeterLive : null;
+  const meterSig = JSON.stringify(meter && [meter.charger_id, meter.power_kw, meter.energy_kwh, meter.cost_brl]);
   const now = Date.now();
   if (!isFinal) {
     const dT = now - _chargeLiveLast.ts;
@@ -23125,10 +23217,10 @@ function sendChargeLiveUpdate(isFinal = false) {
     // significativa (SOC≥1%, potência≥0.5kW) ou se completou 60s sem update.
     const dSoc = Math.abs(soc - _chargeLiveLast.soc);
     const dPwr = Math.abs(pwr - _chargeLiveLast.pwr);
-    const significant = dSoc >= 1 || dPwr >= 0.5 || dT >= 60_000;
+    const significant = dSoc >= 1 || dPwr >= 0.5 || meterSig !== _chargeLiveLast.meter || dT >= 60_000;
     if (!significant) return;
   }
-  _chargeLiveLast = { soc, pwr, rem, ts: now };
+  _chargeLiveLast = { soc, pwr, rem, meter: meterSig, ts: now };
   // No final, usa o total guardado (o APK zera o contador ao terminar a recarga).
   const kwh   = isFinal ? Math.max(_chargeFinalKwh, +state.charge_session_kwh || 0) : (+state.charge_session_kwh || 0);
   const title = isFinal ? '✅ Recarga concluída' : '⚡ Carregando…';
@@ -23144,7 +23236,12 @@ function sendChargeLiveUpdate(isFinal = false) {
     skipApnsAlert: true,
     // Dados de estado embarcados no payload: o app nativo iOS usa para atualizar
     // a Live Activity diretamente a partir da notificação (sem fetch extra).
-    state: { soc, pwr, rem: Math.max(0, Math.round(rem)), kwh, charging: !isFinal },
+    state: {
+      soc, pwr, rem: Math.max(0, Math.round(rem)), kwh, charging: !isFinal,
+      charger_pwr: meter?.power_kw ?? null,
+      charger_kwh: meter?.energy_kwh ?? null,
+      cost_brl: meter?.cost_brl ?? null,
+    },
   });
   // Live Activity (iOS) via APNs — manda o mesmo content-state pra todos os
   // pushTokens registrados pelo app companion. No-op se APNS_ENABLED=false.
@@ -23164,12 +23261,15 @@ function sendChargeLiveUpdate(isFinal = false) {
     }
     apnsLive.pushUpdate('ChargeActivityAttributes', {}, {
       soc, powerKw: pwr,
+      chargerPowerKw: meter?.power_kw ?? null,
       // No final, usa o total guardado (o APK zera o contador ao terminar).
       sessionKwh: isFinal ? Math.max(_chargeFinalKwh, +state.charge_session_kwh || 0) : (+state.charge_session_kwh || 0),
+      chargerSessionKwh: meter?.energy_kwh ?? null,
       remainingMin: Math.max(0, Math.round(rem)),
       charging: !isFinal,
       targetPct: _effectiveChargeTarget(),
       locked: _isLocked(),
+      costBrl: meter?.cost_brl ?? null,
       updatedAtMs: now,
       // charging:false no final → o widget renderiza o doneBody (card-resumo verde).
     }, {
@@ -25551,7 +25651,11 @@ app.post('/api/apns/register', (req, res) => {
 
 function startChargeLiveTimer() {
   if (_chargeLiveTimer) return;
-  _chargeLiveLast = { soc: -1, pwr: -1, rem: -1, ts: 0 };
+  _chargeLiveLast = { soc: -1, pwr: -1, rem: -1, meter: '', ts: 0 };
+  _refreshChargeMeterLive().catch(error => console.warn('[charge-meter:live]', error.message));
+  _chargeMeterLiveTimer = setInterval(() => {
+    _refreshChargeMeterLive().catch(error => console.warn('[charge-meter:live]', error.message));
+  }, 15_000);
   // Aguarda 30s do início (potência estabilizar) antes da primeira live notif
   setTimeout(() => sendChargeLiveUpdate(false), 30_000);
   _chargeLiveTimer = setInterval(() => sendChargeLiveUpdate(false), 60_000);
@@ -25559,6 +25663,7 @@ function startChargeLiveTimer() {
 
 function stopChargeLiveTimer() {
   if (_chargeLiveTimer) { clearInterval(_chargeLiveTimer); _chargeLiveTimer = null; }
+  if (_chargeMeterLiveTimer) { clearInterval(_chargeMeterLiveTimer); _chargeMeterLiveTimer = null; }
 }
 
 /**

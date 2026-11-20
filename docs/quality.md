@@ -9,7 +9,7 @@ node --check bridge/gateway.js
 node --test bridge/test/charge-meter-*.test.js bridge/test/charge-location-links.test.js
 ```
 
-Os testes de medidores validam catálogo, compatibilidade legada, deduplicação, seleção temporal, tarifas, custo do provedor e normalização dos adaptadores com `fetch` simulado. Eles não substituem validação das rotas, autenticação ou runtime. Android e Apple compilam somente na fila autorizada.
+Os testes de medidores validam catálogo, compatibilidade legada, deduplicação, seleção temporal, sessões ativas, descarte de energia Zeeda obsoleta, tarifas, custo, perdas e normalização com `fetch` simulado. Eles não substituem validação das rotas, autenticação ou runtime. Android e Apple compilam somente na fila autorizada.
 
 ## Builds
 

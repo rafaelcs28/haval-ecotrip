@@ -820,10 +820,31 @@ struct DashV2View: View {
                         .foregroundStyle(store.chargePowerConfiavel ? DS.text : DS.muted)
                     Text("kW").font(.system(size: 13)).foregroundStyle(DS.muted)
                 }
-                Text("+\(Fmt.dec1(store.chargeSessionKwh)) kWh nesta sessão"
-                     + (store.chargeSessionKwhEstimada ? " · estimado pelo SOC" : ""))
-                    .font(.system(size: 12)).foregroundStyle(DS.text2)
-                    .lineLimit(1).minimumScaleFactor(0.85)
+                if let chargerPower = store.chargerPowerKw,
+                   let comparison = ChargePowerComparison(
+                    chargerPowerKw: chargerPower, vehiclePowerKw: store.chargePowerKw
+                   ) {
+                    Text("Carregador \(Fmt.dec1(comparison.chargerPowerKw)) → carro \(Fmt.dec1(comparison.vehiclePowerKw)) kW · perda \(Fmt.dec1(comparison.lossPercent))%")
+                        .font(.system(size: 11)).foregroundStyle(DS.text2)
+                        .lineLimit(1).minimumScaleFactor(0.75)
+                }
+                if let chargerEnergy = store.chargerSessionKwh,
+                   let comparison = ChargeEnergyComparison(
+                    chargerEnergyKwh: chargerEnergy, vehicleEnergyKwh: store.chargeSessionKwh
+                   ) {
+                    Text("\(Fmt.dec1(comparison.chargerEnergyKwh)) → \(Fmt.dec1(comparison.vehicleEnergyKwh)) kWh · perda \(Fmt.dec1(comparison.lossKwh)) kWh (\(Fmt.dec1(comparison.lossPercent))%)")
+                        .font(.system(size: 12)).foregroundStyle(DS.text2)
+                        .lineLimit(1).minimumScaleFactor(0.72)
+                } else {
+                    Text("+\(Fmt.dec1(store.chargeSessionKwh)) kWh nesta sessão"
+                         + (store.chargeSessionKwhEstimada ? " · estimado pelo SOC" : ""))
+                        .font(.system(size: 12)).foregroundStyle(DS.text2)
+                        .lineLimit(1).minimumScaleFactor(0.85)
+                }
+                if let cost = store.chargerCostBrl {
+                    Text("R$ \(Fmt.dec2(cost))")
+                        .font(.system(size: 11.5, weight: .semibold)).foregroundStyle(DS.green)
+                }
             }
             Spacer()
             VStack(alignment: .trailing, spacing: 4) {

@@ -80,10 +80,17 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
             let soc = (data["soc"] as? Double) ?? 0
             let pwr = (data["pwr"] as? Double) ?? 0
             let chargerPwr = data["charger_pwr"] as? Double
+            let chargerKwh = data["charger_kwh"] as? Double
+            let costBrl = data["cost_brl"] as? Double
             let rem = (data["rem"] as? Double) ?? 0
             let kwh = (data["kwh"] as? Double) ?? 0
             if soc > 0 || pwr > 0 {
-                Task { await ActivityManager.updateFromPayload(soc: soc, pwr: pwr, chargerPwr: chargerPwr, rem: rem, kwh: kwh) }
+                Task {
+                    await ActivityManager.updateFromPayload(
+                        soc: soc, pwr: pwr, chargerPwr: chargerPwr, rem: rem,
+                        kwh: kwh, chargerKwh: chargerKwh, costBrl: costBrl
+                    )
+                }
             }
             completionHandler([.list])   // silencioso, sem banner, só central
         } else {

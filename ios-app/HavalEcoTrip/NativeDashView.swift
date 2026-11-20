@@ -536,6 +536,17 @@ struct NativeDashView: View {
                     DSMetric(value: store.chargeRemainingMin > 0 ? "\(store.chargeRemainingMin)" : "—", unit: "min", label: "Faltam")
                     DSMetric(value: f0(store.rangeEvKm), unit: "km", label: "Autonomia")
                 }
+                if let chargerPower = store.chargerPowerKw,
+                   let comparison = ChargePowerComparison(chargerPowerKw: chargerPower, vehiclePowerKw: store.chargePowerKw) {
+                    Text("Carregador \(f1(comparison.chargerPowerKw)) → carro \(f1(comparison.vehiclePowerKw)) kW · perda \(f1(comparison.lossPercent))%")
+                        .font(.caption).foregroundStyle(DS.text2)
+                }
+                if let chargerEnergy = store.chargerSessionKwh,
+                   let comparison = ChargeEnergyComparison(chargerEnergyKwh: chargerEnergy, vehicleEnergyKwh: store.chargeSessionKwh) {
+                    Text("Energia \(f1(comparison.chargerEnergyKwh)) → \(f1(comparison.vehicleEnergyKwh)) kWh · perda \(f1(comparison.lossKwh)) kWh (\(f1(comparison.lossPercent))%)"
+                         + (store.chargerCostBrl.map { " · R$ \(Fmt.dec2($0))" } ?? ""))
+                        .font(.caption).foregroundStyle(DS.text2)
+                }
             }
         }
         .contextMenu {

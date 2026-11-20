@@ -522,6 +522,10 @@ final class CarStore: ObservableObject {
         default: return 0
         }
     }
+    func optionalNum(_ key: String) -> Double? {
+        guard raw[key] != nil, !(raw[key] is NSNull) else { return nil }
+        return num(key)
+    }
     func str(_ key: String) -> String {
         switch raw[key] {
         case let s as String: return s
@@ -750,6 +754,9 @@ final class CarStore: ObservableObject {
     /// Último estado conhecido, sem exigir frescor (histórico/diagnóstico).
     var chargingStateBruto: String { chargingState }
     var chargePowerKw: Double  { num("charge_power_kw") }
+    var chargerPowerKw: Double? { optionalNum("charge_charger_power_kw") }
+    var chargerSessionKwh: Double? { optionalNum("charge_charger_kwh") }
+    var chargerCostBrl: Double? { optionalNum("charge_charger_cost_brl") }
     /// `charge_power_kw` e `charge_session_kwh` vêm SÓ do APK. Com ele caído, zero medido
     /// e zero por ausência ficavam indistinguíveis — o card afirmava "0,0 kW · +0,0 kWh"
     /// com o carro carregando (19/08). O bridge marca a confiabilidade e deriva a energia
