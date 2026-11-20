@@ -23019,6 +23019,7 @@ function handleChargingStateTransition(value, isRetained) {
       const aTitle = '⚠️ Carregamento interrompido';
       const aBody  = `Parou em ${endSoc.toFixed(0)}% (alvo ${effTarget}%). Verifique o carregamento.`;
       const finalKwh = Math.max(_chargeFinalKwh, +state.charge_session_kwh || 0);
+      const finalMeter = _chargeMeterLive;
       // Debounce 90s: parada pode ser breve (carro pausa e retoma). Só alerta se
       // continuar parado após 90s. Religar (value 'Carregando') cancela o timer.
       if (_chargeStoppedTimer) clearTimeout(_chargeStoppedTimer);
@@ -23033,7 +23034,7 @@ function handleChargingStateTransition(value, isRetained) {
           stopChargeLiveTimer();
           apnsLive.pushUpdate('ChargeActivityAttributes', {}, {
             soc: endSoc, powerKw: 0, sessionKwh: finalKwh,
-            ...chargeMeterContentFields(_chargeMeterLive),
+            ...chargeMeterContentFields(finalMeter),
             remainingMin: 0, charging: false,
             targetPct: effTarget, locked: _isLocked(), updatedAtMs: Date.now(),
           }, { isFinal: true, dismissalDate: Date.now() + 30 * 60_000, alert: { title: aTitle, body: aBody } })
