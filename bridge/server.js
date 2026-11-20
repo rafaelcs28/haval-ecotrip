@@ -42,7 +42,7 @@ const {
 } = require('./charge-meter-catalog');
 const { getCurrentChargeMeterSession, listChargeMeterSessions } = require('./charge-meter-provider');
 const { selectLiveChargeMeter } = require('./charge-meter-live');
-const { reconcileChargeMeter, shouldRetryChargeMeter } = require('./charge-meter-reconciliation');
+const { reconcileChargeMeter, shouldFillChargeMeterEnergy, shouldRetryChargeMeter } = require('./charge-meter-reconciliation');
 
 // Sem isto, uma rejection/exception fora de rota (timer, callback MQTT, fetch em
 // background) derrubava o processo inteiro. Loga e segue — pm2 só reinicia em crash real.
@@ -11640,7 +11640,7 @@ async function _reconcileChargeMeterRecord(charge) {
     const index = chargesArr.findIndex(item => Number(item.timestamp_ms) === timestamp);
     const before = structuredClone(charge);
     let costChanged = false;
-    if (Number(charge.charger_kwh) <= 0 && Number(result.charger_kwh) > 0) {
+    if (shouldFillChargeMeterEnergy(charge.charger_kwh, result.charger_kwh)) {
       charge.charger_kwh = result.charger_kwh;
     }
     if (charge.cost_override == null && result.cost_override != null) {

@@ -73,6 +73,10 @@ function shouldRetryChargeMeter(status, nowMs, deadlineMs) {
   return status !== 'matched' && Number(nowMs) < Number(deadlineMs);
 }
 
+function shouldFillChargeMeterEnergy(current, candidate) {
+  return !(Number(current) > 0) && Number(candidate) > 0;
+}
+
 function reconcileChargeMeter({ charge, configs, sessionsByKey }) {
   const chargeEnd = Number(charge?.timestamp_ms);
   const durationMs = Number(charge?.duration_sec) * 1000;
@@ -149,5 +153,6 @@ function reconcileChargeMeter({ charge, configs, sessionsByKey }) {
 module.exports = {
   deduplicateSessions,
   reconcileChargeMeter,
+  shouldFillChargeMeterEnergy,
   shouldRetryChargeMeter,
 };
