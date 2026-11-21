@@ -1,8 +1,9 @@
 //
 //  ChargeActivityLiveActivity.swift
-//  Live Activity de recarga — estilo v2 Rodada 10 (frame 10a): SOC é o hero
-//  (o número que cresce), kW/kWh/custo descem pra régua de micro-métricas.
-//  Concluída → variante verde de confirmação (anatomia da pós-Travar 9b).
+//  Live Activity de recarga — redesign 2026-11: SOC e "pronto às" são o hero;
+//  potência, energia e custo numa grade de três colunas (carro em cima, tomada
+//  embaixo); uma única perda, a da sessão. Frescor em hora absoluta, âmbar
+//  quando a atividade fica stale. Concluída → variante verde de confirmação.
 //
 import ActivityKit
 import AppIntents
@@ -55,7 +56,8 @@ private func chargeLAButtons(_ s: ChargeActivityAttributes.ContentState) -> some
 struct ChargeActivityLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: ChargeActivityAttributes.self) { context in
-            ChargeLockScreenView(state: context.state, carName: context.attributes.carName)
+            ChargeLockScreenView(state: context.state, carName: context.attributes.carName,
+                                 isStale: context.isStale)
                 .activityBackgroundTint(LAv2.bg)
                 .activitySystemActionForegroundColor(LAv2.green)
 
@@ -63,44 +65,44 @@ struct ChargeActivityLiveActivity: Widget {
             let s = context.state
             return DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
-                    Image(systemName: s.charging ? "bolt.fill" : "checkmark")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(LAv2.green)
-                        .frame(width: 40, height: 40)
-                        .background(LAv2.green.opacity(0.15), in: Circle())
+                    HStack(spacing: 8) {
+                        CarChargeRing(soc: s.soc, charging: s.charging, accent: LAv2.green)
+                        Text("\(Int(s.soc))%")
+                            .font(.system(size: 22, weight: .light)).monospacedDigit()
+                            .foregroundStyle(LAv2.green)
+                            .lineLimit(1).minimumScaleFactor(0.7)
+                    }
+                    .padding(.leading, 4)
                 }
-                DynamicIslandExpandedRegion(.center) {
-                    VStack(alignment: .leading, spacing: 2) {
+                DynamicIslandExpandedRegion(.trailing) {
+                    VStack(alignment: .trailing, spacing: 1) {
                         if s.charging {
-                            (Text("\(Int(s.soc))%").foregroundStyle(LAv2.green)
-                                + Text(" · \(chargeRemainingShort(s.remainingMin)) restante").foregroundStyle(LAv2.text))
+                            chargeReadyText(s)
                                 .font(.system(size: 13, weight: .semibold)).monospacedDigit()
+                                .foregroundStyle(LAv2.text)
                                 .lineLimit(1).minimumScaleFactor(0.7)
-                            Text(diSubline(s))
-                                .font(.system(size: 11.5)).monospacedDigit().foregroundStyle(LAv2.text2)
-                                .lineLimit(1).minimumScaleFactor(0.6)
+                            Text(chargeTimingLine(s))
+                                .font(.system(size: 11)).monospacedDigit().foregroundStyle(LAv2.text2)
+                                .lineLimit(1).minimumScaleFactor(0.7)
                         } else {
-                            Text("Recarga concluída · \(Int(s.soc))%")
-                                .font(.system(size: 13, weight: .semibold)).monospacedDigit()
+                            Text("Recarga concluída")
+                                .font(.system(size: 13, weight: .semibold))
                                 .foregroundStyle(LAv2.green)
                         }
                     }
-                }
-                DynamicIslandExpandedRegion(.trailing) {
-                    if s.charging {
-                        VStack(alignment: .trailing, spacing: 3) {
-                            LACaps(text: "live", color: LAv2.green)
-                            if s.targetPct > 0, s.targetPct < 100 {
-                                Text("→ \(Int(s.targetPct))%")
-                                    .font(.system(size: 11, weight: .semibold)).monospacedDigit()
-                                    .foregroundStyle(LAv2.muted)
-                            }
-                        }
-                    }
+                    .padding(.trailing, 4)
                 }
                 DynamicIslandExpandedRegion(.bottom) {
-                    if #available(iOS 17.0, *), s.charging {
-                        chargeLAButtons(s)
+                    VStack(spacing: 6) {
+                        if s.charging {
+                            ChargeProgressBar(soc: s.soc, targetPct: s.targetPct, height: 6)
+                        }
+                        Text(diSubline(s))
+                            .font(.system(size: 11.5)).monospacedDigit().foregroundStyle(LAv2.text2)
+                            .lineLimit(1).minimumScaleFactor(0.6)
+                        if #available(iOS 17.0, *), s.charging {
+                            chargeLAButtons(s)
+                        }
                     }
                 }
             } compactLeading: {
@@ -117,161 +119,184 @@ struct ChargeActivityLiveActivity: Widget {
     }
 
     private func diSubline(_ s: ChargeActivityAttributes.ContentState) -> String {
-        var parts: [String]
-        if let chargerPower = s.chargerPowerKw,
-           let comparison = ChargePowerComparison(chargerPowerKw: chargerPower, vehiclePowerKw: s.powerKw) {
-            parts = ["\(laDec1(comparison.chargerPowerKw))→\(laDec1(comparison.vehiclePowerKw)) kW", "perda \(Int(comparison.lossPercent.rounded()))%"]
-        } else {
-            parts = ["\(laDec1(s.powerKw)) kW", "+\(laDec1(s.sessionKwh)) kWh"]
-        }
-        if let chargerEnergy = s.chargerSessionKwh,
-           let comparison = ChargeEnergyComparison(chargerEnergyKwh: chargerEnergy, vehicleEnergyKwh: s.sessionKwh) {
-            parts.append("\(laDec1(comparison.chargerEnergyKwh))→\(laDec1(comparison.vehicleEnergyKwh)) kWh")
-        } else {
-            parts.append("+\(laDec1(s.sessionKwh)) kWh")
-        }
-        if s.remainingMin > 0 {
-            let ready = s.updatedAt.addingTimeInterval(Double(s.remainingMin) * 60)
-            let f = DateFormatter(); f.dateFormat = "HH:mm"
-            parts.append("pronto ~ \(f.string(from: ready))")
-        }
+        var parts = [s.charging ? "\(laDec1(s.powerKw)) kW" : nil, "+\(laDec1(s.sessionKwh)) kWh"].compactMap { $0 }
+        if let c = s.costBrl, c > 0 { parts.append("R$ \(laDec2(c))") }
+        if let loss = chargeSessionLossPercent(s) { parts.append("perda \(Int(loss.rounded()))%") }
         return parts.joined(separator: " · ")
+    }
+}
+
+// "pronto às 14:59" (ou "sem previsão" quando o carro não estima o fim).
+private func chargeReadyText(_ s: ChargeActivityAttributes.ContentState) -> Text {
+    guard s.remainingMin > 0 else { return Text("sem previsão") }
+    let ready = s.updatedAt.addingTimeInterval(Double(s.remainingMin) * 60)
+    return Text("pronto às ") + Text(ready, format: .dateTime.hour().minute())
+}
+
+// "faltam 13 min · limite 80%"
+private func chargeTimingLine(_ s: ChargeActivityAttributes.ContentState) -> String {
+    var parts: [String] = []
+    if s.remainingMin > 0 { parts.append("faltam \(chargeRemainingShort(s.remainingMin))") }
+    if s.targetPct > 0 { parts.append("limite \(Int(s.targetPct))%") }
+    return parts.joined(separator: " · ")
+}
+
+// Perda da sessão (energia da tomada vs. energia que entrou no carro); na falta
+// do medidor de energia, a perda instantânea pela potência. Uma perda só na tela.
+private func chargeSessionLossPercent(_ s: ChargeActivityAttributes.ContentState) -> Double? {
+    if let chargerEnergy = s.chargerSessionKwh,
+       let energy = ChargeEnergyComparison(chargerEnergyKwh: chargerEnergy, vehicleEnergyKwh: s.sessionKwh) {
+        return energy.lossPercent
+    }
+    if s.charging, let chargerPower = s.chargerPowerKw,
+       let power = ChargePowerComparison(chargerPowerKw: chargerPower, vehiclePowerKw: s.powerKw) {
+        return power.lossPercent
+    }
+    return nil
+}
+
+// Barra plana: preenchimento verde até o SOC e traço amarelo no limite (< 100%).
+private struct ChargeProgressBar: View {
+    let soc: Double
+    let targetPct: Double
+    var height: CGFloat = 8
+
+    var body: some View {
+        GeometryReader { geo in
+            let w = geo.size.width
+            let frac = CGFloat(min(100, max(0, soc)) / 100)
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color.white.opacity(0.12)).frame(height: height)
+                Capsule().fill(LAv2.green)
+                    .frame(width: max(height, w * frac), height: height)
+                if targetPct > 0, targetPct < 100 {
+                    RoundedRectangle(cornerRadius: 1)
+                        .fill(Color(red: 0.980, green: 0.800, blue: 0.082))
+                        .frame(width: 2, height: height + 5)
+                        .offset(x: w * CGFloat(targetPct / 100) - 1)
+                }
+            }
+            .frame(height: height + 5, alignment: .leading)
+        }
+        .frame(height: height + 5)
+        .accessibilityHidden(true)
     }
 }
 
 struct ChargeLockScreenView: View {
     let state: ChargeActivityAttributes.ContentState
     let carName: String
-
-    private var readyAt: Date? {
-        guard state.charging, state.remainingMin > 0 else { return nil }
-        return state.updatedAt.addingTimeInterval(Double(state.remainingMin) * 60)
-    }
+    var isStale: Bool = false
 
     var body: some View {
         Group {
             if state.charging { chargingBody } else { doneBody }
         }
         .padding(.horizontal, 14).padding(.vertical, 8)
-        .background(alignment: .topTrailing) {
-            RadialGradient(colors: [LAv2.green.opacity(0.14), .clear],
-                           center: .topTrailing, startRadius: 0, endRadius: 220)
-        }
     }
 
-    // Variante em andamento — SOC hero + barra com ponto + régua de métricas.
+    // A tela bloqueada limita a Live Activity a ~160 pt: cabeçalho, hero,
+    // barra, grade de duas linhas e botões cabem nesse orçamento.
     private var chargingBody: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            // Header: tile raio + carro | dot + frescor
-            HStack(spacing: 7) {
-                Image(systemName: "bolt.fill")
-                    .font(.system(size: 9, weight: .bold)).foregroundStyle(.black)
-                    .frame(width: 17, height: 17)
-                    .background(LAv2.green, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
-                Text("\(carName) · carregando")
-                    .font(.system(size: 11.5, weight: .semibold)).foregroundStyle(LAv2.text2)
-                    .lineLimit(1).minimumScaleFactor(0.7)
-                Spacer(minLength: 6)
-                Circle().fill(LAv2.green).frame(width: 5, height: 5)
-                (Text("há ") + Text(state.updatedAt, style: .relative))
-                    .font(.system(size: 10)).foregroundStyle(LAv2.muted)
-                    .lineLimit(1)
-            }
-            // Hero: SOC → meta | restante · pronto ~ (uma linha só)
-            HStack(alignment: .firstTextBaseline, spacing: 5) {
-                Text("\(Int(state.soc))")
-                    .font(.system(size: 28, weight: .light)).tracking(-1)
-                    .monospacedDigit().foregroundStyle(LAv2.green)
-                    .lineLimit(1).minimumScaleFactor(0.7)
-                Text("%").font(.system(size: 13)).foregroundStyle(LAv2.green)
-                if state.targetPct > 0, state.targetPct < 100 {
-                    Text("→ \(Int(state.targetPct))%")
-                        .font(.system(size: 11.5, weight: .semibold)).monospacedDigit()
-                        .foregroundStyle(LAv2.text2)
-                }
-                Spacer(minLength: 8)
-                (Text("\(chargeRemainingShort(state.remainingMin)) restante")
-                    .font(.system(size: 12.5, weight: .semibold)).foregroundColor(LAv2.text)
-                    + Text(readyAt.map { r in
-                        " · ~ " + r.formatted(.dateTime.hour().minute())
-                    } ?? "")
-                    .font(.system(size: 11)).foregroundColor(LAv2.text2))
-                    .monospacedDigit()
-                    .lineLimit(1).minimumScaleFactor(0.7)
-            }
-            .frame(height: 28)
-            progressBar
-            // Régua de micro-métricas
-            if let chargerPower = state.chargerPowerKw,
-               let comparison = ChargePowerComparison(chargerPowerKw: chargerPower, vehiclePowerKw: state.powerKw) {
-                HStack {
-                    Text("carregador \(laDec1(comparison.chargerPowerKw)) kW")
-                    Spacer(minLength: 6)
-                    Text("carro \(laDec1(comparison.vehiclePowerKw)) kW")
-                    Spacer(minLength: 6)
-                    Text("perda \(laDec1(comparison.lossPercent))%")
-                }
-                .font(.system(size: 10.5)).monospacedDigit().foregroundStyle(LAv2.text2)
-                .lineLimit(1).minimumScaleFactor(0.7)
-            }
-            HStack {
-                if state.chargerPowerKw.flatMap({ ChargePowerComparison(chargerPowerKw: $0, vehiclePowerKw: state.powerKw) }) == nil {
-                    Text("\(laDec1(state.powerKw)) kW")
-                }
-                Spacer(minLength: 6)
-                Text("+\(laDec1(state.sessionKwh)) kWh")
-                if let c = state.costBrl, c > 0 {
-                    Spacer(minLength: 6)
-                    Text("R$ \(laDec2(c))")
-                }
-            }
-            .font(.system(size: 10.5)).monospacedDigit().foregroundStyle(LAv2.text2)
-            .lineLimit(1).minimumScaleFactor(0.7)
-            if let chargerEnergy = state.chargerSessionKwh,
-               let comparison = ChargeEnergyComparison(
-                chargerEnergyKwh: chargerEnergy, vehicleEnergyKwh: state.sessionKwh
-               ) {
-                HStack {
-                    Text("carregador \(laDec1(comparison.chargerEnergyKwh)) kWh")
-                    Spacer(minLength: 6)
-                    Text("carro \(laDec1(comparison.vehicleEnergyKwh)) kWh")
-                    Spacer(minLength: 6)
-                    Text("perda \(laDec1(comparison.lossKwh)) kWh · \(laDec1(comparison.lossPercent))%")
-                }
-                .font(.system(size: 10.5)).monospacedDigit().foregroundStyle(LAv2.text2)
-                .lineLimit(1).minimumScaleFactor(0.65)
-            }
+        VStack(alignment: .leading, spacing: 6) {
+            header
+            hero
+            ChargeProgressBar(soc: state.soc, targetPct: state.targetPct)
+            metrics
             if #available(iOS 17.0, *) {
                 chargeLAButtons(state)
             }
         }
     }
 
-    // Barra h8: fill green até o SOC, ponto branco 10px com glow, tick amarelo no limite.
-    private var progressBar: some View {
-        GeometryReader { geo in
-            let w = geo.size.width
-            let frac = CGFloat(min(100, max(0, state.soc)) / 100)
-            ZStack(alignment: .leading) {
-                Capsule().fill(Color.black.opacity(0.55)).frame(height: 8)
-                Capsule()
-                    .fill(LinearGradient(colors: [LAv2.green.opacity(0.55), LAv2.green],
-                                         startPoint: .leading, endPoint: .trailing))
-                    .frame(width: max(8, w * frac), height: 8)
-                if state.targetPct > 0, state.targetPct < 100 {
-                    RoundedRectangle(cornerRadius: 1)
-                        .fill(Color(red: 0.980, green: 0.800, blue: 0.082))
-                        .frame(width: 2, height: 13)
-                        .offset(x: w * CGFloat(state.targetPct / 100) - 1)
-                }
-                Circle().fill(.white)
-                    .frame(width: 10, height: 10)
-                    .shadow(color: LAv2.green.opacity(0.6), radius: 3)
-                    .offset(x: max(0, min(w - 10, w * frac - 5)))
-            }
-            .frame(height: 13, alignment: .leading)
+    // Carro | ponto + "atualizado 14:46" (âmbar "sem atualização desde" quando stale).
+    private var header: some View {
+        HStack(spacing: 7) {
+            Image(systemName: "bolt.fill")
+                .font(.system(size: 9, weight: .bold)).foregroundStyle(.black)
+                .frame(width: 17, height: 17)
+                .background(LAv2.green, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                .accessibilityHidden(true)
+            Text(carName)
+                .font(.system(size: 12, weight: .semibold)).foregroundStyle(LAv2.text)
+                .lineLimit(1).minimumScaleFactor(0.7)
+            Spacer(minLength: 6)
+            Circle().fill(isStale ? LAv2.orange : LAv2.green).frame(width: 5, height: 5)
+                .accessibilityHidden(true)
+            (Text(isStale ? "sem atualização desde " : "atualizado ")
+                + Text(state.updatedAt, format: .dateTime.hour().minute()))
+                .font(.system(size: 10.5)).monospacedDigit()
+                .foregroundStyle(isStale ? LAv2.orange : LAv2.text2)
+                .lineLimit(1).minimumScaleFactor(0.7)
         }
-        .frame(height: 13)
+    }
+
+    // SOC grande | "pronto às 14:59" com "faltam 13 min · limite 100%" embaixo.
+    private var hero: some View {
+        HStack(alignment: .bottom, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 3) {
+                Text("\(Int(state.soc))")
+                    .font(.system(size: 32, weight: .light)).tracking(-1)
+                    .monospacedDigit().foregroundStyle(LAv2.green)
+                Text("%").font(.system(size: 15)).foregroundStyle(LAv2.green)
+            }
+            .lineLimit(1)
+            Spacer(minLength: 8)
+            VStack(alignment: .trailing, spacing: 1) {
+                chargeReadyText(state)
+                    .font(.system(size: 15, weight: .semibold)).monospacedDigit()
+                    .foregroundStyle(LAv2.text)
+                    .lineLimit(1).minimumScaleFactor(0.7)
+                Text(chargeTimingLine(state))
+                    .font(.system(size: 11)).monospacedDigit().foregroundStyle(LAv2.text2)
+                    .lineLimit(1).minimumScaleFactor(0.7)
+            }
+        }
+        .frame(height: 36)
+    }
+
+    // Grade de três colunas: valor do carro em cima, valor da tomada embaixo.
+    private var metrics: some View {
+        let power = state.chargerPowerKw.flatMap {
+            ChargePowerComparison(chargerPowerKw: $0, vehiclePowerKw: state.powerKw)
+        }
+        let energy = state.chargerSessionKwh.flatMap {
+            ChargeEnergyComparison(chargerEnergyKwh: $0, vehicleEnergyKwh: state.sessionKwh)
+        }
+        let loss = chargeSessionLossPercent(state).map { "perda \(Int($0.rounded()))%" }
+        let cost = state.costBrl.flatMap { $0 > 0 ? "R$ \(laDec2($0))" : nil }
+        return HStack(alignment: .top, spacing: 8) {
+            metric(value: "\(laDec1(state.powerKw)) kW",
+                   sub: power.map { "tomada \(laDec1($0.chargerPowerKw)) kW" },
+                   alignment: .leading)
+            metric(value: "+\(laDec1(state.sessionKwh)) kWh",
+                   sub: energy.map { "tomada \(laDec1($0.chargerEnergyKwh)) kWh" },
+                   alignment: .center)
+            if let cost {
+                metric(value: cost, sub: loss, alignment: .trailing, subColor: LAv2.orange)
+            } else if let loss {
+                metric(value: loss, sub: nil, alignment: .trailing, valueColor: LAv2.orange)
+            } else {
+                Color.clear.frame(maxWidth: .infinity, maxHeight: 1)
+            }
+        }
+    }
+
+    private func metric(value: String, sub: String?, alignment: HorizontalAlignment,
+                        valueColor: Color = LAv2.text, subColor: Color = LAv2.text2) -> some View {
+        let frameAlignment: Alignment = alignment == .leading ? .leading
+            : (alignment == .trailing ? .trailing : .center)
+        return VStack(alignment: alignment, spacing: 1) {
+            Text(value)
+                .font(.system(size: 13.5, weight: .semibold)).monospacedDigit()
+                .foregroundStyle(valueColor)
+            if let sub {
+                Text(sub)
+                    .font(.system(size: 10.5)).monospacedDigit().foregroundStyle(subColor)
+            }
+        }
+        .lineLimit(1).minimumScaleFactor(0.7)
+        .frame(maxWidth: .infinity, alignment: frameAlignment)
     }
 
     // Variante verde de confirmação — bridge encerra com stale/dismissal.
@@ -279,23 +304,25 @@ struct ChargeLockScreenView: View {
         HStack(spacing: 12) {
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 34)).foregroundStyle(LAv2.green)
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Recarga concluída · \(Int(state.soc))%")
-                    .font(.system(size: 13, weight: .semibold)).monospacedDigit()
+                    .font(.system(size: 14, weight: .semibold)).monospacedDigit()
                     .foregroundStyle(LAv2.text)
                 Text(doneSub)
-                    .font(.system(size: 10.5)).monospacedDigit().foregroundStyle(LAv2.text2)
+                    .font(.system(size: 11)).monospacedDigit().foregroundStyle(LAv2.text2)
                     .lineLimit(1).minimumScaleFactor(0.7)
             }
             Spacer(minLength: 6)
             Text(state.updatedAt, format: .dateTime.hour().minute())
-                .font(.system(size: 11)).monospacedDigit().foregroundStyle(LAv2.muted)
+                .font(.system(size: 11)).monospacedDigit().foregroundStyle(LAv2.text2)
         }
     }
 
     private var doneSub: String {
-        var s = "+\(laDec1(state.sessionKwh)) kWh"
-        if let c = state.costBrl, c > 0 { s += " · R$ \(laDec2(c))" }
-        return s
+        var parts = ["+\(laDec1(state.sessionKwh)) kWh"]
+        if let c = state.costBrl, c > 0 { parts.append("R$ \(laDec2(c))") }
+        if let loss = chargeSessionLossPercent(state) { parts.append("perda \(Int(loss.rounded()))%") }
+        return parts.joined(separator: " · ")
     }
 }
