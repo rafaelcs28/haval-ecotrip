@@ -1,9 +1,9 @@
 //
 //  ChargeActivityLiveActivity.swift
-//  Live Activity de recarga — redesign 2026-11: SOC e "pronto às" são o hero;
-//  potência, energia e custo numa grade de três colunas (carro em cima, tomada
-//  embaixo); uma única perda, a da sessão. Frescor em hora absoluta, âmbar
-//  quando a atividade fica stale. Concluída → variante verde de confirmação.
+//  Live Activity de recarga — redesign 2026-11 (fluxo compacto): SOC e "pronto
+//  às" no hero; duas linhas de fluxo, carregador → carro (perda agora) e
+//  fornecidos → recebidos (perda da sessão · custo). Frescor em hora absoluta,
+//  âmbar quando stale. Concluída → variante verde de confirmação.
 //
 import ActivityKit
 import AppIntents
@@ -195,14 +195,14 @@ struct ChargeLockScreenView: View {
         .padding(.horizontal, 14).padding(.vertical, 8)
     }
 
-    // A tela bloqueada limita a Live Activity a ~160 pt: cabeçalho, hero,
-    // barra, grade de duas linhas e botões cabem nesse orçamento.
+    // A tela bloqueada limita a Live Activity a ~160 pt: cabeçalho, hero de uma
+    // linha, barra, duas linhas de fluxo e botões cabem nesse orçamento.
     private var chargingBody: some View {
         VStack(alignment: .leading, spacing: 6) {
             header
             hero
             ChargeProgressBar(soc: state.soc, targetPct: state.targetPct)
-            metrics
+            flows
             if #available(iOS 17.0, *) {
                 chargeLAButtons(state)
             }
@@ -217,7 +217,7 @@ struct ChargeLockScreenView: View {
                 .frame(width: 17, height: 17)
                 .background(LAv2.green, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
                 .accessibilityHidden(true)
-            Text(carName)
+            Text("\(carName) · Carregando")
                 .font(.system(size: 12, weight: .semibold)).foregroundStyle(LAv2.text)
                 .lineLimit(1).minimumScaleFactor(0.7)
             Spacer(minLength: 6)
@@ -231,10 +231,10 @@ struct ChargeLockScreenView: View {
         }
     }
 
-    // SOC grande | "pronto às 14:59" com "faltam 13 min · limite 100%" embaixo.
+    // SOC grande | "pronto às 15:02 · 6 min" numa linha só.
     private var hero: some View {
-        HStack(alignment: .bottom, spacing: 8) {
-            HStack(alignment: .firstTextBaseline, spacing: 3) {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 2) {
                 Text("\(Int(state.soc))")
                     .font(.system(size: 32, weight: .light)).tracking(-1)
                     .monospacedDigit().foregroundStyle(LAv2.green)
@@ -242,61 +242,71 @@ struct ChargeLockScreenView: View {
             }
             .lineLimit(1)
             Spacer(minLength: 8)
-            VStack(alignment: .trailing, spacing: 1) {
-                chargeReadyText(state)
-                    .font(.system(size: 15, weight: .semibold)).monospacedDigit()
-                    .foregroundStyle(LAv2.text)
-                    .lineLimit(1).minimumScaleFactor(0.7)
-                Text(chargeTimingLine(state))
-                    .font(.system(size: 11)).monospacedDigit().foregroundStyle(LAv2.text2)
-                    .lineLimit(1).minimumScaleFactor(0.7)
-            }
+            (chargeReadyText(state).font(.system(size: 15, weight: .semibold)).foregroundColor(LAv2.text)
+                + Text(state.remainingMin > 0 ? " · \(chargeRemainingShort(state.remainingMin))" : "")
+                    .font(.system(size: 13)).foregroundColor(LAv2.text2))
+                .monospacedDigit()
+                .lineLimit(1).minimumScaleFactor(0.7)
         }
-        .frame(height: 36)
+        .frame(height: 34)
     }
 
-    // Grade de três colunas: valor do carro em cima, valor da tomada embaixo.
-    private var metrics: some View {
+    // Fluxo em duas linhas: potência (carregador → carro, perda agora) e energia
+    // (fornecidos → recebidos, perda da sessão · custo). Sem medidor do carregador,
+    // a linha mostra só o lado do carro.
+    private var flows: some View {
         let power = state.chargerPowerKw.flatMap {
             ChargePowerComparison(chargerPowerKw: $0, vehiclePowerKw: state.powerKw)
         }
         let energy = state.chargerSessionKwh.flatMap {
             ChargeEnergyComparison(chargerEnergyKwh: $0, vehicleEnergyKwh: state.sessionKwh)
         }
-        let loss = chargeSessionLossPercent(state).map { "perda \(Int($0.rounded()))%" }
         let cost = state.costBrl.flatMap { $0 > 0 ? "R$ \(laDec2($0))" : nil }
-        return HStack(alignment: .top, spacing: 8) {
-            metric(value: "\(laDec1(state.powerKw)) kW",
-                   sub: power.map { "tomada \(laDec1($0.chargerPowerKw)) kW" },
-                   alignment: .leading)
-            metric(value: "+\(laDec1(state.sessionKwh)) kWh",
-                   sub: energy.map { "tomada \(laDec1($0.chargerEnergyKwh)) kWh" },
-                   alignment: .center)
-            if let cost {
-                metric(value: cost, sub: loss, alignment: .trailing, subColor: LAv2.orange)
-            } else if let loss {
-                metric(value: loss, sub: nil, alignment: .trailing, valueColor: LAv2.orange)
-            } else {
-                Color.clear.frame(maxWidth: .infinity, maxHeight: 1)
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 5) {
+                if let power {
+                    flowLabel("Carregador"); flowValue("\(laDec1(power.chargerPowerKw)) kW")
+                    flowArrow
+                }
+                flowLabel("Carro"); flowValue("\(laDec1(state.powerKw)) kW")
+                Spacer(minLength: 6)
+                if let power {
+                    Text("perda agora \(Int(power.lossPercent.rounded()))%").foregroundStyle(LAv2.orange)
+                }
+            }
+            HStack(spacing: 5) {
+                if let energy {
+                    flowValue("\(laDec1(energy.chargerEnergyKwh)) kWh"); flowLabel("fornecidos")
+                    flowArrow
+                    flowValue(laDec1(energy.vehicleEnergyKwh)); flowLabel("recebidos")
+                } else {
+                    flowValue("+\(laDec1(state.sessionKwh)) kWh"); flowLabel("recebidos")
+                }
+                Spacer(minLength: 6)
+                if let energy {
+                    Text("perda \(Int(energy.lossPercent.rounded()))%").foregroundStyle(LAv2.orange)
+                }
+                if let cost {
+                    Text(energy == nil ? cost : "· \(cost)").fontWeight(.semibold).foregroundStyle(LAv2.text)
+                }
             }
         }
+        .font(.system(size: 11.5)).monospacedDigit()
+        .lineLimit(1).minimumScaleFactor(0.7)
     }
 
-    private func metric(value: String, sub: String?, alignment: HorizontalAlignment,
-                        valueColor: Color = LAv2.text, subColor: Color = LAv2.text2) -> some View {
-        let frameAlignment: Alignment = alignment == .leading ? .leading
-            : (alignment == .trailing ? .trailing : .center)
-        return VStack(alignment: alignment, spacing: 1) {
-            Text(value)
-                .font(.system(size: 13.5, weight: .semibold)).monospacedDigit()
-                .foregroundStyle(valueColor)
-            if let sub {
-                Text(sub)
-                    .font(.system(size: 10.5)).monospacedDigit().foregroundStyle(subColor)
-            }
-        }
-        .lineLimit(1).minimumScaleFactor(0.7)
-        .frame(maxWidth: .infinity, alignment: frameAlignment)
+    private func flowLabel(_ text: String) -> some View {
+        Text(text).foregroundStyle(LAv2.text2)
+    }
+
+    private func flowValue(_ text: String) -> some View {
+        Text(text).fontWeight(.semibold).foregroundStyle(LAv2.text)
+    }
+
+    private var flowArrow: some View {
+        Image(systemName: "arrow.right")
+            .font(.system(size: 9, weight: .semibold)).foregroundStyle(LAv2.text2)
+            .accessibilityLabel("para")
     }
 
     // Variante verde de confirmação — bridge encerra com stale/dismissal.

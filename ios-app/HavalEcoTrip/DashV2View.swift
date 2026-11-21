@@ -813,7 +813,6 @@ struct DashV2View: View {
         let energy = store.chargerSessionKwh.flatMap {
             ChargeEnergyComparison(chargerEnergyKwh: $0, vehicleEnergyKwh: store.chargeSessionKwh)
         }
-        let lossPct = energy?.lossPercent ?? power?.lossPercent
         // "Faltam N min" vale a partir da última leitura, não de agora.
         let ready = mins > 0 ? (store.lastUpdate ?? Date()).addingTimeInterval(Double(mins) * 60) : nil
         var timing: [String] = []
@@ -845,22 +844,51 @@ struct DashV2View: View {
                     }
                 }
             }
-            HStack(alignment: .top, spacing: 10) {
-                // Sem leitura viva mostra "—", não "0,0": zero medido e zero por
-                // ausência são coisas diferentes, e afirmar 0 kW carregando é mentir.
-                chargeMetric("POTÊNCIA",
-                             value: store.chargePowerConfiavel ? "\(Fmt.dec1(store.chargePowerKw)) kW" : "—",
-                             sub: power.map { "tomada \(Fmt.dec1($0.chargerPowerKw)) kW" },
+            // Fluxo carregador → carro: potência agora e energia da sessão, cada um
+            // com a sua perda. Sem leitura viva a potência mostra "—", não "0,0":
+            // zero medido e zero por ausência são coisas diferentes.
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    if let power {
+                        flowPart("Carregador", "\(Fmt.dec1(power.chargerPowerKw)) kW")
+                        Image(systemName: "arrow.right")
+                            .font(.system(size: 12, weight: .semibold)).foregroundStyle(DS.text2)
+                            .accessibilityLabel("para")
+                    }
+                    flowPart("Carro", store.chargePowerConfiavel ? "\(Fmt.dec1(store.chargePowerKw)) kW" : "—",
                              valueColor: store.chargePowerConfiavel ? DS.text : DS.muted)
-                chargeMetric("ENERGIA",
-                             value: "+\(Fmt.dec1(store.chargeSessionKwh)) kWh",
-                             sub: energy.map { "tomada \(Fmt.dec1($0.chargerEnergyKwh)) kWh" }
-                                ?? (store.chargeSessionKwhEstimada ? "estimado pelo SOC" : nil))
-                if let cost = store.chargerCostBrl {
-                    chargeMetric("CUSTO", value: "R$ \(Fmt.dec2(cost))",
-                                 sub: lossPct.map { "perda \(Fmt.int($0))%" }, subColor: DS.orange)
-                } else if let lossPct {
-                    chargeMetric("PERDA", value: "\(Fmt.int(lossPct))%", sub: nil, valueColor: DS.orange)
+                    Spacer(minLength: 6)
+                    if let power {
+                        Text("perda agora \(Fmt.int(power.lossPercent))%")
+                            .font(.system(size: 11.5, weight: .semibold)).foregroundStyle(DS.orange)
+                            .padding(.horizontal, 8).padding(.vertical, 3)
+                            .background(DS.orange.opacity(0.12), in: Capsule())
+                    }
+                }
+                Rectangle().fill(Color.white.opacity(0.08)).frame(height: 1)
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    if let energy {
+                        flowPart("fornecidos", "\(Fmt.dec1(energy.chargerEnergyKwh)) kWh", labelFirst: false)
+                        Image(systemName: "arrow.right")
+                            .font(.system(size: 12, weight: .semibold)).foregroundStyle(DS.text2)
+                            .accessibilityLabel("para")
+                        flowPart("recebidos", "\(Fmt.dec1(energy.vehicleEnergyKwh)) kWh", labelFirst: false)
+                    } else {
+                        flowPart(store.chargeSessionKwhEstimada ? "nesta sessão · estimado pelo SOC" : "nesta sessão",
+                                 "+\(Fmt.dec1(store.chargeSessionKwh)) kWh", labelFirst: false)
+                    }
+                    Spacer(minLength: 6)
+                    VStack(alignment: .trailing, spacing: 1) {
+                        if let cost = store.chargerCostBrl {
+                            Text("R$ \(Fmt.dec2(cost))")
+                                .font(.system(size: 15, weight: .semibold, design: .rounded))
+                                .monospacedDigit().foregroundStyle(DS.text)
+                        }
+                        if let energy {
+                            Text("perda \(Fmt.dec1(energy.lossKwh)) kWh · \(Fmt.int(energy.lossPercent))%")
+                                .font(.system(size: 11)).monospacedDigit().foregroundStyle(DS.orange)
+                        }
+                    }
                 }
             }
         }
@@ -876,20 +904,17 @@ struct DashV2View: View {
         .contextMenu { chargeLimitMenu }
     }
 
-    private func chargeMetric(_ label: String, value: String, sub: String?,
-                              valueColor: Color = DS.text, subColor: Color = DS.text2) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(label)
-                .font(.system(size: 9.5, weight: .bold)).tracking(0.8).foregroundStyle(DS.muted)
+    // "Carregador 3,2 kW" (rótulo antes) ou "11,2 kWh fornecidos" (rótulo depois).
+    private func flowPart(_ label: String, _ value: String, labelFirst: Bool = true,
+                          valueColor: Color = DS.text) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 4) {
+            if labelFirst { Text(label).font(.system(size: 12)).foregroundStyle(DS.text2) }
             Text(value)
                 .font(.system(size: 17, weight: .semibold, design: .rounded))
                 .monospacedDigit().foregroundStyle(valueColor)
-            if let sub {
-                Text(sub).font(.system(size: 11)).monospacedDigit().foregroundStyle(subColor)
-            }
+            if !labelFirst { Text(label).font(.system(size: 12)).foregroundStyle(DS.text2) }
         }
-        .lineLimit(1).minimumScaleFactor(0.75)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .lineLimit(1).minimumScaleFactor(0.7)
         .accessibilityElement(children: .combine)
     }
 

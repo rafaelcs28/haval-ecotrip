@@ -55,3 +55,15 @@
 
 `chargeReadyText`, `chargeTimingLine`, `chargeSessionLossPercent`, `ChargeProgressBar`;
 `ChargeLockScreenView` ganhou `isStale` (default `false`).
+
+## Atualização — fluxo compacto (substitui a grade de 3 colunas)
+
+Tela bloqueada: cabeçalho "Haval H6 PHEV · Carregando"; hero de uma linha "99%" |
+"pronto às 15:02 · 6 min"; barra; duas linhas de fluxo:
+
+- `Carregador 3,2 kW → Carro 2,8 kW` … `perda agora 13%` (laranja);
+- `11,2 kWh fornecidos → 8,6 recebidos` … `perda 23% · R$ 2,02`.
+
+Sem medidor do carregador, cada linha mostra só o lado do carro. Mock: quadro
+"Fluxo compacto" no canvas. O cartão "Carregando" do app (DashV2) usa a mesma
+leitura em tamanho maior: pílula "perda agora", divisor e "perda X kWh · N%" + custo.
