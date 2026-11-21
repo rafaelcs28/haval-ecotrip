@@ -800,63 +800,67 @@ struct DashV2View: View {
 
     // MARK: card carregando
 
+    // Mesma leitura da Live Activity de recarga: "pronto às" como destaque e uma
+    // grade potência · energia · custo, com o valor do carro em cima e o da tomada
+    // embaixo. Uma perda só (a da sessão; sem medidor de energia, a instantânea).
+    // SOC e limite já estão na barra logo acima, então não se repetem aqui.
     private var chargingCardV2: some View {
         let mins = store.chargeRemainingMin
         let limit = effectiveLimit
-        return HStack(alignment: .center) {
-            VStack(alignment: .leading, spacing: 7) {
+        let power = store.chargerPowerKw.flatMap {
+            ChargePowerComparison(chargerPowerKw: $0, vehiclePowerKw: store.chargePowerKw)
+        }
+        let energy = store.chargerSessionKwh.flatMap {
+            ChargeEnergyComparison(chargerEnergyKwh: $0, vehicleEnergyKwh: store.chargeSessionKwh)
+        }
+        let lossPct = energy?.lossPercent ?? power?.lossPercent
+        // "Faltam N min" vale a partir da última leitura, não de agora.
+        let ready = mins > 0 ? (store.lastUpdate ?? Date()).addingTimeInterval(Double(mins) * 60) : nil
+        var timing: [String] = []
+        if mins > 0 { timing.append("faltam " + (mins >= 60 ? "\(mins / 60)h\(String(format: "%02d", mins % 60))" : "\(mins) min")) }
+        if limit > 0 { timing.append("até \(Fmt.int(limit))%") }
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top) {
                 HStack(spacing: 6) {
                     BreatheDot(color: DS.green)
                     Text("CARREGANDO")
                         .font(.system(size: 9.5, weight: .bold))
                         .foregroundStyle(DS.green).tracking(1.1)
                 }
-                HStack(alignment: .firstTextBaseline, spacing: 3) {
-                    // Sem leitura viva mostra "—", não "0,0": zero medido e zero por
-                    // ausência são coisas diferentes, e afirmar 0 kW carregando é mentir.
-                    Text(store.chargePowerConfiavel ? Fmt.dec1(store.chargePowerKw) : "—")
-                        .font(.system(size: 30, weight: .semibold, design: .rounded))
-                        .monospacedDigit()
-                        .foregroundStyle(store.chargePowerConfiavel ? DS.text : DS.muted)
-                    Text("kW").font(.system(size: 13)).foregroundStyle(DS.muted)
-                }
-                if let chargerPower = store.chargerPowerKw,
-                   let comparison = ChargePowerComparison(
-                    chargerPowerKw: chargerPower, vehiclePowerKw: store.chargePowerKw
-                   ) {
-                    Text("Carregador \(Fmt.dec1(comparison.chargerPowerKw)) → carro \(Fmt.dec1(comparison.vehiclePowerKw)) kW · perda \(Fmt.dec1(comparison.lossPercent))%")
-                        .font(.system(size: 11)).foregroundStyle(DS.text2)
-                        .lineLimit(1).minimumScaleFactor(0.75)
-                }
-                if let chargerEnergy = store.chargerSessionKwh,
-                   let comparison = ChargeEnergyComparison(
-                    chargerEnergyKwh: chargerEnergy, vehicleEnergyKwh: store.chargeSessionKwh
-                   ) {
-                    Text("\(Fmt.dec1(comparison.chargerEnergyKwh)) → \(Fmt.dec1(comparison.vehicleEnergyKwh)) kWh · perda \(Fmt.dec1(comparison.lossKwh)) kWh (\(Fmt.dec1(comparison.lossPercent))%)")
-                        .font(.system(size: 12)).foregroundStyle(DS.text2)
-                        .lineLimit(1).minimumScaleFactor(0.72)
-                } else {
-                    Text("+\(Fmt.dec1(store.chargeSessionKwh)) kWh nesta sessão"
-                         + (store.chargeSessionKwhEstimada ? " · estimado pelo SOC" : ""))
-                        .font(.system(size: 12)).foregroundStyle(DS.text2)
-                        .lineLimit(1).minimumScaleFactor(0.85)
-                }
-                if let cost = store.chargerCostBrl {
-                    Text("R$ \(Fmt.dec2(cost))")
-                        .font(.system(size: 11.5, weight: .semibold)).foregroundStyle(DS.green)
+                .padding(.top, 4)
+                Spacer(minLength: 8)
+                VStack(alignment: .trailing, spacing: 2) {
+                    Group {
+                        if let ready {
+                            Text("pronto às ") + Text(ready, format: .dateTime.hour().minute())
+                        } else {
+                            Text("sem previsão")
+                        }
+                    }
+                    .font(.system(size: 20, weight: .semibold, design: .rounded))
+                    .monospacedDigit().foregroundStyle(ready == nil ? DS.muted : DS.text)
+                    if !timing.isEmpty {
+                        Text(timing.joined(separator: " · "))
+                            .font(.system(size: 11.5)).monospacedDigit().foregroundStyle(DS.text2)
+                    }
                 }
             }
-            Spacer()
-            VStack(alignment: .trailing, spacing: 4) {
-                if mins > 0 {
-                    Text(mins >= 60 ? "\(mins / 60)h\(String(format: "%02d", mins % 60))" : "\(mins) min")
-                        .font(.system(size: 22, weight: .semibold, design: .rounded))
-                        .monospacedDigit().foregroundStyle(DS.text)
-                }
-                if limit > 0 {
-                    Text("ATÉ \(Fmt.int(limit))%")
-                        .font(.system(size: 9.5, weight: .bold))
-                        .foregroundStyle(DS.muted).tracking(1)
+            HStack(alignment: .top, spacing: 10) {
+                // Sem leitura viva mostra "—", não "0,0": zero medido e zero por
+                // ausência são coisas diferentes, e afirmar 0 kW carregando é mentir.
+                chargeMetric("POTÊNCIA",
+                             value: store.chargePowerConfiavel ? "\(Fmt.dec1(store.chargePowerKw)) kW" : "—",
+                             sub: power.map { "tomada \(Fmt.dec1($0.chargerPowerKw)) kW" },
+                             valueColor: store.chargePowerConfiavel ? DS.text : DS.muted)
+                chargeMetric("ENERGIA",
+                             value: "+\(Fmt.dec1(store.chargeSessionKwh)) kWh",
+                             sub: energy.map { "tomada \(Fmt.dec1($0.chargerEnergyKwh)) kWh" }
+                                ?? (store.chargeSessionKwhEstimada ? "estimado pelo SOC" : nil))
+                if let cost = store.chargerCostBrl {
+                    chargeMetric("CUSTO", value: "R$ \(Fmt.dec2(cost))",
+                                 sub: lossPct.map { "perda \(Fmt.int($0))%" }, subColor: DS.orange)
+                } else if let lossPct {
+                    chargeMetric("PERDA", value: "\(Fmt.int(lossPct))%", sub: nil, valueColor: DS.orange)
                 }
             }
         }
@@ -870,6 +874,23 @@ struct DashV2View: View {
             .stroke(DS.green.opacity(0.3), lineWidth: 1))
         .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .contextMenu { chargeLimitMenu }
+    }
+
+    private func chargeMetric(_ label: String, value: String, sub: String?,
+                              valueColor: Color = DS.text, subColor: Color = DS.text2) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label)
+                .font(.system(size: 9.5, weight: .bold)).tracking(0.8).foregroundStyle(DS.muted)
+            Text(value)
+                .font(.system(size: 17, weight: .semibold, design: .rounded))
+                .monospacedDigit().foregroundStyle(valueColor)
+            if let sub {
+                Text(sub).font(.system(size: 11)).monospacedDigit().foregroundStyle(subColor)
+            }
+        }
+        .lineLimit(1).minimumScaleFactor(0.75)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
     }
 
     @ViewBuilder private var chargeLimitMenu: some View {
