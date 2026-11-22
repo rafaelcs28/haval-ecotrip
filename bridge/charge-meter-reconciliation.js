@@ -1,6 +1,18 @@
 'use strict';
 
 const { chargeMeterKey } = require('./charge-meter-catalog');
+const CHARGE_METER_QUERY_LOOKBACK_MS = 24 * 60 * 60_000;
+const CHARGE_METER_QUERY_MARGIN_MS = 10 * 60_000;
+
+function chargeMeterQueryWindow(charge) {
+  const endMs = Number(charge?.timestamp_ms);
+  const startMs = endMs - Number(charge?.duration_sec || 0) * 1000;
+  return {
+    // Provider APIs filter by session start, so include sessions already running when vehicle telemetry began.
+    fromIso: new Date(startMs - CHARGE_METER_QUERY_LOOKBACK_MS).toISOString(),
+    toIso: new Date(endMs + CHARGE_METER_QUERY_MARGIN_MS).toISOString(),
+  };
+}
 
 function toMs(value) {
   if (typeof value === 'number') return Number.isFinite(value) ? value : NaN;
@@ -162,6 +174,7 @@ function reconcileChargeMeter({ charge, configs, sessionsByKey }) {
 }
 
 module.exports = {
+  chargeMeterQueryWindow,
   deduplicateSessions,
   resolveProviderReconciliation,
   reconcileChargeMeter,

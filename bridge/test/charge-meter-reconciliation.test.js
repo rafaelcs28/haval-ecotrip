@@ -2,6 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const reconciliation = require('../charge-meter-reconciliation');
 const {
   resolveProviderReconciliation,
   reconcileChargeMeter,
@@ -49,6 +50,14 @@ const session = (id, startMinute, endMinute, energy, extra = {}) => ({
   ended_at: new Date(base + endMinute * MINUTE).toISOString(),
   energy_kwh: energy,
   ...extra,
+});
+
+test('queries far enough back to include a provider session already in progress', () => {
+  assert.equal(typeof reconciliation.chargeMeterQueryWindow, 'function');
+  const window = reconciliation.chargeMeterQueryWindow(charge());
+
+  assert.ok(Date.parse(window.fromIso) <= base - 26 * MINUTE);
+  assert.equal(Date.parse(window.toIso), base + 70 * MINUTE);
 });
 
 test('sums sequential sessions from the same charger after a power interruption', () => {

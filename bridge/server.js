@@ -49,6 +49,7 @@ const {
   selectLiveChargeMeter,
 } = require('./charge-meter-live');
 const {
+  chargeMeterQueryWindow,
   reconcileChargeMeter,
   resolveProviderReconciliation,
   shouldFillChargeMeterEnergy,
@@ -11621,10 +11622,7 @@ async function _reconcileChargeMeterRecord(charge) {
       return { status: 'not_configured', providers: [] };
     }
 
-    const endMs = timestamp;
-    const startMs = endMs - Number(charge.duration_sec || 0) * 1000;
-    const fromIso = new Date(startMs - 10 * 60_000).toISOString();
-    const toIso = new Date(endMs + 10 * 60_000).toISOString();
+    const { fromIso, toIso } = chargeMeterQueryWindow(charge);
     const states = [];
     const sessionsByKey = {};
     await Promise.all(configs.map(async config => {

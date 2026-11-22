@@ -37,6 +37,8 @@ A telemetria ao vivo consulta provedores a cada 15 segundos somente quando o Hav
 
 O namespace autenticado `/api/mhzmob` é um proxy de leitura com rotas permitidas explicitamente e erros limitados; payloads brutos do fornecedor não atravessam essa fronteira. Na conciliação, falha de um provedor não descarta uma correspondência válida encontrada em outro. Pendências sem solução após 72 horas viram `failed` e deixam de aparecer como cálculo em andamento.
 
+A consulta de conciliação inclui sessões iniciadas até 24 horas antes do intervalo detectado pelo carro. A seleção ainda exige sobreposição real ou distância máxima de 10 minutos, evitando atribuir outra recarga ao registro.
+
 O Bridge deriva candidatos persistidos de `chargesArr` em `GET /api/charge-locations`. O Haval Hub exige confirmação para `POST /api/charge-locations/:id/link` ou `POST /api/charge-locations/:id/create-known-place`. `known_place_id` mantém o vínculo; nomes são apenas apresentação.
 
 ## Dados e runtime
