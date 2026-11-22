@@ -106,6 +106,18 @@ final class ChargesLoader: ObservableObject {
                               method: "PATCH", opPath: "/api/charges/\(id)/location", body: ["name": location, "save_known": true])
         }
     }
+
+    func reconcileMeter(_ ts: Double) async -> Bool {
+        guard let url = URL(string: "\(BridgeRouter.shared.currentURL)/api/charges/\(Int(ts))/reconcile-meter") else { return false }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 20
+        request.addValue("Bearer " + Settings.bridgeToken, forHTTPHeaderField: "Authorization")
+        guard let (_, response) = try? await URLSession.shared.data(for: request),
+              let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { return false }
+        await sync.sync()
+        return true
+    }
 }
 
 // MARK: - Abastecimento
@@ -202,6 +214,7 @@ struct NativeRecargasView: View {
     @State private var showCal = false
     @State private var showAddRefuel = false
     @State private var expandedCharge: Double?
+    @State private var reconcilingCharge: Double?
     @State private var toast: String?
     @State private var showHealth = false
     @State private var showAnalysis = false
@@ -366,6 +379,18 @@ struct NativeRecargasView: View {
                         Text("Medidor: \(f1(c.chargerKwh)) kWh · entrou \(f1(c.kwh)) kWh · perda \(f1(c.lossKwh)) kWh (\(f0(c.lossPct))%)")
                             .font(.caption2).foregroundStyle(DS.muted)
                     }
+                    Button {
+                        reconcilingCharge = c.id
+                        Task {
+                            let ok = await loader.reconcileMeter(c.id)
+                            reconcilingCharge = nil
+                            toast = ok ? "Dados do carregador atualizados ✓" : "Não foi possível consultar o carregador"
+                        }
+                    } label: {
+                        Label(reconcilingCharge == c.id ? "Atualizando…" : "Atualizar do carregador", systemImage: "arrow.triangle.2.circlepath")
+                            .font(.caption.weight(.semibold)).foregroundStyle(DS.teal)
+                    }
+                    .disabled(reconcilingCharge != nil)
                     ChargeEditFields(meter: c.chargerKwh, total: c.costTotal, location: c.location == "Local desconhecido" ? "" : c.location) { m, t, loc in
                         Task {
                             await loader.edit(c.id, charger: m, total: t, location: loc, batteryKwh: c.kwh)

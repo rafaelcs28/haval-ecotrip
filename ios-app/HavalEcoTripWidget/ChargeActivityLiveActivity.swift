@@ -117,7 +117,13 @@ struct ChargeActivityLiveActivity: Widget {
     }
 
     private func diSubline(_ s: ChargeActivityAttributes.ContentState) -> String {
-        var parts = ["\(laDec1(s.powerKw)) kW", "+\(laDec1(s.sessionKwh)) kWh"]
+        var parts: [String]
+        if let chargerPower = s.chargerPowerKw,
+           let comparison = ChargePowerComparison(chargerPowerKw: chargerPower, vehiclePowerKw: s.powerKw) {
+            parts = ["\(laDec1(comparison.chargerPowerKw))→\(laDec1(comparison.vehiclePowerKw)) kW", "perda \(Int(comparison.lossPercent.rounded()))%", "+\(laDec1(s.sessionKwh)) kWh"]
+        } else {
+            parts = ["\(laDec1(s.powerKw)) kW", "+\(laDec1(s.sessionKwh)) kWh"]
+        }
         if s.remainingMin > 0 {
             let ready = s.updatedAt.addingTimeInterval(Double(s.remainingMin) * 60)
             let f = DateFormatter(); f.dateFormat = "HH:mm"
@@ -190,8 +196,22 @@ struct ChargeLockScreenView: View {
             .frame(height: 28)
             progressBar
             // Régua de micro-métricas
+            if let chargerPower = state.chargerPowerKw,
+               let comparison = ChargePowerComparison(chargerPowerKw: chargerPower, vehiclePowerKw: state.powerKw) {
+                HStack {
+                    Text("carregador \(laDec1(comparison.chargerPowerKw)) kW")
+                    Spacer(minLength: 6)
+                    Text("carro \(laDec1(comparison.vehiclePowerKw)) kW")
+                    Spacer(minLength: 6)
+                    Text("perda \(laDec1(comparison.lossPercent))%")
+                }
+                .font(.system(size: 10.5)).monospacedDigit().foregroundStyle(LAv2.text2)
+                .lineLimit(1).minimumScaleFactor(0.7)
+            }
             HStack {
-                Text("\(laDec1(state.powerKw)) kW")
+                if state.chargerPowerKw.flatMap({ ChargePowerComparison(chargerPowerKw: $0, vehiclePowerKw: state.powerKw) }) == nil {
+                    Text("\(laDec1(state.powerKw)) kW")
+                }
                 Spacer(minLength: 6)
                 Text("+\(laDec1(state.sessionKwh)) kWh")
                 if let c = state.costBrl, c > 0 {

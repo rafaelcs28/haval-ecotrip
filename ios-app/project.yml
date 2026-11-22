@@ -77,6 +77,7 @@ targets:
         ITSAppUsesNonExemptEncryption: false
         # LAN direta: descobre o APK do carro via Bonjour (_havalobd._tcp) e fala
         # WebSocket local (ws://host:8088/ws/state) sem passar pelo Mac mini.
+        NSCameraUsageDescription: "Permite visualizar as câmeras do veículo e conectar a transmissão ao vivo."
         NSFaceIDUsageDescription: "Use o Face ID para desbloquear o app."
         NSMicrophoneUsageDescription: "Usa o microfone para falar na cabine do carro durante a escuta ao vivo."
         NSLocalNetworkUsageDescription: "Conecta direto ao carro na mesma rede Wi-Fi para telemetria e comandos com baixa latência."
@@ -155,6 +156,20 @@ targets:
       # Scheme compartilhado (gera xcshareddata/xcschemes/HavalEcoTrip.xcscheme)
       # pra `xcodebuild -scheme HavalEcoTrip` funcionar sem precisar de xcuserdata.
       gatherCoverageData: false
+      testTargets:
+        - HavalEcoTripTests
+
+  HavalEcoTripTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - HavalEcoTripTests
+    dependencies:
+      - target: HavalEcoTrip
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: br.com.consorciolimpagyn.havalecotrip.tests
+        CODE_SIGNING_ALLOWED: NO
 
   HavalEcoTripWidget:
     type: app-extension

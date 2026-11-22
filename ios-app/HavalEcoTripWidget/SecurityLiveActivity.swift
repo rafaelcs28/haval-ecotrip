@@ -14,7 +14,7 @@ struct SecurityLiveActivity: Widget {
         ActivityConfiguration(for: SecurityActivityAttributes.self) { context in
             SecurityLockScreenView(state: context.state, carName: context.attributes.carName)
                 .activityBackgroundTint(LAv2.bg)
-                .activitySystemActionForegroundColor(context.state.active ? LAv2.red : LAv2.green)
+                .activitySystemActionForegroundColor(context.state.active ? LAv2.orange : LAv2.green)
 
         } dynamicIsland: { context in
             let s = context.state
@@ -22,16 +22,16 @@ struct SecurityLiveActivity: Widget {
                 DynamicIslandExpandedRegion(.leading) {
                     Image(systemName: s.active ? "lock.open.fill" : "checkmark")
                         .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(s.active ? LAv2.red : LAv2.green)
+                        .foregroundStyle(s.active ? LAv2.orange : LAv2.green)
                         .frame(width: 40, height: 40)
-                        .background((s.active ? LAv2.red : LAv2.green).opacity(0.15), in: Circle())
+                        .background((s.active ? LAv2.orange : LAv2.green).opacity(0.15), in: Circle())
                 }
                 DynamicIslandExpandedRegion(.center) {
                     VStack(alignment: .leading, spacing: 2) {
                         if s.active {
                             (Text(securityHeadline(s)) + sinceText(s))
                                 .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(LAv2.red)
+                                .foregroundStyle(LAv2.orange)
                                 .lineLimit(1).minimumScaleFactor(0.7)
                             Text(securityIssueLine(s))
                                 .font(.system(size: 11.5)).foregroundStyle(LAv2.text2)
@@ -50,22 +50,22 @@ struct SecurityLiveActivity: Widget {
                 }
             } compactLeading: {
                 Image(systemName: s.active ? "lock.open.fill" : "lock.fill")
-                    .foregroundStyle(s.active ? LAv2.red : LAv2.green)
+                    .foregroundStyle(s.active ? LAv2.orange : LAv2.green)
             } compactTrailing: {
                 if s.active, let since = s.since {
                     Text(since, style: .relative)
                         .font(.system(size: 12, weight: .bold)).monospacedDigit()
-                        .foregroundStyle(LAv2.red)
+                        .foregroundStyle(LAv2.orange)
                         .frame(maxWidth: 46)
                         .lineLimit(1).minimumScaleFactor(0.5)
                 } else if s.active {
-                    Text("\(s.openCount)").bold().foregroundStyle(LAv2.red)
+                    Text("\(s.openCount)").bold().foregroundStyle(LAv2.orange)
                 }
             } minimal: {
                 Image(systemName: s.active ? "lock.open.fill" : "lock.fill")
-                    .foregroundStyle(s.active ? LAv2.red : LAv2.green)
+                    .foregroundStyle(s.active ? LAv2.orange : LAv2.green)
             }
-            .keylineTint(s.active ? LAv2.red : LAv2.green)
+            .keylineTint(s.active ? LAv2.orange : LAv2.green)
         }
     }
 }
@@ -82,71 +82,37 @@ struct SecurityLockScreenView: View {
         }
         .padding(14)
         .background(alignment: .topLeading) {
-            RadialGradient(colors: [(state.active ? LAv2.red : LAv2.green).opacity(0.14), .clear],
+            RadialGradient(colors: [(state.active ? LAv2.orange : LAv2.green).opacity(0.14), .clear],
                            center: .topLeading, startRadius: 0, endRadius: 220)
         }
     }
 
-    // Variante de anomalia (destravado / algo aberto).
+    // Variante de anomalia — layout mínimo (B): ponto + estado + hora | Travar,
+    // e uma subline condensada (local · o que está aberto · distância).
     private var alertBody: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            // Header: tile + local | tag ATENÇÃO
+        VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
-                Image(systemName: "lock.open.fill")
-                    .font(.system(size: 11, weight: .bold)).foregroundStyle(.black)
-                    .frame(width: 22, height: 22)
-                    .background(LAv2.red, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-                Text(state.locationShort.map { "Haval · \($0)" } ?? carName)
-                    .font(.system(size: 12, weight: .semibold)).foregroundStyle(LAv2.text)
+                Circle().fill(LAv2.orange).frame(width: 7, height: 7)
+                Text(securityHeadline(state))
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(LAv2.text)
                     .lineLimit(1).minimumScaleFactor(0.7)
-                Spacer(minLength: 6)
-                Text("ATENÇÃO")
-                    .font(.system(size: 10, weight: .bold)).tracking(1)
-                    .foregroundStyle(LAv2.red)
-            }
-            // Corpo: PNG do carro | estado + contexto | Travar
-            HStack(alignment: .center, spacing: 13) {
-                Image("haval_h6_top")
-                    .resizable().scaledToFit()
-                    .frame(width: 56, height: 56)
-                    .shadow(color: .black.opacity(0.5), radius: 6, y: 3)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(securityHeadline(state))
-                        .font(.system(size: 26, weight: .light)).tracking(-0.5)
-                        .foregroundStyle(LAv2.red)
-                        .lineLimit(1).minimumScaleFactor(0.7)
-                    Text(securityIssueLine(state))
-                        .font(.system(size: 11.5)).foregroundStyle(LAv2.text)
-                        .lineLimit(1).minimumScaleFactor(0.7)
-                    contextLine
-                        .font(.system(size: 10.5)).monospacedDigit()
-                        .foregroundStyle(LAv2.text2)
-                        .lineLimit(1).minimumScaleFactor(0.7)
+                if let since = state.since {
+                    (Text("· ") + Text(since, style: .relative))
+                        .font(.system(size: 12.5)).monospacedDigit()
+                        .foregroundStyle(LAv2.muted)
+                        .lineLimit(1)
                 }
                 Spacer(minLength: 8)
-                if state.unlocked {
-                    VStack(spacing: 4) {
-                        if #available(iOS 17.0, *) { LockPillButton() }
-                        Text("fecha vidros junto")
-                            .font(.system(size: 8.5)).foregroundStyle(LAv2.muted)
-                    }
+                if state.unlocked, #available(iOS 17.0, *) {
+                    LockPillButton()
                 }
             }
-            // Rodapé: o que está OK | ver no mapa
-            VStack(spacing: 8) {
-                Rectangle().fill(Color.white.opacity(0.06)).frame(height: 1)
-                HStack {
-                    Text(securityOkLine(state))
-                        .font(.system(size: 10.5)).foregroundStyle(LAv2.text2)
-                        .lineLimit(1).minimumScaleFactor(0.7)
-                    Spacer(minLength: 6)
-                    Link(destination: URL(string: "havalecotrip://")!) {
-                        Text("Ver no mapa →")
-                            .font(.system(size: 10.5, weight: .semibold))
-                            .foregroundStyle(LAv2.text2)
-                    }
-                }
-            }
+            // Local · o que está aberto · distância, tudo numa linha só
+            subLine
+                .font(.system(size: 11)).monospacedDigit()
+                .foregroundStyle(LAv2.text2)
+                .lineLimit(1).minimumScaleFactor(0.6)
         }
     }
 
@@ -167,14 +133,12 @@ struct SecurityLockScreenView: View {
         }
     }
 
-    private var contextLine: Text {
-        var t = Text("")
-        if let since = state.since {
-            t = Text("há ") + Text(since, style: .relative)
-        }
+    // Linha única condensada (B): local · o que está aberto · distância.
+    private var subLine: Text {
+        var t = Text(state.locationShort.map { "Haval · \($0)" } ?? carName)
+        t = t + Text(" · ") + Text(securityIssueLine(state))
         if let d = state.userDistKm {
-            let sep = state.since != nil ? " · " : ""
-            t = t + Text("\(sep)você a \(d < 1 ? "\(Int(d * 1000)) m" : "\(laDec1(d)) km")")
+            t = t + Text(" · \(d < 1 ? "\(Int(d * 1000)) m" : "\(laDec1(d)) km")")
         }
         return t
     }
@@ -185,16 +149,16 @@ struct SecurityLockScreenView: View {
     }
 }
 
-// Botão Travar (pill red, texto preto) — App Intent, trava sem abrir o app.
+// Botão Travar (pill fantasma âmbar — só contorno) — App Intent, trava sem abrir o app.
 @available(iOS 17.0, *)
 private struct LockPillButton: View {
     var body: some View {
         Button(intent: LockCarIntent()) {
             Text("Travar")
-                .font(.system(size: 13, weight: .bold)).foregroundStyle(.black)
+                .font(.system(size: 12.5, weight: .semibold)).foregroundStyle(LAv2.orange)
                 .lineLimit(1).fixedSize()
-                .padding(.horizontal, 18).padding(.vertical, 9)
-                .background(LAv2.red, in: Capsule())
+                .padding(.horizontal, 14).padding(.vertical, 7)
+                .overlay(Capsule().stroke(LAv2.orange.opacity(0.5), lineWidth: 1))
         }
         .buttonStyle(.plain)
     }

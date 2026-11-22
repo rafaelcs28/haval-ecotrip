@@ -6,6 +6,7 @@
 bash -n scripts/build-on-mac-mini.sh
 node --check bridge/server.js
 node --check bridge/gateway.js
+node --test bridge/test/charge-location-links.test.js
 ```
 
 Os checks Node validam sintaxe, não integração, rotas, autenticação ou runtime. Android e Apple compilam somente na fila autorizada.
@@ -14,9 +15,11 @@ Os checks Node validam sintaxe, não integração, rotas, autenticação ou runt
 
 Android, Gradle, Kotlin e Xcode executam exclusivamente no Mac Mini. O fluxo Android exige commit Git imutável, auditoria de conteúdo e digest allowlisted. Consulte [BUILD_ANDROID_ON_MAC_MINI.md](BUILD_ANDROID_ON_MAC_MINI.md).
 
+O target `HavalEcoTripTests` roda pela fila com o tipo `xcode-native-test`, projeto `ios-app/HavalEcoTrip.xcodeproj` e scheme `HavalEcoTrip`.
+
 ## Estratégia de testes
 
-Não foram encontrados testes em `test`, `androidTest` ou targets Swift de teste, nem script de teste no bridge. A evolução recomendada é incremental:
+Há testes Swift para configuração de medidores e cálculo de perda instantânea. Não foram encontrados testes Android nem script de teste no bridge. A evolução recomendada continua incremental:
 
 1. regras puras de viagem, recarga, energia e automação;
 2. serialização e compatibilidade de payloads HTTP/MQTT;

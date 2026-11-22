@@ -222,6 +222,13 @@ struct FlowChipsSelect: View {
 }
 
 // MARK: - Locais conhecidos
+private struct PendingChargeLocationLink: Identifiable {
+    let id = UUID()
+    let location: ChargeLocationCandidate
+    let knownPlaceId: String?
+    let knownPlaceName: String?
+}
+
 struct KnownPlacesSheet: View {
     @ObservedObject var cfg: ConfigStore
     @ObservedObject private var car = CarStore.shared
@@ -233,8 +240,16 @@ struct KnownPlacesSheet: View {
     @State private var coord: (Double, Double)? = nil
     @State private var addrLabel = ""
     @State private var showMap = false
+    @State private var chargeLocations: [ChargeLocationCandidate] = []
+    @State private var chargeLocationsFailed = false
+    @State private var chargeLocationMessage = ""
+    @State private var selectingChargeLocation: ChargeLocationCandidate?
+    @State private var editingPlaceId: String?
 
     private var effective: (Double, Double)? { coord ?? (car.hasGps ? (car.lat, car.lng) : nil) }
+    private var unlinkedChargeLocations: [ChargeLocationCandidate] {
+        ChargeLocationCandidate.unlinked(chargeLocations)
+    }
     private var locText: String {
         if coord != nil { return addrLabel.isEmpty ? "Ponto escolhido" : addrLabel }
         return car.hasGps ? "Posição atual do carro" : "Sem local — busque ou escolha no mapa"
@@ -282,7 +297,39 @@ struct KnownPlacesSheet: View {
                             }.disabled(newName.isEmpty || effective == nil)
                         }
                     }
-                    ForEach(cfg.places) { p in PlaceRow(place: p, cfg: cfg) }
+                    if !unlinkedChargeLocations.isEmpty {
+                        DSCard(title: "Locais de recarga para vincular", icon: "bolt.badge.clock") {
+                            VStack(spacing: 12) {
+                                ForEach(unlinkedChargeLocations) { location in
+                                    HStack(spacing: 10) {
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(location.name).font(.system(size: 14, weight: .semibold)).foregroundStyle(DS.text)
+                                            Text(location.canCreateKnownPlace ? "Coordenadas disponíveis" : "Sem coordenadas · escolha um local existente")
+                                                .font(.caption2).foregroundStyle(DS.muted)
+                                        }
+                                        Spacer()
+                                        Button {
+                                            selectingChargeLocation = location
+                                        } label: {
+                                            Label("Vincular", systemImage: "link")
+                                                .font(.caption.weight(.semibold)).foregroundStyle(DS.teal)
+                                        }
+                                    }
+                                    if location.id != unlinkedChargeLocations.last?.id { Divider().overlay(DS.border) }
+                                }
+                            }
+                        }
+                    }
+                    if chargeLocationsFailed {
+                        Text("Não foi possível carregar os locais usados nas recargas.")
+                            .font(.caption).foregroundStyle(DS.red).frame(maxWidth: .infinity, alignment: .leading)
+                    } else if !chargeLocationMessage.isEmpty {
+                        Text(chargeLocationMessage)
+                            .font(.caption).foregroundStyle(DS.teal).frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    ForEach(cfg.places) { p in
+                        PlaceRow(place: p, cfg: cfg, startEditing: editingPlaceId == p.id)
+                    }
                 }.padding(16)
             }
             .background(DS.bg.ignoresSafeArea())
@@ -295,8 +342,16 @@ struct KnownPlacesSheet: View {
                     if newName.isEmpty { newName = nm }
                 }
             }
+            .sheet(item: $selectingChargeLocation) { location in
+                ChargeLocationLinkPicker(location: location, places: cfg.places) { pending in
+                    Task { await confirm(pending) }
+                }
+            }
         }
-        .task { await cfg.loadPlaces() }
+        .task {
+            await cfg.loadPlaces()
+            await reloadChargeLocations()
+        }
     }
 
     @ViewBuilder private func field(_ ph: String, _ text: Binding<String>, icon: String? = nil) -> some View {
@@ -319,19 +374,141 @@ struct KnownPlacesSheet: View {
     }
 
     private func reset() { newName = ""; search = ""; coord = nil; addrLabel = ""; completer.clear() }
+
+    private func reloadChargeLocations() async {
+        guard let loaded = await cfg.loadChargeLocations() else {
+            chargeLocationsFailed = true
+            return
+        }
+        chargeLocations = loaded
+        chargeLocationsFailed = false
+    }
+
+    private func confirm(_ pending: PendingChargeLocationLink) async {
+        chargeLocationMessage = ""
+        if let knownPlaceId = pending.knownPlaceId {
+            let ok = await cfg.linkChargeLocation(pending.location.id, to: knownPlaceId)
+            guard ok else {
+                chargeLocationMessage = "Não foi possível salvar o vínculo."
+                return
+            }
+            editingPlaceId = knownPlaceId
+        } else {
+            guard let newId = await cfg.createKnownPlace(from: pending.location, radius: 200) else {
+                chargeLocationMessage = "Não foi possível criar o local conhecido."
+                return
+            }
+            editingPlaceId = newId
+        }
+        chargeLocationMessage = "Vínculo salvo. Configure o provedor e o carregador abaixo."
+        await reloadChargeLocations()
+    }
+}
+
+private struct ChargeLocationLinkPicker: View {
+    @Environment(\.dismiss) private var dismiss
+    let location: ChargeLocationCandidate
+    let places: [KnownPlace]
+    let onConfirm: (PendingChargeLocationLink) -> Void
+    @State private var pendingLink: PendingChargeLocationLink?
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("Locais conhecidos") {
+                    ForEach(places) { place in
+                        Button(place.name) {
+                            pendingLink = PendingChargeLocationLink(
+                                location: location,
+                                knownPlaceId: place.id,
+                                knownPlaceName: place.name
+                            )
+                        }
+                        .foregroundStyle(DS.text)
+                    }
+                }
+                if location.canCreateKnownPlace {
+                    Section {
+                        Button("Criar local conhecido") {
+                            pendingLink = PendingChargeLocationLink(
+                                location: location,
+                                knownPlaceId: nil,
+                                knownPlaceName: nil
+                            )
+                        }
+                        .foregroundStyle(DS.teal)
+                    }
+                }
+            }
+            .scrollContentBackground(.hidden)
+            .background(DS.bg)
+            .navigationTitle(location.name)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancelar") { dismiss() }
+                }
+            }
+            .alert(item: $pendingLink) { pending in
+                Alert(
+                    title: Text(pending.knownPlaceId == nil ? "Criar local conhecido?" : "Vincular locais?"),
+                    message: Text(confirmationMessage(pending)),
+                    primaryButton: .default(Text("Confirmar")) {
+                        dismiss()
+                        onConfirm(pending)
+                    },
+                    secondaryButton: .cancel()
+                )
+            }
+        }
+    }
+
+    private func confirmationMessage(_ pending: PendingChargeLocationLink) -> String {
+        if let name = pending.knownPlaceName {
+            return "Vincular “\(pending.location.name)” ao local conhecido “\(name)”?"
+        }
+        return "Criar “\(pending.location.name)” como local conhecido com raio de 200 m?"
+    }
+}
+
+private enum ChargeMeterCatalogSelection: String, Identifiable, Equatable {
+    case provider
+    case charger
+
+    var id: String { rawValue }
+    var title: String { self == .provider ? "Escolher provedor" : "Escolher carregador" }
+}
+
+private struct ChargeMeterChoice: Identifiable {
+    let id: String
+    let name: String
 }
 
 private struct PlaceRow: View {
     let place: KnownPlace
     let cfg: ConfigStore
+    let startEditing: Bool
     @State private var name = ""
     @State private var radius = 200.0
     @State private var loaded = false
     @State private var editing = false
     @State private var coord: (Double, Double)? = nil
     @State private var showMap = false
+    @State private var meterEnabled = false
+    @State private var providerId = ""
+    @State private var chargerId = ""
+    @State private var chargerName = ""
+    @State private var tariff = ""
+    @State private var providers: [ChargeMeterProvider] = []
+    @State private var chargers: [ChargeMeterCharger] = []
+    @State private var meterError = ""
+    @State private var saving = false
+    @State private var selectingCatalog: ChargeMeterCatalogSelection?
 
     private var effective: (Double, Double) { coord ?? (place.lat, place.lng) }
+    private var requiresTariff: Bool {
+        providers.first(where: { $0.id == providerId })?.requiresTariff ?? (providerId.lowercased() == "zeeda")
+    }
 
     var body: some View {
         DSCard {
@@ -353,23 +530,205 @@ private struct PlaceRow: View {
                         Label(coord != nil ? "Local ajustado no mapa ✓" : "Editar local no mapa", systemImage: "map.fill")
                             .font(.caption.weight(.semibold)).foregroundStyle(coord != nil ? DS.teal : DS.blue)
                     }
+                    Divider().overlay(DS.border)
+                    Toggle("Preencher recargas pelo carregador", isOn: $meterEnabled)
+                        .tint(DS.green).font(.system(size: 14))
+                    if meterEnabled {
+                        meterSelector(
+                            title: "Provedor",
+                            value: providers.first(where: { $0.id == providerId })?.name ?? providerId,
+                            empty: "Nenhum provedor disponível",
+                            enabled: !providers.isEmpty
+                        ) {
+                            selectingCatalog = .provider
+                        }
+                        meterSelector(
+                            title: "Carregador",
+                            value: chargerName,
+                            empty: providerId.isEmpty ? "Escolha o provedor" : "Nenhum carregador disponível",
+                            enabled: !providerId.isEmpty && !chargers.isEmpty
+                        ) {
+                            selectingCatalog = .charger
+                        }
+                        if requiresTariff {
+                            TextField("Tarifa (R$/kWh)", text: $tariff)
+                                .keyboardType(.decimalPad).foregroundStyle(DS.text)
+                                .padding(9).background(DS.panel2).clipShape(RoundedRectangle(cornerRadius: 9))
+                            Text("Zeeda: custo calculado pela tarifa vigente.")
+                                .font(.caption2).foregroundStyle(DS.muted)
+                        } else if !providerId.isEmpty {
+                            Text("Energia e valor vêm da sessão do provedor.")
+                                .font(.caption2).foregroundStyle(DS.muted)
+                        }
+                    }
+                    if !meterError.isEmpty {
+                        Text(meterError).font(.caption2).foregroundStyle(DS.red)
+                    }
                     HStack(spacing: 10) {
-                        Button("Cancelar") { editing = false; name = place.name; radius = place.radiusM; coord = nil }.foregroundStyle(DS.muted)
+                        Button("Cancelar") { editing = false; loadState() }.foregroundStyle(DS.muted)
                         Spacer()
-                        Button("Salvar") {
-                            Task { await cfg.updatePlace(place.id, name: name, radius: radius, lat: coord?.0, lng: coord?.1); editing = false; coord = nil }
-                        }.font(.system(size: 14, weight: .bold)).foregroundStyle(DS.green)
+                        Button(saving ? "Salvando…" : "Salvar") { save() }
+                            .disabled(saving).font(.system(size: 14, weight: .bold)).foregroundStyle(DS.green)
                     }
                 } else {
-                    Button("Editar") { editing = true }.font(.caption).foregroundStyle(DS.blue)
+                    if let meter = place.chargeMeter, meter.enabled {
+                        Text("\(meter.chargerName) · \(meter.provider == "zeeda" ? "tarifa R$ \(String(format: "%.2f", meter.currentPricePerKwh ?? 0))" : "valor do provedor")")
+                            .font(.caption2).foregroundStyle(DS.teal)
+                    }
+                    Button("Editar") { beginEditing() }.font(.caption).foregroundStyle(DS.blue)
                 }
             }
         }
-        .onAppear { if !loaded { name = place.name; radius = place.radiusM; loaded = true } }
+        .onAppear {
+            if !loaded { loadState(); loaded = true }
+            if startEditing { beginEditing() }
+        }
+        .onChange(of: startEditing) { _, shouldEdit in
+            if shouldEdit { beginEditing() }
+        }
         .sheet(isPresented: $showMap) {
             MapPickerSheet(start: .init(latitude: effective.0, longitude: effective.1),
                            initial: .init(latitude: effective.0, longitude: effective.1)) { c, _ in
                 coord = (c.latitude, c.longitude)
+            }
+        }
+        .sheet(item: $selectingCatalog) { selection in
+            ChargeMeterCatalogPicker(
+                title: selection.title,
+                choices: choices(for: selection),
+                selectedId: selection == .provider ? providerId : chargerId
+            ) { choice in
+                select(choice, for: selection)
+            }
+        }
+    }
+
+    private func loadState() {
+        name = place.name
+        radius = place.radiusM
+        coord = nil
+        meterEnabled = place.chargeMeter?.enabled ?? false
+        providerId = place.chargeMeter?.provider ?? ""
+        chargerId = place.chargeMeter?.chargerId ?? ""
+        chargerName = place.chargeMeter?.chargerName ?? ""
+        tariff = place.chargeMeter?.currentPricePerKwh.map { String(format: "%.2f", $0).replacingOccurrences(of: ".", with: ",") } ?? ""
+        meterError = ""
+    }
+
+    private func loadCatalog() async {
+        providers = await cfg.loadChargeMeterProviders()
+        if !providerId.isEmpty { chargers = await cfg.loadChargeMeterChargers(provider: providerId) }
+    }
+
+    private func beginEditing() {
+        editing = true
+        loadState()
+        Task { await loadCatalog() }
+    }
+
+    private func selectProvider(_ provider: ChargeMeterProvider) {
+        providerId = provider.id
+        chargerId = ""
+        chargerName = ""
+        chargers = []
+        Task { chargers = await cfg.loadChargeMeterChargers(provider: provider.id) }
+    }
+
+    private func save() {
+        saving = true
+        meterError = ""
+        Task {
+            var meter = place.chargeMeter
+            do {
+                if meterEnabled {
+                    meter = try (meter ?? ChargeMeterConfig()).updating(
+                        enabled: true,
+                        provider: providerId,
+                        chargerId: chargerId,
+                        chargerName: chargerName,
+                        priceText: tariff,
+                        effectiveFromMs: Int64(Date().timeIntervalSince1970 * 1000)
+                    )
+                } else if var existing = meter {
+                    existing.enabled = false
+                    meter = existing
+                }
+                let ok = await cfg.updatePlace(place.id, name: name, radius: radius, lat: coord?.0, lng: coord?.1, chargeMeter: meter)
+                saving = false
+                if ok { editing = false; coord = nil } else { meterError = "Não foi possível salvar no Bridge." }
+            } catch {
+                saving = false
+                meterError = error.localizedDescription
+            }
+        }
+    }
+
+    private func choices(for selection: ChargeMeterCatalogSelection) -> [ChargeMeterChoice] {
+        switch selection {
+        case .provider:
+            return providers.map { ChargeMeterChoice(id: $0.id, name: $0.name) }
+        case .charger:
+            return chargers.map { ChargeMeterChoice(id: $0.id, name: $0.name) }
+        }
+    }
+
+    private func select(_ choice: ChargeMeterChoice, for selection: ChargeMeterCatalogSelection) {
+        switch selection {
+        case .provider:
+            guard let provider = providers.first(where: { $0.id == choice.id }) else { return }
+            selectProvider(provider)
+        case .charger:
+            chargerId = choice.id
+            chargerName = choice.name
+        }
+    }
+
+    private func meterSelector(title: String, value: String, empty: String, enabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack {
+                Text(title).font(.caption).foregroundStyle(DS.muted)
+                Spacer()
+                Text(value.isEmpty ? empty : value)
+                    .font(.system(size: 13, weight: .semibold)).foregroundStyle(DS.text)
+            }
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .padding(9).background(DS.panel2).clipShape(RoundedRectangle(cornerRadius: 9))
+    }
+}
+
+private struct ChargeMeterCatalogPicker: View {
+    @Environment(\.dismiss) private var dismiss
+    let title: String
+    let choices: [ChargeMeterChoice]
+    let selectedId: String
+    let onSelect: (ChargeMeterChoice) -> Void
+
+    var body: some View {
+        NavigationStack {
+            List(choices) { choice in
+                Button {
+                    onSelect(choice)
+                    dismiss()
+                } label: {
+                    HStack {
+                        Text(choice.name).foregroundStyle(DS.text)
+                        Spacer()
+                        if choice.id == selectedId {
+                            Image(systemName: "checkmark").foregroundStyle(DS.green)
+                        }
+                    }
+                }
+            }
+            .scrollContentBackground(.hidden)
+            .background(DS.bg)
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancelar") { dismiss() }
+                }
             }
         }
     }
