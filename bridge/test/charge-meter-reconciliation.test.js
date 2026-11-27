@@ -6,6 +6,8 @@ const reconciliation = require('../charge-meter-reconciliation');
 const {
   resolveProviderReconciliation,
   reconcileChargeMeter,
+  mergeChargeMeterClaims,
+  previousChargeMeterClaims,
   shouldFillChargeMeterEnergy,
   shouldRetryChargeMeter,
   terminalChargeMeterStatus,
@@ -163,6 +165,128 @@ test('uses YellotMob energy and provider cost', () => {
 
   assert.equal(result.charger_kwh, 22.502);
   assert.deepEqual(result.cost_override, { total: 31.11, perKwh: 1.3825 });
+});
+
+test('uses only the unclaimed delta when a provider reuses one cumulative transaction', () => {
+  const result = reconcileChargeMeter({
+    charge: charge({ timestamp_ms: base + 11 * 60 * MINUTE, duration_sec: 4 * 60 * 60 }),
+    configs: [yellotmob('1301')],
+    sessionsByKey: {
+      'yellotmob:1301': [session('transaction:479958', -10 * 60, -5 * 60, 33.48, { provider_cost: 41.13 })],
+    },
+    previousClaims: [{
+      meter_key: 'yellotmob:1301',
+      session_id: 'transaction:479958',
+      energy_kwh: 1.352,
+      cost_brl: 1.66,
+    }],
+  });
+
+  assert.equal(result.status, 'matched');
+  assert.equal(result.charger_kwh, 32.128);
+  assert.deepEqual(result.cost_override, { total: 39.47, perKwh: 1.2285 });
+  assert.deepEqual(result.meter_claims, [{
+    meter_key: 'yellotmob:1301',
+    session_id: 'transaction:479958',
+    energy_kwh: 32.128,
+    cost_brl: 39.47,
+  }]);
+});
+
+test('does not reuse a stale provider transaction without a matching prior claim', () => {
+  const result = reconcileChargeMeter({
+    charge: charge({ timestamp_ms: base + 11 * 60 * MINUTE, duration_sec: 4 * 60 * 60 }),
+    configs: [yellotmob('1301')],
+    sessionsByKey: {
+      'yellotmob:1301': [session('transaction:other', -10 * 60, -5 * 60, 33.48, { provider_cost: 41.13 })],
+    },
+    previousClaims: [{
+      meter_key: 'yellotmob:1301',
+      session_id: 'transaction:479958',
+      energy_kwh: 1.352,
+      cost_brl: 1.66,
+    }],
+  });
+
+  assert.equal(result.status, 'pending');
+});
+
+test('uses claims only from earlier matched charges', () => {
+  const claim = { session_id: 'transaction:479958', energy_kwh: 1.352, cost_brl: 1.66 };
+  const claims = previousChargeMeterClaims([
+    {
+      timestamp_ms: base,
+      charge_meter_key: 'yellotmob:1301',
+      charge_meter_claims: [claim],
+      charge_meter_reconcile: { status: 'matched' },
+    },
+    {
+      timestamp_ms: base + MINUTE,
+      charge_meter_key: 'yellotmob:1301',
+      charge_meter_claims: [claim],
+      charge_meter_reconcile: { status: 'pending' },
+    },
+    {
+      timestamp_ms: base + 3 * MINUTE,
+      charge_meter_key: 'yellotmob:1301',
+      charge_meter_claims: [claim],
+      charge_meter_reconcile: { status: 'matched' },
+    },
+  ], base + 2 * MINUTE);
+
+  assert.deepEqual(claims, [{ meter_key: 'yellotmob:1301', ...claim }]);
+});
+
+test('merges claims without inventing a cost when one baseline is unknown', () => {
+  const merged = mergeChargeMeterClaims(
+    {
+      charge_meter_key: 'yellotmob:1301',
+      charge_meter_claims: [{ session_id: 'transaction:1', energy_kwh: 1.5, cost_brl: null }],
+    },
+    {
+      charge_meter_key: 'yellotmob:1301',
+      charge_meter_claims: [{ session_id: 'transaction:1', energy_kwh: 2.5, cost_brl: 3 }],
+    },
+  );
+
+  assert.deepEqual(merged, [{
+    meter_key: 'yellotmob:1301',
+    session_id: 'transaction:1',
+    energy_kwh: 4,
+    cost_brl: null,
+  }]);
+});
+
+test('keeps cumulative cost pending when a previous cost baseline is unknown', () => {
+  const result = reconcileChargeMeter({
+    charge: charge(),
+    configs: [yellotmob('1301')],
+    sessionsByKey: {
+      'yellotmob:1301': [session('transaction:1', 0, 60, 10, { provider_cost: 12 })],
+    },
+    previousClaims: [{
+      meter_key: 'yellotmob:1301',
+      session_id: 'transaction:1',
+      energy_kwh: 2,
+      cost_brl: null,
+    }],
+  });
+
+  assert.equal(result.status, 'pending');
+  assert.equal(result.charger_kwh, 8);
+  assert.equal(result.cost_override, undefined);
+});
+
+test('refreshes provider energy previously filled by an incomplete retry', () => {
+  const result = reconcileChargeMeter({
+    charge: charge({ charger_kwh: 4, charge_meter_auto_fields: { charger_kwh: true } }),
+    configs: [yellotmob('1301')],
+    sessionsByKey: {
+      'yellotmob:1301': [session('transaction:1', 0, 60, 10, { provider_cost: 12 })],
+    },
+  });
+
+  assert.equal(result.charger_kwh, 10);
 });
 
 test('accepts a provider interval displaced by up to ten minutes', () => {

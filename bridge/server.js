@@ -51,6 +51,8 @@ const {
 } = require('./charge-meter-live');
 const {
   chargeMeterQueryWindow,
+  mergeChargeMeterClaims,
+  previousChargeMeterClaims,
   reconcileChargeMeter,
   resolveProviderReconciliation,
   shouldFillChargeMeterEnergy,
@@ -11357,6 +11359,9 @@ function _mergeChargePair(cA, cB) {
       // campos somados quando o APK reenvia o estado original da early.
       merged_from:  [...(early.merged_from || []), late.timestamp_ms],
     };
+    if (early.charge_meter_reconcile || late.charge_meter_reconcile) {
+      delete merged.charge_meter_reconcile;
+    }
     // Nome só viaja junto da coordenada: propagar o nome sozinho fazia a recarga
     // nova nascer com o local da anterior e bloquear a detecção pelo GPS.
     if (locName != null && locLat != null)  merged.location_name  = locName;
@@ -11368,6 +11373,17 @@ function _mergeChargePair(cA, cB) {
     else                            delete merged.cost_override;
     if (mergedAvgTemp != null)     merged.avg_temp_c     = mergedAvgTemp;
     else                           delete merged.avg_temp_c;
+    const mergedMeterClaims = mergeChargeMeterClaims(early, late);
+    if (mergedMeterClaims.length) merged.charge_meter_claims = mergedMeterClaims;
+    else delete merged.charge_meter_claims;
+    const energySources = [early, late].filter(item => Number(item.charger_kwh) > 0);
+    const costSources = [early, late].filter(item => item.cost_override != null);
+    merged.charge_meter_auto_fields = {
+      charger_kwh: energySources.length > 0
+        && energySources.every(item => item.charge_meter_auto_fields?.charger_kwh === true),
+      cost_override: costSources.length > 0
+        && costSources.every(item => item.charge_meter_auto_fields?.cost_override === true),
+    };
 
     // Amostras da linha do tempo: early + late com offset de t para continuar após a early
     const earlyFile = path.join(CHARGE_TELEMETRY_DIR, `${early.timestamp_ms}.json`);
@@ -11650,20 +11666,31 @@ async function _reconcileChargeMeterRecord(charge) {
     }));
 
     const result = resolveProviderReconciliation(
-      reconcileChargeMeter({ charge, configs, sessionsByKey, nowMs: now }),
+      reconcileChargeMeter({
+        charge,
+        configs,
+        sessionsByKey,
+        previousClaims: previousChargeMeterClaims(chargesArr, timestamp),
+      }),
       states
     );
     const index = chargesArr.findIndex(item => Number(item.timestamp_ms) === timestamp);
     const before = structuredClone(charge);
     let costChanged = false;
-    if (shouldFillChargeMeterEnergy(charge.charger_kwh, result.charger_kwh)) {
+    if (shouldFillChargeMeterEnergy(charge.charger_kwh, result.charger_kwh)
+        || charge.charge_meter_auto_fields?.charger_kwh === true) {
       charge.charger_kwh = result.charger_kwh;
+      charge.charge_meter_auto_fields = { ...charge.charge_meter_auto_fields, charger_kwh: true };
     }
     if (charge.cost_override == null && result.cost_override != null) {
       charge.cost_override = result.cost_override;
+      charge.charge_meter_auto_fields = { ...charge.charge_meter_auto_fields, cost_override: true };
       costChanged = true;
     }
     if (result.meter_key) charge.charge_meter_key = result.meter_key;
+    if (result.status === 'matched' && result.meter_claims?.length) {
+      charge.charge_meter_claims = result.meter_claims;
+    }
     charge.charge_meter_reconcile = _chargeMeterRetryState(charge, result.status, now, {
       meter_key: result.meter_key || null,
     });
@@ -11698,8 +11725,9 @@ async function _runChargeMeterRetries() {
   const pending = chargesArr.filter(charge => {
     const end = Number(charge.timestamp_ms || 0);
     if (!end) return false;
-    if (Number(charge.charger_kwh) > 0 && charge.cost_override != null) return false;
     const state = charge.charge_meter_reconcile;
+    if (Number(charge.charger_kwh) > 0 && charge.cost_override != null
+        && state?.status === 'matched' && charge.charge_meter_claims?.length) return false;
     if (!state && now - end > CHARGE_METER_RETRY_TTL_MS) return false;
     if (state?.status === 'failed' || state?.status === 'matched') return false;
     if (state && Number(state.deadline_ms) <= now) return true;
@@ -12839,6 +12867,7 @@ app.patch('/api/charges/:ts/charger_kwh', (req, res) => {
   if (!charge) return res.status(404).json({ error: 'not found' });
   const val = parseFloat(raw) || 0;
   if (val > 0) charge.charger_kwh = val; else delete charge.charger_kwh;
+  charge.charge_meter_auto_fields = { ...charge.charge_meter_auto_fields, charger_kwh: false };
   charge._updated_ms = Date.now();
   scheduleChargesFlush();
   res.json(charge);
@@ -12921,6 +12950,7 @@ app.patch('/api/charges/:ts/cost', (req, res) => {
   const t = parseFloat(total) || 0;
   if (free === true)  charge.cost_override = { total: 0, perKwh: 0, free: true };
   else if (t > 0)     charge.cost_override = { total: t, perKwh: parseFloat(per_kwh) || 0 };
+  else                delete charge.cost_override;
   // Avalia DEPOIS de gravar: precisa do valor final pra comparar com a mediana.
   if (free !== true) {
     const e = +charge.energy_kwh || 0;
@@ -12937,7 +12967,7 @@ app.patch('/api/charges/:ts/cost', (req, res) => {
       delete charge._precoAtipico;
     }
   }
-  else                delete charge.cost_override;
+  charge.charge_meter_auto_fields = { ...charge.charge_meter_auto_fields, cost_override: false };
   charge._updated_ms = Date.now();
   scheduleChargesFlush();
   recomputeBatteryAvgPrice();   // recalcula mix da bateria após override
@@ -27281,6 +27311,8 @@ function applyMqttMessage(key, value, isRetained = false) {
             if (existing.manual_overrides != null) keep.manual_overrides = existing.manual_overrides;
             if (existing._updated_ms      != null) keep._updated_ms      = existing._updated_ms;
             if (existing.charge_meter_key != null) keep.charge_meter_key = existing.charge_meter_key;
+            if (existing.charge_meter_claims != null) keep.charge_meter_claims = existing.charge_meter_claims;
+            if (existing.charge_meter_auto_fields != null) keep.charge_meter_auto_fields = existing.charge_meter_auto_fields;
             if (existing.charge_meter_reconcile != null) keep.charge_meter_reconcile = existing.charge_meter_reconcile;
             // Anotações do bridge sobre coerência. Sem preservar, a re-ingestão do
             // retained recria o objeto, a marca some e o aviso volta a ser logado a

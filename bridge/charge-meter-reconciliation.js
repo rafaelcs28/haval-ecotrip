@@ -100,12 +100,61 @@ function terminalChargeMeterStatus(status, nowMs, deadlineMs) {
   return 'failed';
 }
 
-function reconcileChargeMeter({ charge, configs, sessionsByKey }) {
+function previousChargeMeterClaims(charges, beforeTimestamp) {
+  return (Array.isArray(charges) ? charges : []).flatMap(charge => {
+    if (Number(charge?.timestamp_ms) >= Number(beforeTimestamp)) return [];
+    if (charge?.charge_meter_reconcile?.status !== 'matched' || !charge?.charge_meter_key) return [];
+    return (Array.isArray(charge.charge_meter_claims) ? charge.charge_meter_claims : []).map(claim => ({
+      meter_key: charge.charge_meter_key,
+      ...claim,
+    }));
+  });
+}
+
+function mergeChargeMeterClaims(...charges) {
+  const merged = new Map();
+  for (const charge of charges) {
+    for (const claim of Array.isArray(charge?.charge_meter_claims) ? charge.charge_meter_claims : []) {
+      const meterKey = claim?.meter_key || charge?.charge_meter_key;
+      const sessionId = claim?.session_id;
+      if (!meterKey || !sessionId) continue;
+      const key = `${meterKey}\0${sessionId}`;
+      const current = merged.get(key) || {
+        meter_key: meterKey,
+        session_id: sessionId,
+        energy_kwh: 0,
+        cost_brl: 0,
+        cost_known: true,
+      };
+      current.energy_kwh += Number(claim.energy_kwh) || 0;
+      if (claim.cost_brl == null || !Number.isFinite(Number(claim.cost_brl))) current.cost_known = false;
+      else current.cost_brl += Number(claim.cost_brl);
+      merged.set(key, current);
+    }
+  }
+  return [...merged.values()].map(({ cost_known: costKnown, ...claim }) => ({
+    ...claim,
+    energy_kwh: round(claim.energy_kwh, 6),
+    cost_brl: costKnown ? round(claim.cost_brl, 2) : null,
+  }));
+}
+
+function reconcileChargeMeter({ charge, configs, sessionsByKey, previousClaims = [] }) {
   const chargeEnd = Number(charge?.timestamp_ms);
   const durationMs = Number(charge?.duration_sec) * 1000;
   if (!Number.isFinite(chargeEnd) || !(durationMs > 0)) return { status: 'invalid_charge' };
   const chargeRange = { start: chargeEnd - durationMs, end: chargeEnd };
   const candidates = [];
+  const claimed = new Map();
+  for (const claim of Array.isArray(previousClaims) ? previousClaims : []) {
+    if (!claim?.meter_key || !claim?.session_id) continue;
+    const key = `${claim.meter_key}\0${claim.session_id}`;
+    const previous = claimed.get(key) || { energy: 0, cost: 0, costKnown: true };
+    previous.energy += Number(claim.energy_kwh) || 0;
+    if (claim.cost_brl == null || !Number.isFinite(Number(claim.cost_brl))) previous.costKnown = false;
+    else previous.cost += Number(claim.cost_brl);
+    claimed.set(key, previous);
+  }
 
   for (const config of Array.isArray(configs) ? configs : []) {
     if (config?.enabled === false) continue;
@@ -116,8 +165,15 @@ function reconcileChargeMeter({ charge, configs, sessionsByKey }) {
         const overlap = bounds ? overlapMs(bounds, chargeRange) : 0;
         const gap = bounds ? gapMs(bounds, chargeRange) : Infinity;
         const energy = Number(session?.energy_kwh);
-        return bounds && (overlap > 0 || gap <= 10 * 60_000) && energy > 0
-          ? [{ session, bounds, overlap, gap, energy }] : [];
+        const sessionId = String(session?.external_session_id || '');
+        const prior = claimed.get(`${key}\0${sessionId}`) || { energy: 0, cost: 0, costKnown: true };
+        const continuation = sessionId && prior.energy > 0 && energy > prior.energy;
+        const netEnergy = round(energy - prior.energy, 6);
+        const providerCost = session?.provider_cost == null ? null : Number(session.provider_cost);
+        const netCost = Number.isFinite(providerCost) && prior.costKnown
+          ? round(providerCost - prior.cost, 2) : null;
+        return bounds && (overlap > 0 || gap <= 10 * 60_000 || continuation) && netEnergy > 0
+          ? [{ session, sessionId, bounds, overlap, gap, energy: netEnergy, cost: netCost }] : [];
       });
     if (!sessions.length) continue;
     candidates.push({
@@ -139,7 +195,8 @@ function reconcileChargeMeter({ charge, configs, sessionsByKey }) {
   if (tied.length > 1) return { status: 'ambiguous', candidates: tied.map(candidate => candidate.key) };
 
   const providerEnergy = round(winner.sessions.reduce((sum, item) => sum + item.energy, 0), 6);
-  const energy = Number(charge?.charger_kwh) > 0 ? Number(charge.charger_kwh) : providerEnergy;
+  const energy = Number(charge?.charger_kwh) > 0 && charge?.charge_meter_auto_fields?.charger_kwh !== true
+    ? Number(charge.charger_kwh) : providerEnergy;
   let cost = charge?.cost_override ?? null;
   let status = 'matched';
 
@@ -153,8 +210,8 @@ function reconcileChargeMeter({ charge, configs, sessionsByKey }) {
       status = 'missing_tariff';
     }
   } else if (cost == null && ['yellotmob', 'mhzmob'].includes(winner.config.provider)) {
-    const providerCosts = winner.sessions.map(item => item.session.provider_cost);
-    if (providerCosts.every(value => value != null && Number.isFinite(Number(value)))) {
+    const providerCosts = winner.sessions.map(item => item.cost);
+    if (providerCosts.every(value => value != null && Number.isFinite(Number(value)) && Number(value) >= 0)) {
       const total = round(providerCosts.reduce((sum, value) => sum + Number(value), 0), 2);
       cost = total === 0
         ? { total: 0, perKwh: 0, free: true }
@@ -168,6 +225,12 @@ function reconcileChargeMeter({ charge, configs, sessionsByKey }) {
     status,
     meter_key: winner.key,
     charger_kwh: energy,
+    meter_claims: winner.sessions.map(item => ({
+      meter_key: winner.key,
+      session_id: item.sessionId,
+      energy_kwh: item.energy,
+      cost_brl: item.cost,
+    })),
   };
   if (cost != null) result.cost_override = cost;
   return result;
@@ -176,8 +239,10 @@ function reconcileChargeMeter({ charge, configs, sessionsByKey }) {
 module.exports = {
   chargeMeterQueryWindow,
   deduplicateSessions,
+  mergeChargeMeterClaims,
   resolveProviderReconciliation,
   reconcileChargeMeter,
+  previousChargeMeterClaims,
   shouldFillChargeMeterEnergy,
   shouldRetryChargeMeter,
   terminalChargeMeterStatus,
