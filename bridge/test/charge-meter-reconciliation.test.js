@@ -289,6 +289,21 @@ test('refreshes provider energy previously filled by an incomplete retry', () =>
   assert.equal(result.charger_kwh, 10);
 });
 
+test('refreshes provider cost previously filled before a cumulative session completed', () => {
+  const result = reconcileChargeMeter({
+    charge: charge({
+      cost_override: { total: 3, perKwh: 0.75 },
+      charge_meter_auto_fields: { cost_override: true },
+    }),
+    configs: [yellotmob('1301')],
+    sessionsByKey: {
+      'yellotmob:1301': [session('transaction:1', 0, 60, 10, { provider_cost: 12 })],
+    },
+  });
+
+  assert.deepEqual(result.cost_override, { total: 12, perKwh: 1.2 });
+});
+
 test('accepts a provider interval displaced by up to ten minutes', () => {
   const result = reconcileChargeMeter({
     charge: charge({ duration_sec: 28 * 60 }),

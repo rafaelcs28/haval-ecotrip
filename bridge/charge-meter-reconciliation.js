@@ -197,7 +197,8 @@ function reconcileChargeMeter({ charge, configs, sessionsByKey, previousClaims =
   const providerEnergy = round(winner.sessions.reduce((sum, item) => sum + item.energy, 0), 6);
   const energy = Number(charge?.charger_kwh) > 0 && charge?.charge_meter_auto_fields?.charger_kwh !== true
     ? Number(charge.charger_kwh) : providerEnergy;
-  let cost = charge?.cost_override ?? null;
+  let cost = charge?.cost_override != null && charge?.charge_meter_auto_fields?.cost_override !== true
+    ? charge.cost_override : null;
   let status = 'matched';
 
   if (cost == null && winner.config.provider === 'zeeda') {

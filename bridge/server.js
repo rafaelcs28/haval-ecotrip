@@ -11682,7 +11682,8 @@ async function _reconcileChargeMeterRecord(charge) {
       charge.charger_kwh = result.charger_kwh;
       charge.charge_meter_auto_fields = { ...charge.charge_meter_auto_fields, charger_kwh: true };
     }
-    if (charge.cost_override == null && result.cost_override != null) {
+    if ((charge.cost_override == null || charge.charge_meter_auto_fields?.cost_override === true)
+        && result.cost_override != null) {
       charge.cost_override = result.cost_override;
       charge.charge_meter_auto_fields = { ...charge.charge_meter_auto_fields, cost_override: true };
       costChanged = true;
