@@ -7,6 +7,7 @@ const {
   hasFreshVehicleChargeContext,
   meterForLiveUpdate,
   selectLiveChargeMeter,
+  shouldRecoverApkCharging,
 } = require('../charge-meter-live');
 
 test('builds the same external meter fields for final and interrupted updates', () => {
@@ -39,6 +40,46 @@ test('requires fresh charging and GPS readings before polling linked chargers', 
   }), false);
   assert.equal(hasFreshVehicleChargeContext({
     chargingState: 'Desconectado', chargingSeenMs: now - 30_000, gpsSeenMs: now - 20_000, nowMs: now,
+  }), false);
+});
+
+test('keeps polling while the APK heartbeat is fresh after charging state stops repeating', () => {
+  const now = 1_800_000_000_000;
+  assert.equal(hasFreshVehicleChargeContext({
+    chargingState: 'Carregando',
+    chargingSeenMs: now - 7 * 60_000,
+    chargingSource: 'apk',
+    apkSeenMs: now - 10_000,
+    gpsSeenMs: now - 5_000,
+    nowMs: now,
+  }), true);
+  assert.equal(hasFreshVehicleChargeContext({
+    chargingState: 'Carregando',
+    chargingSeenMs: now - 7 * 60_000,
+    chargingSource: 'apk',
+    apkSeenMs: now - 6 * 60_000,
+    gpsSeenMs: now - 5_000,
+    nowMs: now,
+  }), false);
+});
+
+test('recovers charging after stale cloud state overwrites live APK state on restart', () => {
+  const now = 1_800_000_000_000;
+  assert.equal(shouldRecoverApkCharging({
+    chargingState: 'Desconectado',
+    apkChargingState: 'Carregando',
+    apkSeenMs: now - 5_000,
+    chargePowerKw: 6.1,
+    isRetained: false,
+    nowMs: now,
+  }), true);
+  assert.equal(shouldRecoverApkCharging({
+    chargingState: 'Desconectado',
+    apkChargingState: 'Carregando',
+    apkSeenMs: now - 5_000,
+    chargePowerKw: 6.1,
+    isRetained: true,
+    nowMs: now,
   }), false);
 });
 

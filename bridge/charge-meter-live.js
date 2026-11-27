@@ -16,15 +16,37 @@ function tariffAt(config, atMs) {
 function hasFreshVehicleChargeContext({
   chargingState,
   chargingSeenMs,
+  chargingSource,
+  apkSeenMs,
   gpsSeenMs,
   nowMs = Date.now(),
   maxAgeMs = 5 * 60_000,
 }) {
   if (chargingState !== 'Carregando') return false;
-  return [chargingSeenMs, gpsSeenMs].every(value => {
+  const effectiveChargingSeenMs = chargingSource === 'apk' ? apkSeenMs : chargingSeenMs;
+  return [effectiveChargingSeenMs, gpsSeenMs].every(value => {
     const age = Number(nowMs) - Number(value);
     return Number(value) > 0 && age >= 0 && age <= maxAgeMs;
   });
+}
+
+function shouldRecoverApkCharging({
+  chargingState,
+  apkChargingState,
+  apkSeenMs,
+  chargePowerKw,
+  isRetained,
+  nowMs = Date.now(),
+  maxAgeMs = 5 * 60_000,
+}) {
+  const apkAge = Number(nowMs) - Number(apkSeenMs);
+  return !isRetained
+    && chargingState !== 'Carregando'
+    && apkChargingState === 'Carregando'
+    && Number(chargePowerKw) > 0.3
+    && Number(apkSeenMs) > 0
+    && apkAge >= 0
+    && apkAge <= maxAgeMs;
 }
 
 function meterForLiveUpdate(item, charging, final) {
@@ -80,4 +102,5 @@ module.exports = {
   hasFreshVehicleChargeContext,
   meterForLiveUpdate,
   selectLiveChargeMeter,
+  shouldRecoverApkCharging,
 };

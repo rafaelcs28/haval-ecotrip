@@ -47,6 +47,7 @@ const {
   hasFreshVehicleChargeContext,
   meterForLiveUpdate,
   selectLiveChargeMeter,
+  shouldRecoverApkCharging,
 } = require('./charge-meter-live');
 const {
   chargeMeterQueryWindow,
@@ -22897,6 +22898,7 @@ function handleChargingStateTransition(value, isRetained) {
   // só o push de notificação é gateado por !isRetained (pra não notificar
   // o user no boot quando o broker reenvia 'Carregando' antigo).
   const realTransition = prev && prev !== value;
+  if (value === 'Carregando') startChargeLiveTimer();
   if (!realTransition) return;
 
   // Anti-flap de fim de recarga: ao bater o alvo, o carro oscila
@@ -23118,6 +23120,8 @@ async function _refreshChargeMeterLive() {
   if (!hasFreshVehicleChargeContext({
     chargingState: state.charging_state,
     chargingSeenMs: _fieldSeenMs('charging_state'),
+    chargingSource: _fieldSource.charging_state,
+    apkSeenMs: state.last_apk_live_ms,
     gpsSeenMs: state._gps_live_ms,
   })) {
     _chargeMeterLive = null;
@@ -26812,6 +26816,16 @@ function applyMqttMessage(key, value, isRetained = false) {
     }
     case 'charge_power_kw': {
       const p = num(value);
+      if (shouldRecoverApkCharging({
+        chargingState: state.charging_state,
+        apkChargingState: _srcChange.charging_state?.apk?.v,
+        apkSeenMs: state.last_apk_live_ms,
+        chargePowerKw: p,
+        isRetained,
+      })) {
+        _fieldSource.charging_state = 'apk';
+        handleChargingStateTransition('Carregando', true);
+      }
       state.charge_power_kw = p;
       // Rastreia pico + média só enquanto carregando.
       if (state.charging_state === 'Carregando') {
